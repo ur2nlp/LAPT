@@ -1,0 +1,163 @@
+import argparse
+import numpy as np
+import os
+import random
+import sys
+import yaml
+
+from itertools import chain
+
+import torch
+from datasets import load_dataset, load_from_disk
+from transformers import (
+    AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, EarlyStoppingCallback,
+    Trainer, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
+)
+
+
+def docs_to_lines(examples):
+        return {
+            'text': list(chain(
+                *[doc.split('\n') for doc in examples['text']]
+            ))
+        }
+
+
+class DetectBrokenLossCallback(TrainerCallback):
+    """
+    Callback to detect if the training loss goes to zero (indicating divergence) and stop training
+    with an error if so
+    """
+    def __init__(self, trainer: Trainer):
+        self.trainer = trainer
+
+    def on_log(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs
+    ):
+        if 'loss' in state.log_history[-1] and state.log_history[-1]['loss'] <= 0.0:
+            raise RuntimeError("Training loss dropped to zero, indicating divergence")
+
+
+if __name__ == "__main__":
+    # read training configurations from YAML file
+    parser = argparse.ArgumentParser(description="Finetune XGLM on text dataset")
+    parser.add_argument('--config', type=str)
+    args = parser.parse_args()
+    config_dict = vars(args)
+    with open(args.config, 'r') as config_file:
+        config_dict.update(yaml.load(config_file, Loader=yaml.Loader))
+
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+    os.environ['PYTHONHASHSEED'] = str(args.seed)
+
+    if not os.path.exists(args.dataset_path):
+        print("downloading")
+        dataset = load_dataset(
+            "oscar-corpus/OSCAR-2201",
+            token=True,
+            language=args.language_code
+        )
+        dataset = dataset.map(
+            docs_to_lines,
+            batched=True,
+            remove_columns=dataset['train'].column_names
+        )
+        dataset = dataset['train'].train_test_split(test_size=args.dev_size)
+        dataset.save_to_disk(args.dataset_path)
+    else:
+        dataset = load_from_disk(args.dataset_path)
+
+    # load pretrained model and tokenizer
+    model = AutoModelForCausalLM.from_pretrained(args.hf_model)
+    tokenizer = AutoTokenizer.from_pretrained(args.hf_tokenizer)
+
+    # for sanity, make sure all parameters require gradients initially;
+    # this is mostly in response to new embeddings not having grads, but might as
+    # well make sure everything is trainable at first
+    for p in model.parameters():
+        p.requires_grad = True
+
+    # move model to GPU if available
+    device = torch.device('cuda')
+    model.to(device)
+
+    # Get default values if some training arguments missing
+    args.num_train_epochs = getattr(args, 'num_train_epochs', 1.0)
+    args.max_steps = getattr(args, 'max_steps', -1)
+    args.train_batch_size = getattr(args, 'train_batch_size', 32)
+    args.gradient_accumulation_steps = getattr(args, 'gradient_accumulation_steps', 1)
+    args.learning_rate = getattr(args, 'learning_rate', 5e-5)
+    args.lr_scheduler_type = getattr(args, 'lr_scheduler_type', 'linear')
+    args.warmup_ratio = getattr(args, 'warmup_ratio', 0.0)
+    args.warmup_steps = getattr(args, 'warmup_steps', 0)
+    args.max_grad_norm = getattr(args, 'max_grad_norm', 1.0)
+    args.logging_steps = getattr(args, 'logging_steps', 500)
+
+    args.eval_strategy = getattr(args, 'eval_strategy', 'steps')
+    args.eval_steps = getattr(args, 'eval_steps', 1000)
+    args.eval_batch_size = getattr(args, 'eval_batch_size', 64)
+    args.save_steps = getattr(args, 'save_steps', 1000)
+    args.save_total_limit = getattr(args, 'save_total_limit', 4)
+
+    # initialize trainer class with training configs
+    training_args = TrainingArguments(
+        seed=args.seed,
+        data_seed=args.seed,
+        log_level="info",
+        num_train_epochs=args.num_train_epochs,
+        max_steps=args.training_steps,
+        learning_rate=float(args.learning_rate),
+        per_device_train_batch_size=args.train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        logging_steps=args.logging_steps,
+        evaluation_strategy=args.eval_strategy,
+        per_device_eval_batch_size=args.eval_batch_size,
+        eval_steps=args.eval_steps,
+        save_steps=args.save_steps,
+        save_total_limit=args.save_total_limit,
+        load_best_model_at_end=True,
+        output_dir=args.output_dir,
+        overwrite_output_dir=True,
+        lr_scheduler_type=args.lr_scheduler_type,
+        warmup_ratio=float(args.warmup_ratio),
+        warmup_steps=args.warmup_steps,
+        max_grad_norm=args.max_grad_norm
+    )
+
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer, mlm=False
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=dataset['train'],
+        eval_dataset=dataset['test']
+    )
+
+    broken_loss_callback = DetectBrokenLossCallback(trainer)
+    trainer.add_callback(broken_loss_callback)
+
+    if getattr(args, 'early_stopping_patience', False):
+        early_stopping_callback = EarlyStoppingCallback(
+            early_stopping_patience=args.early_stopping_patience
+        )
+        trainer.add_callback(early_stopping_callback)
+
+    # start training
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+
+    best_checkpoint_path = trainer.state.best_model_checkpoint
+    print(f"Best checkpoint: {best_checkpoint_path}", file=sys.stderr)
+
+    best_checkpoint_path = os.path.join(args.checkpoints_directory, 'best-checkpoint')
+    trainer.save_model(best_checkpoint_path)
+    trainer.save_state()
+
+    # evaluate model
+    trainer.evaluate()
