@@ -2,15 +2,16 @@ name: lapt
 channels:
   - conda-forge
 dependencies:
-  - python=3.12
+  - python=3.12.*
   - datasets=3.*
   - numpy<2.0
   - sentencepiece=0.*
   - tokenizers=0.*
   - transformers=4.*
   - pip
+  - protobuf
   - pyyaml
   - tqdm
   - yapf
   - pip:
-    - torch==2.*
+    - torch==2.2.*
