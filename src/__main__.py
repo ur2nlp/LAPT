@@ -73,7 +73,7 @@ if __name__ == "__main__":
 
     # load pretrained model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(args.hf_model)
-    tokenizer = AutoTokenizer.from_pretrained(args.hf_tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
 
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as
