@@ -1,11 +1,11 @@
-import argparse
+import hydra
 import numpy as np
 import os
 import random
 import sys
-import yaml
 
 from itertools import chain
+from omegaconf import DictConfig
 
 import torch
 from datasets import load_dataset, load_from_disk
@@ -36,17 +36,10 @@ class DetectBrokenLossCallback(TrainerCallback):
     ):
         if 'loss' in state.log_history[-1] and state.log_history[-1]['loss'] <= 0.0:
             raise RuntimeError("Training loss dropped to zero, indicating divergence")
+        
 
-
-if __name__ == "__main__":
-    # read training configurations from YAML file
-    parser = argparse.ArgumentParser(description="Finetune XGLM on text dataset")
-    parser.add_argument('--config', type=str)
-    args = parser.parse_args()
-    config_dict = vars(args)
-    with open(args.config, 'r') as config_file:
-        config_dict.update(yaml.load(config_file, Loader=yaml.Loader))
-
+@hydra.main(version_base=None, config_path="../configs", config_name="main")
+def lapt(args: DictConfig):
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -54,7 +47,6 @@ if __name__ == "__main__":
     random.seed(args.seed)
     os.environ['PYTHONHASHSEED'] = str(args.seed)
 
-    args.max_length = getattr(args, 'max_length', 1024)
     tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
 
     if not os.path.exists(args.dataset_path + "/tokenized"):
@@ -98,47 +90,29 @@ if __name__ == "__main__":
     device = torch.device('cuda')
     model.to(device)
 
-    # Get default values if some training arguments missing
-    args.num_train_epochs = getattr(args, 'num_train_epochs', 1.0)
-    args.max_steps = getattr(args, 'max_steps', -1)
-    args.train_batch_size = getattr(args, 'train_batch_size', 32)
-    args.gradient_accumulation_steps = getattr(args, 'gradient_accumulation_steps', 1)
-    args.learning_rate = getattr(args, 'learning_rate', 5e-5)
-    args.lr_scheduler_type = getattr(args, 'lr_scheduler_type', 'linear')
-    args.warmup_ratio = getattr(args, 'warmup_ratio', 0.0)
-    args.warmup_steps = getattr(args, 'warmup_steps', 0)
-    args.max_grad_norm = getattr(args, 'max_grad_norm', 1.0)
-    args.logging_steps = getattr(args, 'logging_steps', 500)
-
-    args.eval_strategy = getattr(args, 'eval_strategy', 'steps')
-    args.eval_steps = getattr(args, 'eval_steps', 1000)
-    args.eval_batch_size = getattr(args, 'eval_batch_size', 64)
-    args.save_steps = getattr(args, 'save_steps', 1000)
-    args.save_total_limit = getattr(args, 'save_total_limit', 4)
-
     # initialize trainer class with training configs
     training_args = TrainingArguments(
         seed=args.seed,
         data_seed=args.seed,
         log_level="info",
-        num_train_epochs=args.num_train_epochs,
-        max_steps=args.max_steps,
-        learning_rate=float(args.learning_rate),
-        per_device_train_batch_size=args.train_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        logging_steps=args.logging_steps,
-        eval_strategy=args.eval_strategy,
-        per_device_eval_batch_size=args.eval_batch_size,
-        eval_steps=args.eval_steps,
-        save_steps=args.save_steps,
-        save_total_limit=args.save_total_limit,
+        num_train_epochs=args.training.num_train_epochs,
+        max_steps=args.training.max_steps,
+        learning_rate=float(args.training.learning_rate),
+        per_device_train_batch_size=args.training.train_batch_size,
+        gradient_accumulation_steps=args.training.gradient_accumulation_steps,
+        logging_steps=args.training.logging_steps,
+        eval_strategy=args.training.eval_strategy,
+        per_device_eval_batch_size=args.training.eval_batch_size,
+        eval_steps=args.training.eval_steps,
+        save_steps=args.training.save_steps,
+        save_total_limit=args.training.save_total_limit,
         load_best_model_at_end=True,
         output_dir=args.output_dir,
         overwrite_output_dir=True,
-        lr_scheduler_type=args.lr_scheduler_type,
-        warmup_ratio=float(args.warmup_ratio),
-        warmup_steps=args.warmup_steps,
-        max_grad_norm=args.max_grad_norm
+        lr_scheduler_type=args.training.lr_scheduler_type,
+        warmup_ratio=float(args.training.warmup_ratio),
+        warmup_steps=args.training.warmup_steps,
+        max_grad_norm=args.training.max_grad_norm
     )
 
     data_collator = DataCollatorForLanguageModeling(
@@ -174,3 +148,6 @@ if __name__ == "__main__":
 
     # evaluate model
     trainer.evaluate()
+
+if __name__ == "__main__":
+    lapt()
