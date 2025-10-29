@@ -11,11 +11,10 @@ import json
 import os
 import random
 import sys
-from pathlib import Path
 from typing import Optional
 
 import torch
-from datasets import load_dataset, load_from_disk
+from datasets import load_from_disk
 from transformers import AutoTokenizer
 
 
@@ -83,20 +82,18 @@ def train_new_tokenizer(
     jsonl_path: str,
     base_tokenizer_name: str,
     vocab_size: int,
-    tokenizer_type: str,
-    output_path: str,
-    seed: int = 1
+    output_path: str
 ) -> AutoTokenizer:
     """
     Train a new tokenizer on JSONL data using HuggingFace tokenizers library.
 
+    The tokenizer will use the same algorithm (BPE, Unigram, etc.) as the base tokenizer.
+
     Args:
         jsonl_path: Path to JSONL file with training data
-        base_tokenizer_name: Name of base model tokenizer (for special tokens)
+        base_tokenizer_name: Name of base model tokenizer (for special tokens and algorithm)
         vocab_size: Target vocabulary size
-        tokenizer_type: Type of tokenizer ('unigram' or 'bpe')
         output_path: Directory where trained tokenizer will be saved
-        seed: Random seed for reproducible training
 
     Returns:
         Trained tokenizer
@@ -105,7 +102,7 @@ def train_new_tokenizer(
         print(f"Tokenizer already exists at {output_path}, loading it", file=sys.stderr)
         return AutoTokenizer.from_pretrained(output_path)
 
-    print(f"Training new {tokenizer_type} tokenizer with vocab size {vocab_size}", file=sys.stderr)
+    print(f"Training new tokenizer with vocab size {vocab_size}", file=sys.stderr)
 
     base_tokenizer = AutoTokenizer.from_pretrained(base_tokenizer_name)
 

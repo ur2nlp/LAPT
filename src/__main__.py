@@ -73,9 +73,7 @@ def lapt(args: DictConfig):
                 jsonl_path=jsonl_path,
                 base_tokenizer_name=args.hf_model,
                 vocab_size=args.focus.vocab_size,
-                tokenizer_type=args.focus.tokenizer_type,
-                output_path=args.focus.tokenizer_output_dir,
-                seed=args.seed
+                output_path=args.focus.tokenizer_output_dir
             )
 
         # Load model and apply FOCUS

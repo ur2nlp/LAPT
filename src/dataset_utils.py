@@ -59,7 +59,7 @@ def load_or_download_untokenized_dataset(
         dataset = dataset.map(
             docs_to_lines,
             batched=True,
-            remove_columns=dataset['train'].column_names
+            remove_columns=dataset['train'].column_names # type: ignore
         )
         dataset.save_to_disk(untokenized_path)
         print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
