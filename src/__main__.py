@@ -14,6 +14,12 @@ from transformers import (
     Trainer, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 )
 
+from focus_utils import (
+    apply_focus_initialization,
+    prepare_focus_training_data,
+    train_new_tokenizer
+)
+
 
 def docs_to_lines(examples):
     return {
@@ -47,24 +53,97 @@ def lapt(args: DictConfig):
     random.seed(args.seed)
     os.environ['PYTHONHASHSEED'] = str(args.seed)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
+    # Load or download untokenized dataset first (needed for FOCUS or standard training)
+    untokenized_path = args.dataset_path + "/untokenized"
+    if not os.path.exists(untokenized_path):
+        print("Downloading and preparing OSCAR dataset", file=sys.stderr)
+        dataset = load_dataset(
+            "oscar-corpus/OSCAR-2201",
+            token=True,
+            language=args.language_code
+        )
+        dataset = dataset.map(
+            docs_to_lines,
+            batched=True,
+            remove_columns=dataset['train'].column_names
+        )
+        dataset.save_to_disk(untokenized_path)
+        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
 
-    if not os.path.exists(args.dataset_path + "/tokenized"):
-        if not os.path.exists(args.dataset_path + "/untokenized"):
-            dataset = load_dataset(
-                "oscar-corpus/OSCAR-2201",
-                token=True,
-                language=args.language_code
-            )
-            dataset = dataset.map(
-                docs_to_lines,
-                batched=True,
-                remove_columns=dataset['train'].column_names
-            )
-            dataset.save_to_disk(args.dataset_path + "/untokenized")
+    # FOCUS workflow: prepare new tokenizer and embeddings
+    if args.focus.enabled:
+        print("=" * 60, file=sys.stderr)
+        print("FOCUS MODE ENABLED", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+
+        # Prepare JSONL training data for FOCUS
+        jsonl_path = prepare_focus_training_data(
+            dataset_path=args.dataset_path,
+            num_samples=args.focus.num_samples,
+            output_jsonl_path=args.focus.training_data_output,
+            seed=args.seed
+        )
+
+        # Load existing tokenizer or train a new one
+        if args.focus.tokenizer_path:
+            print(f"Loading tokenizer from {args.focus.tokenizer_path}", file=sys.stderr)
+            tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
         else:
-            dataset = load_from_disk(args.dataset_path + "/untokenized")
-        print("Tokenizing")
+            tokenizer = train_new_tokenizer(
+                jsonl_path=jsonl_path,
+                base_tokenizer_name=args.hf_model,
+                vocab_size=args.focus.vocab_size,
+                tokenizer_type=args.focus.tokenizer_type,
+                output_path=args.focus.tokenizer_output_dir,
+                seed=args.seed
+            )
+
+        # Load model and apply FOCUS
+        print(f"Loading model: {args.hf_model}", file=sys.stderr)
+        model = AutoModelForCausalLM.from_pretrained(args.hf_model)
+        source_tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
+
+        new_input_embeddings, new_output_embeddings = apply_focus_initialization(
+            source_model=model,
+            source_tokenizer=source_tokenizer,
+            target_tokenizer=tokenizer,
+            training_data_path=jsonl_path
+        )
+
+        # Resize model vocabulary and replace embeddings
+        model.resize_token_embeddings(len(tokenizer))
+
+        # Set new input embeddings
+        new_input_embedding_layer = torch.nn.Embedding.from_pretrained(
+            new_input_embeddings,
+            padding_idx=tokenizer.pad_token_id
+        )
+        model.set_input_embeddings(new_input_embedding_layer)
+
+        # Set new output embeddings if model doesn't tie weights
+        if hasattr(model.config, 'tie_word_embeddings') and not model.config.tie_word_embeddings:
+            if new_output_embeddings is not None:
+                model.get_output_embeddings().weight.data = new_output_embeddings
+        else:
+            # Tie weights for models that use tied embeddings
+            model.tie_weights()
+
+        del source_tokenizer
+        print("FOCUS initialization complete", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+
+        # Determine tokenized dataset path for FOCUS (separate from standard tokenized data)
+        tokenized_path = args.dataset_path + "/tokenized_focus"
+    else:
+        # Standard workflow: use pretrained tokenizer and model
+        tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
+        model = AutoModelForCausalLM.from_pretrained(args.hf_model)
+        tokenized_path = args.dataset_path + "/tokenized"
+
+    # Tokenize dataset with appropriate tokenizer
+    if not os.path.exists(tokenized_path):
+        print(f"Tokenizing dataset with vocab size {len(tokenizer)}", file=sys.stderr)
+        dataset = load_from_disk(untokenized_path)
         dataset = dataset.map(
             lambda examples: tokenizer(
                 examples['text'], max_length=args.max_length, truncation=True
@@ -73,12 +152,11 @@ def lapt(args: DictConfig):
             remove_columns='text'
         )
         dataset = dataset['train'].train_test_split(test_size=args.dev_size)
-        dataset.save_to_disk(args.dataset_path + "/tokenized")
+        dataset.save_to_disk(tokenized_path)
+        print(f"Tokenized dataset saved to {tokenized_path}", file=sys.stderr)
     else:
-        dataset = load_from_disk(args.dataset_path + "/tokenized")
-
-    # load pretrained model
-    model = AutoModelForCausalLM.from_pretrained(args.hf_model)
+        print(f"Loading tokenized dataset from {tokenized_path}", file=sys.stderr)
+        dataset = load_from_disk(tokenized_path)
 
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as

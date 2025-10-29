@@ -2,7 +2,28 @@ defaults:
     - _self_
     - training: l40_basic
 
+# Reproducibility
 seed: 1
+
+# Language and model configuration
 language_code: hy
+hf_model: facebook/xglm-564M
+
+# Dataset configuration
 dataset_path: "data/${language_code}_oscar"
+max_length: 256
+dev_size: 0.0025
+
+# Output directories
 output_dir: "models/${language_code}_model"
+checkpoints_directory: "checkpoints/${language_code}"
+
+# FOCUS configuration for vocabulary specialization
+focus:
+  enabled: false
+  tokenizer_path: null  # if provided, load existing tokenizer; if null, train new one
+  vocab_size: 50000
+  num_samples: 100000  # number of samples from OSCAR for tokenizer training & FOCUS
+  tokenizer_type: "unigram"  # or "bpe"
+  tokenizer_output_dir: "tokenizers/${language_code}"
+  training_data_output: "data/${language_code}_focus/training_subset.jsonl"
