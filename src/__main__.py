@@ -4,29 +4,20 @@ import os
 import random
 import sys
 
-from itertools import chain
 from omegaconf import DictConfig
 
 import torch
-from datasets import load_dataset, load_from_disk
 from transformers import (
     AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, EarlyStoppingCallback,
     Trainer, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 )
 
+from dataset_utils import load_or_download_untokenized_dataset, load_or_tokenize_dataset
 from focus_utils import (
     apply_focus_initialization,
     prepare_focus_training_data,
     train_new_tokenizer
 )
-
-
-def docs_to_lines(examples):
-    return {
-        'text': list(chain(
-            *[doc.split('\n') for doc in examples['text']]
-        ))
-    }
 
 
 class DetectBrokenLossCallback(TrainerCallback):
@@ -54,21 +45,10 @@ def lapt(args: DictConfig):
     os.environ['PYTHONHASHSEED'] = str(args.seed)
 
     # Load or download untokenized dataset first (needed for FOCUS or standard training)
-    untokenized_path = args.dataset_path + "/untokenized"
-    if not os.path.exists(untokenized_path):
-        print("Downloading and preparing OSCAR dataset", file=sys.stderr)
-        dataset = load_dataset(
-            "oscar-corpus/OSCAR-2201",
-            token=True,
-            language=args.language_code
-        )
-        dataset = dataset.map(
-            docs_to_lines,
-            batched=True,
-            remove_columns=dataset['train'].column_names
-        )
-        dataset.save_to_disk(untokenized_path)
-        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
+    untokenized_path = load_or_download_untokenized_dataset(
+        dataset_path=args.dataset_path,
+        language_code=args.language_code
+    )
 
     # FOCUS workflow: prepare new tokenizer and embeddings
     if args.focus.enabled:
@@ -141,22 +121,13 @@ def lapt(args: DictConfig):
         tokenized_path = args.dataset_path + "/tokenized"
 
     # Tokenize dataset with appropriate tokenizer
-    if not os.path.exists(tokenized_path):
-        print(f"Tokenizing dataset with vocab size {len(tokenizer)}", file=sys.stderr)
-        dataset = load_from_disk(untokenized_path)
-        dataset = dataset.map(
-            lambda examples: tokenizer(
-                examples['text'], max_length=args.max_length, truncation=True
-            ),
-            batched=True,
-            remove_columns='text'
-        )
-        dataset = dataset['train'].train_test_split(test_size=args.dev_size)
-        dataset.save_to_disk(tokenized_path)
-        print(f"Tokenized dataset saved to {tokenized_path}", file=sys.stderr)
-    else:
-        print(f"Loading tokenized dataset from {tokenized_path}", file=sys.stderr)
-        dataset = load_from_disk(tokenized_path)
+    dataset = load_or_tokenize_dataset(
+        untokenized_path=untokenized_path,
+        tokenized_path=tokenized_path,
+        tokenizer=tokenizer,
+        max_length=args.max_length,
+        dev_size=args.dev_size
+    )
 
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as
