@@ -5,6 +5,7 @@ This module handles downloading OSCAR corpus data, converting it to line-based f
 tokenizing with provided tokenizers, and caching results.
 """
 
+import glob
 import os
 import random
 import sys
@@ -57,6 +58,10 @@ def load_untokenized_dataset(dataset_config, cache_dir: str) -> str:
     elif dataset_type == 'plaintext':
         file_path = dataset_config.path
         return _load_plaintext_dataset(cache_dir, file_path)
+    elif dataset_type == 'plaintext_dir':
+        directory = dataset_config.directory
+        pattern = getattr(dataset_config, 'pattern', '*.txt')
+        return _load_plaintext_dir_dataset(cache_dir, directory, pattern)
     elif dataset_type == 'concat':
         sources = dataset_config.sources
         return _load_concat_dataset(cache_dir, sources)
@@ -133,6 +138,41 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
         print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
 
     return untokenized_path
+
+
+def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str) -> str:
+    """
+    Load all plaintext files from a directory and concatenate them.
+
+    Args:
+        cache_dir: Base directory for caching dataset artifacts
+        directory: Directory containing text files
+        pattern: Glob pattern for matching files (e.g., "*.txt", "*.on.txt")
+
+    Returns:
+        Path to the untokenized concatenated dataset
+    """
+    if not os.path.exists(directory):
+        raise FileNotFoundError(f"Directory not found: {directory}")
+    if not os.path.isdir(directory):
+        raise ValueError(f"Path is not a directory: {directory}")
+
+    # Find all matching files
+    file_paths = sorted(glob.glob(os.path.join(directory, pattern)))
+
+    if not file_paths:
+        raise ValueError(f"No files found matching pattern '{pattern}' in {directory}")
+
+    print(f"Found {len(file_paths)} files matching '{pattern}' in {directory}", file=sys.stderr)
+
+    # Create sources list for concat (reuse plaintext loader for each file)
+    sources = [
+        {'type': 'plaintext', 'path': path}
+        for path in file_paths
+    ]
+
+    # Reuse concat implementation
+    return _load_concat_dataset(cache_dir, sources)
 
 
 def _load_concat_dataset(cache_dir: str, sources: list) -> str:
