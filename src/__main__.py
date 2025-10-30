@@ -11,7 +11,7 @@ from transformers import (
 )
 
 from dataset_utils import load_or_download_untokenized_dataset, load_or_tokenize_dataset
-from model_utils import initialize_model_and_tokenizer, set_random_seeds
+from model_utils import initialize_model_and_tokenizer, set_random_seeds, format_number
 
 
 class DetectBrokenLossCallback(TrainerCallback):
@@ -41,6 +41,21 @@ def lapt(args: DictConfig):
 
     # Initialize model and tokenizer (with optional FOCUS)
     model, tokenizer, tokenized_path = initialize_model_and_tokenizer(args)
+
+    # Determine output directory for checkpoints
+    if args.model_name:
+        # Codename override - use base_dir/codename
+        output_dir = f"{args.output_dir}/{args.model_name}"
+    else:
+        # Auto-generate path from training conditions
+        training_config = args.training.name.replace('_', '-')
+
+        if args.focus.enabled:
+            vocab_str = format_number(args.focus.vocab_size)
+            samples_str = format_number(args.focus.num_samples)
+            output_dir = f"{args.output_dir}/{args.language_code}/focus_vocab{vocab_str}_samples{samples_str}_{training_config}"
+        else:
+            output_dir = f"{args.output_dir}/{args.language_code}/{training_config}"
 
     # Tokenize dataset with appropriate tokenizer
     dataset = load_or_tokenize_dataset(
@@ -78,7 +93,7 @@ def lapt(args: DictConfig):
         save_steps=args.training.save_steps,
         save_total_limit=args.training.save_total_limit,
         load_best_model_at_end=True,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         overwrite_output_dir=True,
         lr_scheduler_type=args.training.lr_scheduler_type,
         warmup_ratio=float(args.training.warmup_ratio),
@@ -110,12 +125,11 @@ def lapt(args: DictConfig):
     # start training
     trainer.train()
 
-    best_checkpoint_path = trainer.state.best_model_checkpoint
-    print(f"Best checkpoint: {best_checkpoint_path}", file=sys.stderr)
-
-    best_checkpoint_path = os.path.join(args.checkpoints_directory, 'best-checkpoint')
+    # save the best model (loaded by trainer at end) to a known location
+    best_checkpoint_path = os.path.join(output_dir, 'best-checkpoint')
     trainer.save_model(best_checkpoint_path)
     trainer.save_state()
+    print(f"Best model saved to: {best_checkpoint_path}", file=sys.stderr)
 
     # evaluate model
     trainer.evaluate()

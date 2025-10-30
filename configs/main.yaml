@@ -14,9 +14,9 @@ dataset_path: "data/${language_code}_oscar"
 max_length: 256
 dev_size: 0.0025
 
-# Output directories
-output_dir: "models/${language_code}_model"
-checkpoints_directory: "checkpoints/${language_code}"
+# Model output configuration
+output_dir: "models"  # Base directory for all model outputs (can override for cluster scratch space, etc.)
+model_name: null  # Optional codename override (e.g., "yerevan" → models/yerevan)
 
 # FOCUS configuration for vocabulary specialization
 focus:
@@ -24,5 +24,3 @@ focus:
   tokenizer_path: null  # if provided, load existing tokenizer; if null, train new one
   vocab_size: 50000
   num_samples: 100000  # number of samples from OSCAR for tokenizer training & FOCUS
-  tokenizer_output_dir: "tokenizers/${language_code}"
-  training_data_output: "data/${language_code}_focus/training_subset.jsonl"

@@ -21,6 +21,23 @@ from focus_utils import (
 )
 
 
+def format_number(n: int) -> str:
+    """
+    Format large numbers with k/m suffix for directory names.
+
+    Args:
+        n: Number to format
+
+    Returns:
+        Formatted string (e.g., 50000 -> "50k", 1000000 -> "1m")
+    """
+    if n >= 1_000_000:
+        return f"{n // 1_000_000}m"
+    elif n >= 1_000:
+        return f"{n // 1_000}k"
+    return str(n)
+
+
 def set_random_seeds(seed: int):
     """
     Set all random seeds for reproducibility.
@@ -66,11 +83,17 @@ def _initialize_focus_model(args: DictConfig):
     print("FOCUS MODE ENABLED", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
+    # Build directory paths with formatted vocab size and sample count
+    vocab_str = format_number(args.focus.vocab_size)
+    samples_str = format_number(args.focus.num_samples)
+    focus_suffix = f"vocab{vocab_str}_samples{samples_str}"
+
     # Prepare JSONL training data for FOCUS
+    training_data_output = f"data/{args.language_code}_focus/{focus_suffix}/training_subset.jsonl"
     jsonl_path = prepare_focus_training_data(
         dataset_path=args.dataset_path,
         num_samples=args.focus.num_samples,
-        output_jsonl_path=args.focus.training_data_output,
+        output_jsonl_path=training_data_output,
         seed=args.seed
     )
 
@@ -79,11 +102,12 @@ def _initialize_focus_model(args: DictConfig):
         print(f"Loading tokenizer from {args.focus.tokenizer_path}", file=sys.stderr)
         tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
     else:
+        tokenizer_output_dir = f"tokenizers/{args.language_code}/{focus_suffix}"
         tokenizer = train_new_tokenizer(
             jsonl_path=jsonl_path,
             base_tokenizer_name=args.hf_model,
             vocab_size=args.focus.vocab_size,
-            output_path=args.focus.tokenizer_output_dir
+            output_path=tokenizer_output_dir
         )
 
     # Load model and apply FOCUS
@@ -121,7 +145,7 @@ def _initialize_focus_model(args: DictConfig):
     print("=" * 60, file=sys.stderr)
 
     # Determine tokenized dataset path for FOCUS (separate from standard tokenized data)
-    tokenized_path = args.dataset_path + "/tokenized_focus"
+    tokenized_path = f"{args.dataset_path}/tokenized_focus_{focus_suffix}"
 
     return model, tokenizer, tokenized_path
 
