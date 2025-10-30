@@ -119,12 +119,8 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Plaintext file not found: {file_path}")
 
-        lines = []
         with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    lines.append(line)
+            lines = [line.strip() for line in f if line.strip()]
 
         print(f"Loaded {len(lines)} lines from plaintext file", file=sys.stderr)
 
@@ -217,9 +213,9 @@ def _load_multinomial_dataset(
 
         # Calculate sampling probabilities: p_i = (size_i)^alpha / Z
         # alpha < 1 upsamples smaller datasets, alpha > 1 amplifies size differences
-        raw_probs = [size ** alpha for size in source_sizes]
-        total_prob = sum(raw_probs)
-        sampling_probs = [p / total_prob for p in raw_probs]
+        weights = [size ** alpha for size in source_sizes]
+        total_weight = sum(weights)
+        sampling_probs = [w / total_weight for w in weights]
 
         # Convert probabilities to integer sample counts
         # Distribute remainder samples round-robin to handle rounding errors
