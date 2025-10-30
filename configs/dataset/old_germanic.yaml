@@ -1,0 +1,11 @@
+type: multinomial
+sources:
+  - type: plaintext
+    path: data/beowulf/beowulf_clean.txt
+  - type: plaintext
+    path: data/gotica/gotica_clean.txt
+  - type: plaintext
+    path: data/icecorpus-texts/icepahc_12th_13th_clean.txt
+alpha: 0.4  # < 1 upsamples smaller datasets
+total_samples: 1000000
+cache_dir: "data/old_germanic"
