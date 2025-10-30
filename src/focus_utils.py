@@ -19,19 +19,21 @@ from transformers import AutoTokenizer
 
 
 def prepare_focus_training_data(
-    cache_dir: str,
     num_samples: int,
     output_jsonl_path: str,
-    seed: int = 1
+    seed: int = 1,
+    train_dataset_cache: str = None,
+    dataset_config = None
 ) -> str:
     """
-    Extract a random subset of untokenized OSCAR data and convert to JSONL format.
+    Extract a random subset of untokenized data and convert to JSONL format.
 
     Args:
-        cache_dir: Path to the dataset cache directory
         num_samples: Number of samples to extract
         output_jsonl_path: Path where JSONL file will be saved
         seed: Random seed for reproducible sampling
+        train_dataset_cache: Path to training dataset cache directory (for reusing training data)
+        dataset_config: Optional separate dataset configuration for FOCUS
 
     Returns:
         Path to the created JSONL file
@@ -42,14 +44,26 @@ def prepare_focus_training_data(
 
     print(f"Preparing FOCUS training data: {num_samples} samples", file=sys.stderr)
 
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    if os.path.exists(untokenized_path):
+    # If dataset_config provided, load that dataset; otherwise use training dataset
+    if dataset_config is not None:
+        from dataset_utils import load_untokenized_dataset
+        focus_cache = os.path.dirname(output_jsonl_path)
+        untokenized_path = load_untokenized_dataset(
+            dataset_config=dataset_config,
+            cache_dir=focus_cache
+        )
         dataset = load_from_disk(untokenized_path)
     else:
-        raise FileNotFoundError(
-            f"Untokenized dataset not found at {untokenized_path}. "
-            "Please ensure the dataset is loaded first."
-        )
+        if train_dataset_cache is None:
+            raise ValueError("Either train_dataset_cache or dataset_config must be provided")
+        untokenized_path = os.path.join(train_dataset_cache, "untokenized")
+        if os.path.exists(untokenized_path):
+            dataset = load_from_disk(untokenized_path)
+        else:
+            raise FileNotFoundError(
+                f"Untokenized dataset not found at {untokenized_path}. "
+                "Please ensure the dataset is loaded first."
+            )
 
     train_data = dataset['train']
     total_samples = len(train_data)

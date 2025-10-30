@@ -90,12 +90,22 @@ def _initialize_focus_model(args: DictConfig):
 
     # Prepare JSONL training data for FOCUS
     training_data_output = f"data/{args.language_code}_focus/{focus_suffix}/training_subset.jsonl"
-    jsonl_path = prepare_focus_training_data(
-        cache_dir=args.dataset.cache_dir,
-        num_samples=args.focus.num_samples,
-        output_jsonl_path=training_data_output,
-        seed=args.seed
-    )
+
+    # Use separate FOCUS dataset if configured, otherwise use training dataset
+    if args.focus.dataset is not None:
+        jsonl_path = prepare_focus_training_data(
+            num_samples=args.focus.num_samples,
+            output_jsonl_path=training_data_output,
+            seed=args.seed,
+            dataset_config=args.focus.dataset
+        )
+    else:
+        jsonl_path = prepare_focus_training_data(
+            num_samples=args.focus.num_samples,
+            output_jsonl_path=training_data_output,
+            seed=args.seed,
+            train_dataset_cache=args.dataset.cache_dir
+        )
 
     # Load existing tokenizer or train a new one
     if args.focus.tokenizer_path:
