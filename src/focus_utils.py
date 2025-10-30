@@ -19,7 +19,7 @@ from transformers import AutoTokenizer
 
 
 def prepare_focus_training_data(
-    dataset_path: str,
+    cache_dir: str,
     num_samples: int,
     output_jsonl_path: str,
     seed: int = 1
@@ -28,7 +28,7 @@ def prepare_focus_training_data(
     Extract a random subset of untokenized OSCAR data and convert to JSONL format.
 
     Args:
-        dataset_path: Path to the OSCAR dataset directory
+        cache_dir: Path to the dataset cache directory
         num_samples: Number of samples to extract
         output_jsonl_path: Path where JSONL file will be saved
         seed: Random seed for reproducible sampling
@@ -42,7 +42,7 @@ def prepare_focus_training_data(
 
     print(f"Preparing FOCUS training data: {num_samples} samples", file=sys.stderr)
 
-    untokenized_path = os.path.join(dataset_path, "untokenized")
+    untokenized_path = os.path.join(cache_dir, "untokenized")
     if os.path.exists(untokenized_path):
         dataset = load_from_disk(untokenized_path)
     else:

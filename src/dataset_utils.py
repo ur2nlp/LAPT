@@ -9,7 +9,8 @@ import os
 import sys
 from itertools import chain
 
-from datasets import load_dataset, load_from_disk
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
+from omegaconf import DictConfig
 from transformers import PreTrainedTokenizer
 
 
@@ -33,21 +34,46 @@ def docs_to_lines(examples):
     }
 
 
-def load_or_download_untokenized_dataset(
-    dataset_path: str,
-    language_code: str
-) -> str:
+def load_untokenized_dataset(dataset_config, cache_dir: str) -> str:
     """
-    Load or download untokenized OSCAR dataset.
+    Load untokenized dataset based on configuration.
+
+    This dispatcher routes to the appropriate loader based on dataset type.
 
     Args:
-        dataset_path: Base path for dataset storage
+        dataset_config: Dataset configuration object with type and source info
+        cache_dir: Base directory for caching dataset artifacts
+
+    Returns:
+        Path to the untokenized dataset
+    """
+    dataset_type = getattr(dataset_config, 'type', 'oscar')
+
+    if dataset_type == 'oscar':
+        language_code = dataset_config.language
+        return _load_oscar_dataset(cache_dir, language_code)
+    elif dataset_type == 'plaintext':
+        file_path = dataset_config.path
+        return _load_plaintext_dataset(cache_dir, file_path)
+    elif dataset_type == 'concat':
+        sources = dataset_config.sources
+        return _load_concat_dataset(cache_dir, sources)
+    else:
+        raise ValueError(f"Unsupported dataset type: {dataset_type}")
+
+
+def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
+    """
+    Load or download OSCAR dataset for a specific language.
+
+    Args:
+        cache_dir: Base directory for caching dataset artifacts
         language_code: Two-letter language code for OSCAR corpus
 
     Returns:
         Path to the untokenized dataset
     """
-    untokenized_path = os.path.join(dataset_path, "untokenized")
+    untokenized_path = os.path.join(cache_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
         print("Downloading and preparing OSCAR dataset", file=sys.stderr)
@@ -63,6 +89,80 @@ def load_or_download_untokenized_dataset(
         )
         dataset.save_to_disk(untokenized_path)
         print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
+
+    return untokenized_path
+
+
+def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
+    """
+    Load plaintext file(s) and convert to dataset format.
+
+    Args:
+        cache_dir: Base directory for caching dataset artifacts
+        file_path: Path to plaintext file (one line per training example)
+
+    Returns:
+        Path to the untokenized dataset
+    """
+    untokenized_path = os.path.join(cache_dir, "untokenized")
+
+    if not os.path.exists(untokenized_path):
+        print(f"Loading plaintext data from {file_path}", file=sys.stderr)
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Plaintext file not found: {file_path}")
+
+        lines = []
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    lines.append(line)
+
+        print(f"Loaded {len(lines)} lines from plaintext file", file=sys.stderr)
+
+        dataset = Dataset.from_dict({'text': lines})
+        dataset_dict = DatasetDict({'train': dataset})
+        dataset_dict.save_to_disk(untokenized_path)
+        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
+
+    return untokenized_path
+
+
+def _load_concat_dataset(cache_dir: str, sources: list) -> str:
+    """
+    Concatenate multiple dataset sources into a single dataset.
+
+    Args:
+        cache_dir: Base directory for caching dataset artifacts
+        sources: List of dataset source configurations
+
+    Returns:
+        Path to the untokenized concatenated dataset
+    """
+    untokenized_path = os.path.join(cache_dir, "untokenized")
+
+    if not os.path.exists(untokenized_path):
+        print(f"Concatenating {len(sources)} dataset sources", file=sys.stderr)
+
+        datasets_to_concat = []
+        for idx, source_config in enumerate(sources):
+            source_cache = os.path.join(cache_dir, f"source_{idx}")
+            source_dict_config = DictConfig(source_config)
+
+            source_path = load_untokenized_dataset(
+                dataset_config=source_dict_config,
+                cache_dir=source_cache
+            )
+
+            source_dataset = load_from_disk(source_path)
+            datasets_to_concat.append(source_dataset['train'])
+            print(f"  Source {idx}: {len(source_dataset['train'])} examples", file=sys.stderr)
+
+        concatenated = concatenate_datasets(datasets_to_concat)
+        dataset_dict = DatasetDict({'train': concatenated})
+        dataset_dict.save_to_disk(untokenized_path)
+        print(f"Concatenated dataset saved to {untokenized_path} ({len(concatenated)} total examples)", file=sys.stderr)
 
     return untokenized_path
 

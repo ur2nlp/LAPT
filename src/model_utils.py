@@ -91,7 +91,7 @@ def _initialize_focus_model(args: DictConfig):
     # Prepare JSONL training data for FOCUS
     training_data_output = f"data/{args.language_code}_focus/{focus_suffix}/training_subset.jsonl"
     jsonl_path = prepare_focus_training_data(
-        dataset_path=args.dataset_path,
+        cache_dir=args.dataset.cache_dir,
         num_samples=args.focus.num_samples,
         output_jsonl_path=training_data_output,
         seed=args.seed
@@ -145,7 +145,7 @@ def _initialize_focus_model(args: DictConfig):
     print("=" * 60, file=sys.stderr)
 
     # Determine tokenized dataset path for FOCUS (separate from standard tokenized data)
-    tokenized_path = f"{args.dataset_path}/tokenized_focus_{focus_suffix}"
+    tokenized_path = f"{args.dataset.cache_dir}/tokenized_focus_{focus_suffix}"
 
     return model, tokenizer, tokenized_path
 
@@ -162,6 +162,6 @@ def _initialize_standard_model(args: DictConfig):
     """
     tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
     model = AutoModelForCausalLM.from_pretrained(args.hf_model)
-    tokenized_path = args.dataset_path + "/tokenized"
+    tokenized_path = args.dataset.cache_dir + "/tokenized"
 
     return model, tokenizer, tokenized_path

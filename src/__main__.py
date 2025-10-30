@@ -10,7 +10,7 @@ from transformers import (
     Trainer, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 )
 
-from dataset_utils import load_or_download_untokenized_dataset, load_or_tokenize_dataset
+from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
 from model_utils import initialize_model_and_tokenizer, set_random_seeds, format_number
 
 
@@ -34,9 +34,9 @@ def lapt(args: DictConfig):
     set_random_seeds(args.seed)
 
     # Load or download untokenized dataset first (needed for FOCUS or standard training)
-    untokenized_path = load_or_download_untokenized_dataset(
-        dataset_path=args.dataset_path,
-        language_code=args.language_code
+    untokenized_path = load_untokenized_dataset(
+        dataset_config=args.dataset,
+        cache_dir=args.dataset.cache_dir
     )
 
     # Initialize model and tokenizer (with optional FOCUS)
