@@ -122,6 +122,9 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f if line.strip()]
 
+        if not lines:
+            raise ValueError(f"Plaintext file {file_path} contains no non-empty lines")
+
         print(f"Loaded {len(lines)} lines from plaintext file", file=sys.stderr)
 
         dataset = Dataset.from_dict({'text': lines})
@@ -143,6 +146,9 @@ def _load_concat_dataset(cache_dir: str, sources: list) -> str:
     Returns:
         Path to the untokenized concatenated dataset
     """
+    if not sources:
+        raise ValueError("Cannot concatenate datasets: sources list is empty")
+
     untokenized_path = os.path.join(cache_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
@@ -187,6 +193,13 @@ def _load_multinomial_dataset(
     Returns:
         Path to the untokenized sampled dataset
     """
+    if not sources:
+        raise ValueError("Cannot sample from datasets: sources list is empty")
+    if total_samples <= 0:
+        raise ValueError(f"total_samples must be positive, got {total_samples}")
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
+
     untokenized_path = os.path.join(cache_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
@@ -210,6 +223,10 @@ def _load_multinomial_dataset(
             source_datasets.append(train_data)
             source_sizes.append(len(train_data))
             print(f"  Source {idx}: {len(train_data)} examples", file=sys.stderr)
+
+        # Check for empty datasets
+        if all(size == 0 for size in source_sizes):
+            raise ValueError("Cannot sample: all source datasets are empty")
 
         # Calculate sampling probabilities: p_i = (size_i)^alpha / Z
         # alpha < 1 upsamples smaller datasets, alpha > 1 amplifies size differences
