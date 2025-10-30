@@ -229,7 +229,8 @@ def _load_multinomial_dataset(
             percentage = 100 * count / total_samples
             print(f"  Source {idx}: {count} samples ({percentage:.2f}%)", file=sys.stderr)
 
-        sampled_data = []
+        # Use HF's .select() to keep data memory-mapped instead of loading into RAM
+        selected_datasets = []
         for idx, (dataset, num_samples) in enumerate(zip(source_datasets, samples_per_source)):
             # Sample without replacement if we have enough data, otherwise with replacement
             if num_samples <= len(dataset):
@@ -237,16 +238,16 @@ def _load_multinomial_dataset(
             else:
                 indices = random.choices(range(len(dataset)), k=num_samples)
 
-            sampled_data.extend([dataset[i] for i in indices])
+            # .select() keeps data memory-mapped, handles duplicate indices for sampling with replacement
+            selected = dataset.select(indices)
+            selected_datasets.append(selected)
 
-        # Shuffle to mix samples from different sources
-        random.shuffle(sampled_data)
-
-        text_lines = [example['text'] for example in sampled_data]
-        dataset = Dataset.from_dict({'text': text_lines})
-        dataset_dict = DatasetDict({'train': dataset})
+        # Concatenate and shuffle efficiently without loading into RAM
+        concatenated = concatenate_datasets(selected_datasets)
+        concatenated = concatenated.shuffle()
+        dataset_dict = DatasetDict({'train': concatenated})
         dataset_dict.save_to_disk(untokenized_path)
-        print(f"Multinomial sampled dataset saved to {untokenized_path} ({len(dataset)} examples)", file=sys.stderr)
+        print(f"Multinomial sampled dataset saved to {untokenized_path} ({len(concatenated)} examples)", file=sys.stderr)
 
     return untokenized_path
 
