@@ -36,7 +36,8 @@ def lapt(args: DictConfig):
     # Load or download untokenized dataset first (needed for FOCUS or standard training)
     untokenized_path = load_untokenized_dataset(
         dataset_config=args.dataset,
-        cache_dir=args.dataset.cache_dir
+        cache_dir=args.dataset.cache_dir,
+        dev_size=args.training.dev_size
     )
 
     # Initialize model and tokenizer (with optional FOCUS)
@@ -53,18 +54,28 @@ def lapt(args: DictConfig):
         if args.focus.enabled:
             vocab_str = format_number(args.focus.vocab_size)
             samples_str = format_number(args.focus.num_samples)
-            output_dir = f"{args.output_dir}/{args.language_code}/focus_vocab{vocab_str}_samples{samples_str}_{training_config}"
+            output_dir = f"{args.output_dir}/{args.dataset.language}/focus_vocab{vocab_str}_samples{samples_str}_{training_config}"
         else:
-            output_dir = f"{args.output_dir}/{args.language_code}/{training_config}"
+            output_dir = f"{args.output_dir}/{args.dataset.language}/{training_config}"
 
     # Tokenize dataset with appropriate tokenizer
     dataset = load_or_tokenize_dataset(
         untokenized_path=untokenized_path,
         tokenized_path=tokenized_path,
         tokenizer=tokenizer,
-        max_length=args.max_length,
-        dev_size=args.dev_size
+        max_length=args.training.max_length,
+        dev_size=args.training.dev_size
     )
+
+    # Prepare eval datasets - either single 'test' split or dict of per-language dev splits
+    dev_splits = [key for key in dataset.keys() if key.startswith('dev_')]
+    if dev_splits:
+        # Multinomial sampling case: multiple per-language dev sets
+        eval_dataset = {key: dataset[key] for key in dev_splits}
+        print(f"Using {len(eval_dataset)} per-language dev sets for evaluation: {', '.join(dev_splits)}", file=sys.stderr)
+    else:
+        # Standard case: single dev/test split
+        eval_dataset = dataset['test']
 
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as
@@ -102,7 +113,7 @@ def lapt(args: DictConfig):
     )
 
     data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm=False, 
+        tokenizer=tokenizer, mlm=False,
     )
 
     trainer = Trainer(
@@ -110,7 +121,7 @@ def lapt(args: DictConfig):
         args=training_args,
         data_collator=data_collator,
         train_dataset=dataset['train'],
-        eval_dataset=dataset['test']
+        eval_dataset=eval_dataset
     )
 
     broken_loss_callback = DetectBrokenLossCallback(trainer)

@@ -36,7 +36,7 @@ def docs_to_lines(examples):
     }
 
 
-def load_untokenized_dataset(dataset_config, cache_dir: str) -> str:
+def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = None) -> str:
     """
     Load untokenized dataset based on configuration.
 
@@ -45,6 +45,7 @@ def load_untokenized_dataset(dataset_config, cache_dir: str) -> str:
     Args:
         dataset_config: Dataset configuration object with type and source info
         cache_dir: Base directory for caching dataset artifacts
+        dev_size: Fraction of data for dev set (only used for multinomial sampling)
 
     Returns:
         Path to the untokenized dataset
@@ -69,7 +70,7 @@ def load_untokenized_dataset(dataset_config, cache_dir: str) -> str:
         sources = dataset_config.sources
         alpha = dataset_config.alpha
         total_samples = dataset_config.total_samples
-        return _load_multinomial_dataset(cache_dir, sources, alpha, total_samples)
+        return _load_multinomial_dataset(cache_dir, sources, alpha, total_samples, dev_size)
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
@@ -219,19 +220,23 @@ def _load_concat_dataset(cache_dir: str, sources: list) -> str:
 
 
 def _load_multinomial_dataset(
-    cache_dir: str, sources: list, alpha: float, total_samples: int
+    cache_dir: str, sources: list, alpha: float, total_samples: int, dev_size: float = None
 ) -> str:
     """
     Sample from multiple dataset sources using temperature-scaled multinomial sampling.
 
+    Splits each source into train/dev BEFORE upsampling to prevent dev set leakage.
+    Train splits are upsampled according to alpha, dev splits are kept at natural proportions.
+
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations
+        sources: List of dataset source configurations (should have 'language' field for naming)
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
-        total_samples: Total number of examples to sample
+        total_samples: Total number of training examples to sample (dev set size is separate)
+        dev_size: Fraction of each source to use for dev set (must be between 0 and 1)
 
     Returns:
-        Path to the untokenized sampled dataset
+        Path to the untokenized sampled dataset (DatasetDict with train and per-language dev splits)
     """
     if not sources:
         raise ValueError("Cannot sample from datasets: sources list is empty")
@@ -239,16 +244,26 @@ def _load_multinomial_dataset(
         raise ValueError(f"total_samples must be positive, got {total_samples}")
     if alpha <= 0:
         raise ValueError(f"alpha must be positive, got {alpha}")
+    if dev_size is None:
+        raise ValueError("dev_size must be provided for multinomial sampling")
+    if not (0 < dev_size < 1):
+        raise ValueError(
+            f"Multinomial sampling requires fractional dev_size (between 0 and 1), got {dev_size}. "
+            "Fixed-size dev sets are not supported for multinomial sampling."
+        )
 
     untokenized_path = os.path.join(cache_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
         print(f"Multinomial sampling from {len(sources)} sources with alpha={alpha}", file=sys.stderr)
+        print(f"Dev split: {dev_size:.1%} of each source (before upsampling)", file=sys.stderr)
 
-        source_datasets = []
-        source_sizes = []
+        train_datasets = []
+        dev_datasets = []
+        dev_names = []
+        train_sizes = []
 
-        # Load all sources and record their sizes
+        # Load all sources, split into train/dev, and record train sizes
         for idx, source_config in enumerate(sources):
             source_cache = os.path.join(cache_dir, f"source_{idx}")
             source_dict_config = DictConfig(source_config)
@@ -259,18 +274,34 @@ def _load_multinomial_dataset(
             )
 
             source_dataset = load_from_disk(source_path)
-            train_data = source_dataset['train']
-            source_datasets.append(train_data)
-            source_sizes.append(len(train_data))
-            print(f"  Source {idx}: {len(train_data)} examples", file=sys.stderr)
+            full_data = source_dataset['train']
+
+            # Split into train/dev BEFORE upsampling
+            split_dataset = full_data.train_test_split(test_size=dev_size, seed=1)
+            train_data = split_dataset['train']
+            dev_data = split_dataset['test']
+
+            # Determine dev split name from language field or default to source index
+            language = getattr(source_dict_config, 'language', None)
+            if language:
+                dev_name = f"dev_{language}"
+            else:
+                dev_name = f"dev_source{idx}"
+
+            train_datasets.append(train_data)
+            dev_datasets.append(dev_data)
+            dev_names.append(dev_name)
+            train_sizes.append(len(train_data))
+
+            print(f"  Source {idx} ({dev_name}): {len(train_data)} train, {len(dev_data)} dev examples", file=sys.stderr)
 
         # Check for empty datasets
-        if all(size == 0 for size in source_sizes):
+        if all(size == 0 for size in train_sizes):
             raise ValueError("Cannot sample: all source datasets are empty")
 
-        # Calculate sampling probabilities: p_i = (size_i)^alpha / Z
+        # Calculate sampling probabilities for TRAIN data: p_i = (size_i)^alpha / Z
         # alpha < 1 upsamples smaller datasets, alpha > 1 amplifies size differences
-        weights = [size ** alpha for size in source_sizes]
+        weights = [size ** alpha for size in train_sizes]
         total_weight = sum(weights)
         sampling_probs = [w / total_weight for w in weights]
 
@@ -281,14 +312,14 @@ def _load_multinomial_dataset(
         for i in range(remaining):
             samples_per_source[i % len(sources)] += 1
 
-        print("Sampling distribution:", file=sys.stderr)
+        print("Train sampling distribution:", file=sys.stderr)
         for idx, count in enumerate(samples_per_source):
             percentage = 100 * count / total_samples
             print(f"  Source {idx}: {count} samples ({percentage:.2f}%)", file=sys.stderr)
 
-        # Use HF's .select() to keep data memory-mapped instead of loading into RAM
-        selected_datasets = []
-        for idx, (dataset, num_samples) in enumerate(zip(source_datasets, samples_per_source)):
+        # Sample and upsample TRAIN data only
+        selected_train_datasets = []
+        for idx, (dataset, num_samples) in enumerate(zip(train_datasets, samples_per_source)):
             # Sample without replacement if we have enough data, otherwise with replacement
             if num_samples <= len(dataset):
                 indices = random.sample(range(len(dataset)), num_samples)
@@ -297,14 +328,24 @@ def _load_multinomial_dataset(
 
             # .select() keeps data memory-mapped, handles duplicate indices for sampling with replacement
             selected = dataset.select(indices)
-            selected_datasets.append(selected)
+            selected_train_datasets.append(selected)
 
-        # Concatenate and shuffle efficiently without loading into RAM
-        concatenated = concatenate_datasets(selected_datasets)
-        concatenated = concatenated.shuffle()
-        dataset_dict = DatasetDict({'train': concatenated})
+        # Concatenate and shuffle train data
+        concatenated_train = concatenate_datasets(selected_train_datasets)
+        concatenated_train = concatenated_train.shuffle(seed=1)
+
+        # Build DatasetDict with train and per-language dev splits
+        # Dev splits are NOT upsampled - kept at natural proportions
+        dataset_dict = {'train': concatenated_train}
+        for dev_name, dev_data in zip(dev_names, dev_datasets):
+            dataset_dict[dev_name] = dev_data
+
+        dataset_dict = DatasetDict(dataset_dict)
         dataset_dict.save_to_disk(untokenized_path)
-        print(f"Multinomial sampled dataset saved to {untokenized_path} ({len(concatenated)} examples)", file=sys.stderr)
+
+        print(f"Multinomial sampled dataset saved to {untokenized_path}", file=sys.stderr)
+        print(f"  Train: {len(concatenated_train)} examples (upsampled)", file=sys.stderr)
+        print(f"  Dev splits: {', '.join(dev_names)} ({sum(len(d) for d in dev_datasets)} examples total, natural proportions)", file=sys.stderr)
 
     return untokenized_path
 
@@ -319,23 +360,28 @@ def load_or_tokenize_dataset(
     """
     Load or create tokenized dataset with train/test split.
 
+    Handles both simple datasets (creates train/test split) and pre-split datasets
+    from multinomial sampling (already has train and per-language dev splits).
+
     Args:
         untokenized_path: Path to untokenized dataset
         tokenized_path: Path where tokenized dataset should be saved/loaded
         tokenizer: Tokenizer to use for tokenization
         max_length: Maximum sequence length for tokenization
         dev_size: Fraction (0 < dev_size < 1) or absolute count (dev_size >= 1)
-                  of data to use for development/test set
+                  of data to use for development/test set (ignored if dataset already split)
 
     Returns:
-        Dataset dictionary with 'train' and 'test' splits
+        Dataset dictionary with 'train' and dev splits
+        - Simple datasets: {'train': ..., 'test': ...}
+        - Multinomial datasets: {'train': ..., 'dev_{language}': ..., 'dev_{language}': ..., ...}
+          (e.g., {'train': ..., 'dev_got': ..., 'dev_ang': ..., 'dev_non': ...})
     """
     if not os.path.exists(tokenized_path):
-        if dev_size <= 0:
-            raise ValueError(f"dev_size must be positive, got {dev_size}")
-
         print(f"Tokenizing dataset with vocab size {len(tokenizer)}", file=sys.stderr)
         dataset = load_from_disk(untokenized_path)
+
+        # Tokenize all splits
         dataset = dataset.map(
             lambda examples: tokenizer(
                 examples['text'], max_length=max_length, truncation=True
@@ -344,9 +390,20 @@ def load_or_tokenize_dataset(
             remove_columns='text'
         )
 
-        # dev_size >= 1 is interpreted as absolute count, < 1 as fraction
-        test_size = int(dev_size) if dev_size >= 1 else dev_size
-        dataset = dataset['train'].train_test_split(test_size=test_size)
+        # Check if dataset already has dev splits (from multinomial sampling)
+        has_dev_splits = any(key.startswith('dev_') for key in dataset.keys())
+
+        if not has_dev_splits:
+            # Normal case - need to split train data into train/test
+            if dev_size <= 0:
+                raise ValueError(f"dev_size must be positive, got {dev_size}")
+
+            # dev_size >= 1 is interpreted as absolute count, < 1 as fraction
+            test_size = int(dev_size) if dev_size >= 1 else dev_size
+            dataset = dataset['train'].train_test_split(test_size=test_size)
+        else:
+            print("Dataset already has per-source dev splits", file=sys.stderr)
+
         dataset.save_to_disk(tokenized_path)
         print(f"Tokenized dataset saved to {tokenized_path}", file=sys.stderr)
     else:

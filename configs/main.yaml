@@ -6,17 +6,13 @@ defaults:
 seed: 1
 
 # Language and model configuration
-language_code: hy
 hf_model: facebook/xglm-564M
 
 # Dataset configuration
 dataset:
   type: oscar
-  language: ${language_code}
-  cache_dir: "data/${language_code}_oscar"
-
-max_length: 256
-dev_size: 1000000
+  language: hy
+  cache_dir: "data/${dataset.language}_oscar"
 
 # Model output configuration
 output_dir: "models"  # Base directory for all model outputs (can override for cluster scratch space, etc.)
