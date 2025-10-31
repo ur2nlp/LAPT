@@ -89,7 +89,7 @@ def _initialize_focus_model(args: DictConfig):
     focus_suffix = f"vocab{vocab_str}_samples{samples_str}"
 
     # Prepare JSONL training data for FOCUS
-    training_data_output = f"data/{args.language_code}_focus/{focus_suffix}/training_subset.jsonl"
+    training_data_output = f"data/{args.dataset.language}_focus/{focus_suffix}/training_subset.jsonl"
 
     # Use separate FOCUS dataset if configured, otherwise use training dataset
     if args.focus.dataset is not None:
@@ -112,7 +112,7 @@ def _initialize_focus_model(args: DictConfig):
         print(f"Loading tokenizer from {args.focus.tokenizer_path}", file=sys.stderr)
         tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
     else:
-        tokenizer_output_dir = f"tokenizers/{args.language_code}/{focus_suffix}"
+        tokenizer_output_dir = f"tokenizers/{args.dataset.language}/{focus_suffix}"
         tokenizer = train_new_tokenizer(
             jsonl_path=jsonl_path,
             base_tokenizer_name=args.hf_model,
