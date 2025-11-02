@@ -117,7 +117,8 @@ def _initialize_focus_model(args: DictConfig):
             jsonl_path=jsonl_path,
             base_tokenizer_name=args.hf_model,
             vocab_size=args.focus.vocab_size,
-            output_path=tokenizer_output_dir
+            output_path=tokenizer_output_dir,
+            inherit_additional_special_tokens=args.focus.get('inherit_additional_special_tokens', True)
         )
 
     # Load model and apply FOCUS
