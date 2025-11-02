@@ -3,20 +3,21 @@ name: l40_basic
 max_length: 256
 
 num_train_epochs: 1.0
-max_steps: 5000
-train_batch_size: 20
+max_steps: 100000
+train_batch_size: 50
 gradient_accumulation_steps: 1
 learning_rate: 5e-5
 lr_scheduler_type: linear
 warmup_ratio: 0.0
-warmup_steps: 0
+warmup_steps: ${divide:${max_steps},200}
 max_grad_norm: 1.0
 
-logging_steps: 100
+logging_steps: ${divide:${max_steps},400}
 eval_strategy: steps
-eval_steps: 500
+metric_for_best_model: loss
+eval_steps: ${divide:${max_steps},100}
 eval_batch_size: 40
-dev_size: 0.0025
-save_steps: 500
+dev_size: 100000
+save_steps: ${divide:${max_steps},100}
 save_total_limit: 2
 early_stopping_patience: null

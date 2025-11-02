@@ -2,7 +2,7 @@ import hydra
 import os
 import sys
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 import torch
 from transformers import (
@@ -12,6 +12,9 @@ from transformers import (
 
 from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
 from model_utils import initialize_model_and_tokenizer, set_random_seeds, format_number
+
+
+OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))
 
 
 class DetectBrokenLossCallback(TrainerCallback):
@@ -99,6 +102,7 @@ def lapt(args: DictConfig):
         gradient_accumulation_steps=args.training.gradient_accumulation_steps,
         logging_steps=args.training.logging_steps,
         eval_strategy=args.training.eval_strategy,
+        metric_for_best_model=args.training.metric_for_best_model,
         per_device_eval_batch_size=args.training.eval_batch_size,
         eval_steps=args.training.eval_steps,
         save_steps=args.training.save_steps,
@@ -109,7 +113,8 @@ def lapt(args: DictConfig):
         lr_scheduler_type=args.training.lr_scheduler_type,
         warmup_ratio=float(args.training.warmup_ratio),
         warmup_steps=args.training.warmup_steps,
-        max_grad_norm=args.training.max_grad_norm
+        max_grad_norm=args.training.max_grad_norm,
+        gradient_checkpointing=True
     )
 
     data_collator = DataCollatorForLanguageModeling(
