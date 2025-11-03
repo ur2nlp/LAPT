@@ -14,7 +14,7 @@ import torch
 from omegaconf import DictConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from focus_utils import (
+from tokenizer_utils import (
     apply_focus_initialization,
     prepare_focus_training_data,
     train_new_tokenizer

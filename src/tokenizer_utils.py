@@ -47,7 +47,7 @@ def prepare_focus_training_data(
 
     # If dataset_config provided, load that dataset; otherwise use training dataset
     if dataset_config is not None:
-        # Import here to avoid circular dependency (dataset_utils imports focus_utils)
+        # Import here to avoid circular dependency (dataset_utils imports tokenizer_utils)
         from dataset_utils import load_untokenized_dataset
         # Use the JSONL output directory as the cache for the FOCUS dataset
         focus_cache = os.path.dirname(output_jsonl_path)
