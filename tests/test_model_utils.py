@@ -8,17 +8,11 @@ from src.model_utils import format_number
 class TestFormatNumber:
     """
     Test suite for the format_number() utility function.
-
-    Grouping tests in a class is optional but helps with organization.
-    The class doesn't need to inherit from anything.
     """
 
     def test_format_thousands(self):
         """
         Test that numbers >= 1000 are formatted with 'k' suffix.
-
-        Each test method must start with 'test_' for pytest to discover it.
-        The docstring explains what we're testing.
         """
         assert format_number(50000) == "50k"
         assert format_number(1000) == "1k"
