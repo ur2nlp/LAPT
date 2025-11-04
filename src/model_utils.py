@@ -88,6 +88,10 @@ def _initialize_focus_model(args: DictConfig):
     samples_str = format_number(args.focus.num_samples)
     focus_suffix = f"vocab{vocab_str}_samples{samples_str}"
 
+    # Include inherit_additional_special_tokens in path to avoid cache collision
+    if not args.focus.get('inherit_additional_special_tokens', True):
+        focus_suffix += "_no_additional"
+
     # Prepare JSONL training data for FOCUS
     training_data_output = f"data/{args.dataset.language}_focus/{focus_suffix}/training_subset.jsonl"
 
