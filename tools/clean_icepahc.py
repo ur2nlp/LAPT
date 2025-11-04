@@ -157,8 +157,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--centuries',
         nargs='+',
-        default=['12th', '13th'],
-        help='Centuries to process (default: 12th 13th)'
+        type=int,
+        default=[12, 13, 14, 15, 16, 17, 18],
+        help='Centuries to process as numbers (default: 12 through 18)'
     )
     parser.add_argument(
         '--output',
@@ -167,14 +168,30 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # Convert century numbers to directory names (12 -> '12th', 13 -> '13th', etc.)
+    century_dirs = [f"{c}th" for c in args.centuries]
+
     # Compute default output path if not provided
     if args.output is None:
-        output_file = f"{args.base_dir}/icepahc_{'_'.join(args.centuries)}_clean.txt"
+        # Format centuries as a range if contiguous, otherwise list them
+        if len(args.centuries) == 1:
+            century_str = f"{args.centuries[0]}th"
+        else:
+            # Check if contiguous (sorted and each differs by 1)
+            sorted_centuries = sorted(args.centuries)
+            is_contiguous = (
+                sorted_centuries == list(range(sorted_centuries[0], sorted_centuries[-1] + 1))
+            )
+            if is_contiguous:
+                century_str = f"{sorted_centuries[0]}th-{sorted_centuries[-1]}th"
+            else:
+                century_str = '_'.join(f"{c}th" for c in sorted_centuries)
+        output_file = f"{args.base_dir}/icepahc_{century_str}_clean.txt"
     else:
         output_file = args.output
 
     print(f"Cleaning IcePaHC: centuries {args.centuries}")
     print(f"Output: {output_file}\n")
 
-    process_icepahc(args.base_dir, args.centuries, output_file)
+    process_icepahc(args.base_dir, century_dirs, output_file)
     print("Done!")
