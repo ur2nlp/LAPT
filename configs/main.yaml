@@ -22,7 +22,7 @@ model_name: null  # Optional codename override (e.g., "yerevan" → models/yerev
 focus:
   enabled: true
   tokenizer_path: null  # if provided, load existing tokenizer; if null, train new one
-  vocab_size: 32768
-  num_samples: 1000000  # number of samples for tokenizer training & FOCUS
+  vocab_size: 16384
+  num_samples: 20000  # number of samples for tokenizer training & FOCUS
   dataset: null  # Optional: separate dataset config for FOCUS; if null, uses main training dataset
   inherit_additional_special_tokens: true  # Whether to inherit additional tokens like <madeupword0-6> from base model
