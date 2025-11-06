@@ -134,7 +134,8 @@ def _initialize_focus_model(args: DictConfig):
         source_model=model,
         source_tokenizer=source_tokenizer,
         target_tokenizer=tokenizer,
-        training_data_path=jsonl_path
+        training_data_path=jsonl_path,
+        fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4)
     )
 
     # Resize model vocabulary and replace embeddings
