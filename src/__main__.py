@@ -30,7 +30,58 @@ class DetectBrokenLossCallback(TrainerCallback):
     ):
         if 'loss' in state.log_history[-1] and state.log_history[-1]['loss'] <= 0.0:
             raise RuntimeError("Training loss dropped to zero, indicating divergence")
-        
+
+
+class InitialFreezeCallback(TrainerCallback):
+    """
+    Callback to freeze model parameters at the beginning of training.
+
+    The parameter `model_freeze_prefix` controls which parameters to freeze
+    (as a prefix of their name). This is useful for freezing the main transformer
+    body while allowing embeddings to adapt during initial training.
+    """
+    def __init__(self, trainer: Trainer, model_freeze_prefix: str):
+        self.trainer = trainer
+        self.model_freeze_prefix = model_freeze_prefix
+
+    def on_train_begin(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs
+    ):
+        for name, param in self.trainer.model.named_parameters():
+            if name.startswith(self.model_freeze_prefix):
+                param.requires_grad = False
+        print(
+            f"\nAll parameters with prefix '{self.model_freeze_prefix}' frozen",
+            file=sys.stderr
+        )
+
+
+class UnfreezeCallback(TrainerCallback):
+    """
+    Callback to unfreeze the entire model at a certain point in training.
+
+    The parameter `unfreeze_step_ratio` controls when to unfreeze (as a ratio of
+    the maximum training steps). For example, 0.1 means unfreeze after 10% of training.
+    This allows embeddings to adapt to the model before fine-tuning the entire network.
+    """
+    def __init__(self, trainer: Trainer, unfreeze_step_ratio: float):
+        self.trainer = trainer
+        self.unfreeze_step_ratio = unfreeze_step_ratio
+        self.already_unfrozen = False
+
+    def on_step_begin(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs
+    ):
+        reached_unfreeze_step = state.global_step >= int(self.unfreeze_step_ratio * state.max_steps)
+        if reached_unfreeze_step and not self.already_unfrozen:
+            for param in self.trainer.model.parameters():
+                param.requires_grad = True
+            self.already_unfrozen = True
+            print(
+                f"\nAll model parameters unfrozen after global step {state.global_step}",
+                file=sys.stderr
+            )
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="main")
 def lapt(args: DictConfig):
@@ -132,11 +183,19 @@ def lapt(args: DictConfig):
     broken_loss_callback = DetectBrokenLossCallback(trainer)
     trainer.add_callback(broken_loss_callback)
 
-    if getattr(args, 'early_stopping_patience', False):
+    if args.training.get('early_stopping_patience', None):
         early_stopping_callback = EarlyStoppingCallback(
-            early_stopping_patience=args.early_stopping_patience
+            early_stopping_patience=args.training.early_stopping_patience
         )
         trainer.add_callback(early_stopping_callback)
+
+    if args.training.get('freeze_main_model', False):
+        freeze_callback = InitialFreezeCallback(trainer, args.training.model_freeze_prefix)
+        trainer.add_callback(freeze_callback)
+
+        if args.training.get('unfreeze_step_ratio', None):
+            unfreeze_callback = UnfreezeCallback(trainer, args.training.unfreeze_step_ratio)
+            trainer.add_callback(unfreeze_callback)
 
     # start training
     trainer.train()
