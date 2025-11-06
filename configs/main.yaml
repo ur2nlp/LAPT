@@ -23,6 +23,7 @@ focus:
   enabled: true
   tokenizer_path: null  # if provided, load existing tokenizer; if null, train new one
   vocab_size: 16384
-  num_samples: 20000  # number of samples for tokenizer training & FOCUS
+  num_samples: 25000  # number of samples for tokenizer training & FOCUS
   dataset: null  # Optional: separate dataset config for FOCUS; if null, uses main training dataset
   inherit_additional_special_tokens: true  # Whether to inherit additional tokens like <madeupword0-6> from base model
+  fasttext_model_min_count: 1  # Minimum count for FastText token embeddings (default: 4)
