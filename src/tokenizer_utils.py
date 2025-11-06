@@ -187,6 +187,13 @@ def train_new_tokenizer(
         unk_id = special_tokens_config.get('unk_id', 0)
         backend_tokenizer = _create_unigram_tokenizer(vocab_with_scores, unk_id=unk_id)
 
+    # Copy the post-processor from base tokenizer to preserve special token behavior
+    # This is critical for models like XGLM that prepend EOS to inputs
+    if hasattr(base_tokenizer, '_tokenizer') and hasattr(base_tokenizer._tokenizer, 'post_processor'):
+        if base_tokenizer._tokenizer.post_processor is not None:
+            backend_tokenizer.post_processor = base_tokenizer._tokenizer.post_processor
+            print("Copied post-processor from base tokenizer (preserves special token handling)", file=sys.stderr)
+
     # Wrap in PreTrainedTokenizerFast with special tokens from base model
     new_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=backend_tokenizer,
