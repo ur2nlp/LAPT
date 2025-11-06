@@ -434,7 +434,8 @@ def apply_focus_initialization(
     source_model,
     source_tokenizer: PreTrainedTokenizerBase,
     target_tokenizer: PreTrainedTokenizerBase,
-    training_data_path: str
+    training_data_path: str,
+    fasttext_model_min_count: int = 4
 ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     """
     Apply FOCUS to generate new input embeddings and optionally output embeddings.
@@ -444,6 +445,7 @@ def apply_focus_initialization(
         source_tokenizer: Tokenizer for the source model
         target_tokenizer: Target language-specific tokenizer
         training_data_path: Path to JSONL training data for FOCUS
+        fasttext_model_min_count: Minimum occurrences for FastText embeddings (default: 4)
 
     Returns:
         Tuple of (input_embeddings, output_embeddings)
@@ -464,7 +466,8 @@ def apply_focus_initialization(
         source_embeddings=source_embeddings,
         source_tokenizer=source_tokenizer,
         target_tokenizer=target_tokenizer,
-        target_training_data_path=training_data_path
+        target_training_data_path=training_data_path,
+        fasttext_model_min_count=fasttext_model_min_count
     )
 
     new_output_embeddings = None
@@ -475,7 +478,8 @@ def apply_focus_initialization(
             source_embeddings=source_output_embeddings,
             source_tokenizer=source_tokenizer,
             target_tokenizer=target_tokenizer,
-            target_training_data_path=training_data_path
+            target_training_data_path=training_data_path,
+            fasttext_model_min_count=fasttext_model_min_count
         )
 
     print(f"FOCUS initialization complete. New vocab size: {len(target_tokenizer)}", file=sys.stderr)
