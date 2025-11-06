@@ -1,6 +1,6 @@
 name: l40_basic
 
-max_length: 256
+max_length: 512
 
 num_train_epochs: 1.0
 max_steps: 100000
@@ -20,9 +20,9 @@ eval_batch_size: 40
 dev_size: 100000
 save_steps: ${divide:${training.max_steps},100}
 save_total_limit: 2
-early_stopping_patience: null
+early_stopping_patience: 4
 
 # Freezing parameters (optional)
-freeze_main_model: false  # Set to true to freeze transformer layers initially
-model_freeze_prefix: "model.layer"  # Prefix for parameters to freeze (XGLM: all layers + final layer norm)
-unfreeze_step_ratio: null  # Ratio of max_steps at which to unfreeze (e.g., 0.1 = unfreeze after 10%)
+freeze_main_model: true  # Set to true to freeze transformer layers initially
+model_freeze_prefix: "model.layer"  # Prefix for parameters to freeze (XGLM transformer layers)
+unfreeze_step_ratio: 0.1  # Ratio of max_steps at which to unfreeze (e.g., 0.1 = unfreeze after 10%)
