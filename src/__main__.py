@@ -137,11 +137,8 @@ def lapt(args: DictConfig):
     for p in model.parameters():
         p.requires_grad = True
 
-    # move model to GPU if available
-    device = torch.device('cuda')
-    model.to(device)
-
     # initialize trainer class with training configs
+    # Note: Trainer automatically handles device placement (GPU/CPU/multi-GPU)
     training_args = TrainingArguments(
         seed=args.seed,
         data_seed=args.seed,
