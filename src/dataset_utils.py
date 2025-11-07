@@ -284,9 +284,9 @@ def _load_multinomial_dataset(
             # Determine dev split name from language field or default to source index
             language = getattr(source_dict_config, 'language', None)
             if language:
-                dev_name = f"dev_{language}"
+                dev_name = language
             else:
-                dev_name = f"dev_source{idx}"
+                dev_name = f"source{idx}"
 
             train_datasets.append(train_data)
             dev_datasets.append(dev_data)
@@ -374,8 +374,8 @@ def load_or_tokenize_dataset(
     Returns:
         Dataset dictionary with 'train' and dev splits
         - Simple datasets: {'train': ..., 'test': ...}
-        - Multinomial datasets: {'train': ..., 'dev_{language}': ..., 'dev_{language}': ..., ...}
-          (e.g., {'train': ..., 'dev_got': ..., 'dev_ang': ..., 'dev_non': ...})
+        - Multinomial datasets: {'train': ..., '{language}': ..., '{language}': ..., ...}
+          (e.g., {'train': ..., 'got': ..., 'ang': ..., 'non': ...})
     """
     if not os.path.exists(tokenized_path):
         print(f"Tokenizing dataset with vocab size {len(tokenizer)}", file=sys.stderr)
@@ -391,7 +391,8 @@ def load_or_tokenize_dataset(
         )
 
         # Check if dataset already has dev splits (from multinomial sampling)
-        has_dev_splits = any(key.startswith('dev_') for key in dataset.keys())
+        # Dev splits are any non-train splits (e.g., 'got', 'ang', 'non')
+        has_dev_splits = any(key != 'train' and key != 'test' for key in dataset.keys())
 
         if not has_dev_splits:
             # Normal case - need to split train data into train/test

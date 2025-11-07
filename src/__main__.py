@@ -122,11 +122,12 @@ def lapt(args: DictConfig):
     )
 
     # Prepare eval datasets - either single 'test' split or dict of per-language dev splits
-    dev_splits = [key for key in dataset.keys() if key.startswith('dev_')]
+    # Dev splits are any non-train splits except 'test'
+    dev_splits = [key for key in dataset.keys() if key != 'train' and key != 'test']
     if dev_splits:
         # Multinomial sampling case: multiple per-language dev sets
         eval_dataset = {key: dataset[key] for key in dev_splits}
-        print(f"Using {len(eval_dataset)} per-language dev sets for evaluation: {', '.join(dev_splits)}", file=sys.stderr)
+        print(f"Using {len(eval_dataset)} per-language eval sets for evaluation: {', '.join(dev_splits)}", file=sys.stderr)
     else:
         # Standard case: single dev/test split
         eval_dataset = dataset['test']
