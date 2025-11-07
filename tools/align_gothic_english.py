@@ -168,7 +168,9 @@ def create_parallel_data(
     gothic_verses: Dict[Tuple[str, int, int], str],
     english_verses: Dict[Tuple[str, int, int], str],
     output_file: str,
-    bidirectional: bool = True
+    bidirectional: str = 'on',
+    instruction_format: bool = True,
+    seed: int = 1
 ):
     """
     Create parallel data from aligned Gothic and English verses.
@@ -177,7 +179,9 @@ def create_parallel_data(
         gothic_verses: Dictionary of Gothic verses
         english_verses: Dictionary of English verses
         output_file: Path to output file
-        bidirectional: If True, create both English→Gothic and Gothic→English examples
+        bidirectional: 'on' for both directions, 'off' for English→Gothic only, 'random' for random direction per pair
+        instruction_format: If True, use instruction tuning format; if False, simple concatenation
+        seed: Random seed for reproducible random direction selection
     """
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -185,6 +189,10 @@ def create_parallel_data(
     aligned_count = 0
     gothic_only_count = 0
     examples_written = 0
+
+    # Set random seed for reproducible random direction selection
+    if bidirectional == 'random':
+        random.seed(seed)
 
     with open(output_file, 'w', encoding='utf-8') as f:
         for key in sorted(gothic_verses.keys()):
@@ -194,18 +202,46 @@ def create_parallel_data(
             if key in english_verses:
                 english_text = english_verses[key]
 
-                # English → Gothic direction
-                eng_to_got = f"Translate to Gothic: {english_text} Translation: {gothic_text}"
-                eng_to_got = ' '.join(eng_to_got.split())  # Collapse to single line
-                f.write(eng_to_got + '\n')
-                examples_written += 1
+                # Determine which direction(s) to write
+                if bidirectional == 'random':
+                    # Randomly choose one direction
+                    write_eng_to_got = random.choice([True, False])
+                    write_got_to_eng = not write_eng_to_got
+                elif bidirectional == 'on':
+                    # Write both directions
+                    write_eng_to_got = True
+                    write_got_to_eng = True
+                else:  # bidirectional == 'off'
+                    # Only English → Gothic
+                    write_eng_to_got = True
+                    write_got_to_eng = False
 
-                # Gothic → English direction (if bidirectional)
-                if bidirectional:
-                    got_to_eng = f"Translate to English: {gothic_text} Translation: {english_text}"
-                    got_to_eng = ' '.join(got_to_eng.split())  # Collapse to single line
-                    f.write(got_to_eng + '\n')
-                    examples_written += 1
+                if instruction_format:
+                    # Instruction tuning format
+                    if write_eng_to_got:
+                        eng_to_got = f"Translate to Gothic: {english_text} Translation: {gothic_text}"
+                        eng_to_got = ' '.join(eng_to_got.split())  # Collapse to single line
+                        f.write(eng_to_got + '\n')
+                        examples_written += 1
+
+                    if write_got_to_eng:
+                        got_to_eng = f"Translate to English: {gothic_text} Translation: {english_text}"
+                        got_to_eng = ' '.join(got_to_eng.split())  # Collapse to single line
+                        f.write(got_to_eng + '\n')
+                        examples_written += 1
+                else:
+                    # Simple concatenation format for continued pretraining
+                    if write_eng_to_got:
+                        eng_to_got = f"{english_text} {gothic_text}"
+                        eng_to_got = ' '.join(eng_to_got.split())  # Collapse to single line
+                        f.write(eng_to_got + '\n')
+                        examples_written += 1
+
+                    if write_got_to_eng:
+                        got_to_eng = f"{gothic_text} {english_text}"
+                        got_to_eng = ' '.join(got_to_eng.split())  # Collapse to single line
+                        f.write(got_to_eng + '\n')
+                        examples_written += 1
 
                 aligned_count += 1
             else:
@@ -217,6 +253,7 @@ def create_parallel_data(
     print(f"  Gothic-only verses (no match): {gothic_only_count}", file=sys.stderr)
     print(f"  Total Gothic verses: {len(gothic_verses)}", file=sys.stderr)
     print(f"  Bidirectional: {bidirectional}", file=sys.stderr)
+    print(f"  Instruction format: {instruction_format}", file=sys.stderr)
     print(f"\nWrote {examples_written} training examples to {output_file}", file=sys.stderr)
 
 
@@ -226,15 +263,28 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Create bidirectional parallel data (default)
+  # Create bidirectional parallel data with instruction format (default)
   python align_gothic_english.py
 
   # Create only English→Gothic examples
-  python align_gothic_english.py --no-bidirectional
+  python align_gothic_english.py --bidirectional off
 
-Output format (bidirectional):
+  # Create parallel data with random direction per pair (good for continued pretraining)
+  python align_gothic_english.py --bidirectional random --no-instruction-format
+
+  # Create parallel data without instruction format (for continued pretraining)
+  python align_gothic_english.py --no-instruction-format
+
+Output format (bidirectional=on, instruction format):
   Translate to Gothic: {english text} Translation: {gothic text}
   Translate to English: {gothic text} Translation: {english text}
+
+Output format (bidirectional=on, no instruction format):
+  {english text} {gothic text}
+  {gothic text} {english text}
+
+Output format (bidirectional=random, no instruction format):
+  {english text} {gothic text}  # or {gothic text} {english text} - randomly chosen per pair
         """
     )
 
@@ -260,9 +310,17 @@ Output format (bidirectional):
     )
 
     parser.add_argument(
-        '--no-bidirectional',
+        '--bidirectional',
+        type=str,
+        choices=['on', 'off', 'random'],
+        default='on',
+        help='Direction mode: "on" for both directions, "off" for English→Gothic only, "random" for random direction per pair (default: on)'
+    )
+
+    parser.add_argument(
+        '--no-instruction-format',
         action='store_true',
-        help='Only create English→Gothic examples (default: create both directions)'
+        help='Use simple concatenation instead of instruction format (for continued pretraining)'
     )
 
     parser.add_argument(
@@ -287,7 +345,9 @@ Output format (bidirectional):
         gothic_verses,
         english_verses,
         args.output,
-        bidirectional=not args.no_bidirectional
+        bidirectional=args.bidirectional,
+        instruction_format=not args.no_instruction_format,
+        seed=args.seed
     )
 
 
