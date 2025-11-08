@@ -127,7 +127,21 @@ def _initialize_focus_model(args: DictConfig):
 
     # Load model and apply FOCUS
     print(f"Loading model: {args.hf_model}", file=sys.stderr)
-    model = AutoModelForCausalLM.from_pretrained(args.hf_model)
+
+    # Load config and override dropout if specified
+    from transformers import AutoConfig
+    config = AutoConfig.from_pretrained(args.hf_model)
+    if hasattr(args.training, 'dropout'):
+        config.dropout = args.training.dropout
+        print(f"  Overriding dropout: {config.dropout}", file=sys.stderr)
+    if hasattr(args.training, 'attention_dropout'):
+        config.attention_dropout = args.training.attention_dropout
+        print(f"  Overriding attention_dropout: {config.attention_dropout}", file=sys.stderr)
+    if hasattr(args.training, 'activation_dropout'):
+        config.activation_dropout = args.training.activation_dropout
+        print(f"  Overriding activation_dropout: {config.activation_dropout}", file=sys.stderr)
+
+    model = AutoModelForCausalLM.from_pretrained(args.hf_model, config=config)
     source_tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
 
     new_input_embeddings, new_output_embeddings = apply_focus_initialization(
@@ -177,7 +191,21 @@ def _initialize_standard_model(args: DictConfig):
         Tuple of (model, tokenizer, tokenized_path)
     """
     tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
-    model = AutoModelForCausalLM.from_pretrained(args.hf_model)
+
+    # Load config and override dropout if specified
+    from transformers import AutoConfig
+    config = AutoConfig.from_pretrained(args.hf_model)
+    if hasattr(args.training, 'dropout'):
+        config.dropout = args.training.dropout
+        print(f"  Overriding dropout: {config.dropout}", file=sys.stderr)
+    if hasattr(args.training, 'attention_dropout'):
+        config.attention_dropout = args.training.attention_dropout
+        print(f"  Overriding attention_dropout: {config.attention_dropout}", file=sys.stderr)
+    if hasattr(args.training, 'activation_dropout'):
+        config.activation_dropout = args.training.activation_dropout
+        print(f"  Overriding activation_dropout: {config.activation_dropout}", file=sys.stderr)
+
+    model = AutoModelForCausalLM.from_pretrained(args.hf_model, config=config)
     tokenized_path = args.dataset.cache_dir + "/tokenized"
 
     return model, tokenizer, tokenized_path
