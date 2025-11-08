@@ -201,6 +201,7 @@ def train_new_tokenizer(
         eos_token=base_tokenizer.eos_token,
         unk_token=base_tokenizer.unk_token,
         pad_token=base_tokenizer.pad_token,
+        clean_up_tokenization_spaces=True,
     )
 
     # Add additional special tokens ONLY if we inherited them
