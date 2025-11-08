@@ -83,6 +83,43 @@ class UnfreezeCallback(TrainerCallback):
             )
 
 
+class DelayedEarlyStoppingCallback(EarlyStoppingCallback):
+    """
+    Early stopping callback that delays activation until a certain point in training.
+
+    This is useful when freezing parameters initially - you don't want early stopping
+    to trigger before the full model has been unfrozen and had a chance to adapt.
+
+    Args:
+        early_stopping_patience: Number of evaluations without improvement before stopping
+        early_stopping_delay_ratio: Don't allow early stopping until this proportion of
+                                   training is complete (e.g., 0.2 = wait until 20%)
+    """
+    def __init__(self, early_stopping_patience: int, early_stopping_delay_ratio: float = 0.0):
+        super().__init__(early_stopping_patience=early_stopping_patience)
+        self.delay_ratio = early_stopping_delay_ratio
+        self.delay_passed = False
+
+    def on_evaluate(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs
+    ):
+        # Check if we've passed the delay period
+        if not self.delay_passed:
+            delay_steps = int(self.delay_ratio * state.max_steps)
+            if state.global_step >= delay_steps:
+                self.delay_passed = True
+                print(
+                    f"\nEarly stopping now active (passed delay at step {state.global_step})",
+                    file=sys.stderr
+                )
+            else:
+                # Skip early stopping check - return without calling parent
+                return
+
+        # Delay has passed, use normal early stopping logic
+        return super().on_evaluate(args, state, control, **kwargs)
+
+
 @hydra.main(version_base=None, config_path="../configs", config_name="main")
 def lapt(args: DictConfig):
     set_random_seeds(args.seed)
@@ -182,8 +219,10 @@ def lapt(args: DictConfig):
     trainer.add_callback(broken_loss_callback)
 
     if args.training.get('early_stopping_patience', None):
-        early_stopping_callback = EarlyStoppingCallback(
-            early_stopping_patience=args.training.early_stopping_patience
+        delay_ratio = args.training.get('early_stopping_delay_ratio', 0.0)
+        early_stopping_callback = DelayedEarlyStoppingCallback(
+            early_stopping_patience=args.training.early_stopping_patience,
+            early_stopping_delay_ratio=delay_ratio
         )
         trainer.add_callback(early_stopping_callback)
 

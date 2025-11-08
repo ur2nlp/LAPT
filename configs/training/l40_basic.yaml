@@ -24,7 +24,8 @@ eval_batch_size: 40
 dev_size: 100000
 save_steps: ${divide:${training.max_steps},100}
 save_total_limit: 2
-early_stopping_patience: null
+early_stopping_patience: 4
+early_stopping_delay_ratio: 0.0  # Don't allow early stopping until X% of training complete
 
 # Freezing parameters (optional)
 freeze_main_model: false  # Set to true to freeze transformer layers initially
