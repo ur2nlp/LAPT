@@ -26,3 +26,4 @@ focus:
   num_samples: 1000000  # number of samples for tokenizer training & FOCUS
   dataset: null  # Optional: separate dataset config for FOCUS; if null, uses main training dataset
   inherit_additional_special_tokens: true  # Whether to inherit additional tokens like <madeupword0-6> from base model
+  character_coverage: 1.0  # SentencePiece character coverage (0-1): covers characters making up this fraction of corpus. Use 1.0 for small character sets, 0.9995 for rich sets (CJK)
