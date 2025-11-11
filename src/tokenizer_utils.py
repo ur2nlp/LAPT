@@ -101,7 +101,8 @@ def train_new_tokenizer(
     base_tokenizer_name: str,
     vocab_size: int,
     output_path: str,
-    inherit_additional_special_tokens: bool = True
+    inherit_additional_special_tokens: bool = True,
+    character_coverage: float = 1.0
 ) -> PreTrainedTokenizerFast:
     """
     Train a new tokenizer on JSONL data using SentencePiece library.
@@ -115,6 +116,9 @@ def train_new_tokenizer(
         output_path: Directory where trained tokenizer will be saved
         inherit_additional_special_tokens: Whether to inherit additional special tokens
             (e.g., <madeupword0-6>) from base tokenizer (default: True for compatibility)
+        character_coverage: Fraction of character occurrences to cover (0-1). Characters
+            making up the bottom (1-character_coverage) fraction become UNK. Use 1.0 for
+            small character sets, 0.9995 for rich character sets like CJK (default: 1.0)
 
     Returns:
         Trained tokenizer
@@ -161,7 +165,8 @@ def train_new_tokenizer(
         model_type=model_type,
         vocab_size=vocab_size,
         special_tokens_config=special_tokens_config,
-        output_path=output_path
+        output_path=output_path,
+        character_coverage=character_coverage
     )
 
     # Extract vocabulary with scores for HuggingFace tokenizer initialization
@@ -229,7 +234,8 @@ def _train_sentencepiece_model(
     model_type: str,
     vocab_size: int,
     special_tokens_config: dict,
-    output_path: str
+    output_path: str,
+    character_coverage: float = 1.0
 ) -> spm.SentencePieceProcessor:
     """
     Train a SentencePiece model and return the loaded processor.
@@ -240,6 +246,7 @@ def _train_sentencepiece_model(
         vocab_size: Target vocabulary size
         special_tokens_config: Dict of special token configs (from _extract_special_tokens)
         output_path: Directory where model files will be saved
+        character_coverage: Fraction of character occurrences to cover (0-1)
 
     Returns:
         Loaded SentencePieceProcessor with the trained model
@@ -247,7 +254,7 @@ def _train_sentencepiece_model(
     model_prefix = os.path.join(output_path, 'spm')
 
     # Train SentencePiece model
-    # character_coverage=1.0: include all characters (no sampling for rare chars)
+    # character_coverage: fraction of character occurrences to cover (rest become UNK)
     # normalization_rule_name='identity': no text normalization
     # hard_vocab_limit=True: strictly enforce vocab_size (not a soft target)
     train_args = {
@@ -255,7 +262,7 @@ def _train_sentencepiece_model(
         'model_prefix': model_prefix,
         'model_type': model_type,
         'vocab_size': vocab_size,
-        'character_coverage': 1.0,
+        'character_coverage': character_coverage,
         'normalization_rule_name': 'identity',
         'hard_vocab_limit': True,
     }
