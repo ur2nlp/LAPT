@@ -120,9 +120,170 @@ class DelayedEarlyStoppingCallback(EarlyStoppingCallback):
         return super().on_evaluate(args, state, control, **kwargs)
 
 
+def _get_focus_suffix(args: DictConfig) -> str:
+    """
+    Build FOCUS path suffix encoding vocab size, num samples, and additional token inheritance.
+
+    Args:
+        args: Hydra configuration object
+
+    Returns:
+        Suffix string like "vocab16k_samples25k" or "vocab16k_samples25k_no_additional"
+    """
+    vocab_str = format_number(args.focus.vocab_size)
+    samples_str = format_number(args.focus.num_samples)
+    suffix = f"vocab{vocab_str}_samples{samples_str}"
+
+    if not args.focus.get('inherit_additional_special_tokens', True):
+        suffix += "_no_additional"
+
+    return suffix
+
+
+def _get_tokenizer_path(args: DictConfig) -> str:
+    """
+    Compute tokenizer path based on FOCUS configuration.
+
+    Args:
+        args: Hydra configuration object
+
+    Returns:
+        Path to tokenizer directory, or None if FOCUS is disabled
+    """
+    if not args.focus.enabled:
+        return None
+
+    focus_suffix = _get_focus_suffix(args)
+    return f"tokenizers/{args.dataset.language}/{focus_suffix}"
+
+
+def _get_tokenized_path(args: DictConfig) -> str:
+    """
+    Compute tokenized dataset path based on configuration.
+
+    Args:
+        args: Hydra configuration object
+
+    Returns:
+        Path to tokenized dataset directory
+    """
+    if args.focus.enabled:
+        focus_suffix = _get_focus_suffix(args)
+        return f"{args.dataset.cache_dir}/tokenized_focus_{focus_suffix}"
+    else:
+        return f"{args.dataset.cache_dir}/tokenized"
+
+
+def _get_output_dir(args: DictConfig) -> str:
+    """
+    Compute model output directory based on configuration.
+
+    Args:
+        args: Hydra configuration object
+
+    Returns:
+        Path to model output directory
+    """
+    if args.model_name:
+        return f"{args.output_dir}/{args.model_name}"
+
+    training_config = args.training.name.replace('_', '-')
+
+    # Build base path
+    if args.focus.enabled:
+        focus_suffix = _get_focus_suffix(args)
+        base_path = f"{args.output_dir}/{args.dataset.language}/focus_{focus_suffix}_{training_config}"
+    else:
+        base_path = f"{args.output_dir}/{args.dataset.language}/{training_config}"
+
+    # Append experiment_id if provided
+    experiment_id = getattr(args, 'experiment_id', None)
+    if experiment_id:
+        return f"{base_path}_{experiment_id}"
+    else:
+        return base_path
+
+
+def _handle_cache_cleanup(args: DictConfig):
+    """
+    Handle selective cache cleanup based on fresh_* flags.
+
+    Supports three levels of cleanup:
+    - fresh_model: Clear only model checkpoints
+    - fresh_tokenizer: Clear tokenizer, tokenized dataset, and model
+    - fresh_dataset: Clear everything (dataset, tokenizer, model)
+
+    Args:
+        args: Hydra configuration object
+    """
+    import shutil
+
+    fresh_dataset = getattr(args, 'fresh_dataset', False)
+    fresh_tokenizer = getattr(args, 'fresh_tokenizer', False)
+    fresh_model = getattr(args, 'fresh_model', False)
+
+    if not any([fresh_dataset, fresh_tokenizer, fresh_model]):
+        return
+
+    print("=" * 60, file=sys.stderr)
+    print("CACHE CLEANUP", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    # Compute paths that might need cleaning
+    tokenizer_path = _get_tokenizer_path(args)
+    tokenized_path = _get_tokenized_path(args)
+    output_dir = _get_output_dir(args)
+
+    if fresh_dataset:
+        # Clear everything
+        print("fresh_dataset=true: Clearing dataset cache, tokenizer, and model", file=sys.stderr)
+        if os.path.exists(args.dataset.cache_dir):
+            print(f"  Removing {args.dataset.cache_dir}", file=sys.stderr)
+            shutil.rmtree(args.dataset.cache_dir)
+        if tokenizer_path and os.path.exists(tokenizer_path):
+            print(f"  Removing {tokenizer_path}", file=sys.stderr)
+            shutil.rmtree(tokenizer_path)
+        if os.path.exists(output_dir):
+            print(f"  Removing {output_dir}", file=sys.stderr)
+            shutil.rmtree(output_dir)
+
+    elif fresh_tokenizer:
+        # Clear tokenizer and downstream artifacts
+        print("fresh_tokenizer=true: Clearing tokenizer, tokenized dataset, and model", file=sys.stderr)
+        if tokenizer_path and os.path.exists(tokenizer_path):
+            print(f"  Removing {tokenizer_path}", file=sys.stderr)
+            shutil.rmtree(tokenizer_path)
+        if os.path.exists(tokenized_path):
+            print(f"  Removing {tokenized_path}", file=sys.stderr)
+            shutil.rmtree(tokenized_path)
+        if os.path.exists(output_dir):
+            print(f"  Removing {output_dir}", file=sys.stderr)
+            shutil.rmtree(output_dir)
+
+        # Also clear FOCUS training data if applicable
+        if args.focus.enabled:
+            focus_suffix = _get_focus_suffix(args)
+            focus_data_dir = f"data/{args.dataset.language}_focus/{focus_suffix}"
+            if os.path.exists(focus_data_dir):
+                print(f"  Removing {focus_data_dir}", file=sys.stderr)
+                shutil.rmtree(focus_data_dir)
+
+    elif fresh_model:
+        # Clear only model outputs
+        print("fresh_model=true: Clearing model checkpoints only", file=sys.stderr)
+        if os.path.exists(output_dir):
+            print(f"  Removing {output_dir}", file=sys.stderr)
+            shutil.rmtree(output_dir)
+
+    print("=" * 60, file=sys.stderr)
+
+
 @hydra.main(version_base=None, config_path="../configs", config_name="main")
 def lapt(args: DictConfig):
     set_random_seeds(args.seed)
+
+    # Handle cache cleanup if requested
+    _handle_cache_cleanup(args)
 
     # Load or download untokenized dataset first (needed for FOCUS or standard training)
     untokenized_path = load_untokenized_dataset(
@@ -135,19 +296,7 @@ def lapt(args: DictConfig):
     model, tokenizer, tokenized_path = initialize_model_and_tokenizer(args)
 
     # Determine output directory for checkpoints
-    if args.model_name:
-        # Codename override - use base_dir/codename
-        output_dir = f"{args.output_dir}/{args.model_name}"
-    else:
-        # Auto-generate path from training conditions
-        training_config = args.training.name.replace('_', '-')
-
-        if args.focus.enabled:
-            vocab_str = format_number(args.focus.vocab_size)
-            samples_str = format_number(args.focus.num_samples)
-            output_dir = f"{args.output_dir}/{args.dataset.language}/focus_vocab{vocab_str}_samples{samples_str}_{training_config}"
-        else:
-            output_dir = f"{args.output_dir}/{args.dataset.language}/{training_config}"
+    output_dir = _get_output_dir(args)
 
     # Tokenize dataset with appropriate tokenizer
     dataset = load_or_tokenize_dataset(
