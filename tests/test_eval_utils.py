@@ -4,27 +4,62 @@ Tests for evaluation utilities, particularly distinct-n metrics.
 
 import numpy as np
 import pytest
+import torch
 from collections import namedtuple
 
-from eval_utils import compute_distinctness_metrics
+from eval_utils import compute_distinctness_metrics, preprocess_logits_for_metrics
 
 
 # Create a simple EvalPrediction-like object for testing
 EvalPrediction = namedtuple('EvalPrediction', ['predictions', 'label_ids'])
 
 
+def test_preprocess_logits():
+    """Test that preprocess_logits_for_metrics correctly converts logits to token IDs."""
+    batch_size = 2
+    seq_len = 5
+    vocab_size = 100
+
+    # Create logits with clear argmax
+    logits = torch.zeros((batch_size, seq_len, vocab_size))
+    logits[0, :, 10] = 1.0  # All positions predict token 10
+    logits[1, :, 20] = 1.0  # All positions predict token 20
+
+    labels = torch.ones((batch_size, seq_len), dtype=torch.long)
+
+    result = preprocess_logits_for_metrics(logits, labels)
+
+    # Should return token IDs, not logits
+    assert result.shape == (batch_size, seq_len)
+    assert result[0, 0].item() == 10
+    assert result[1, 0].item() == 20
+
+
+def test_preprocess_logits_tuple():
+    """Test that preprocess handles tuple input (some models return tuples)."""
+    batch_size = 2
+    seq_len = 5
+    vocab_size = 100
+
+    logits = torch.zeros((batch_size, seq_len, vocab_size))
+    logits[:, :, 42] = 1.0
+
+    labels = torch.ones((batch_size, seq_len), dtype=torch.long)
+
+    # Wrap in tuple like some models do
+    result = preprocess_logits_for_metrics((logits, None), labels)
+
+    assert result.shape == (batch_size, seq_len)
+    assert (result == 42).all()
+
+
 def test_distinctness_perfect_diversity():
     """Test case where every prediction is unique (perfect diversity)."""
     batch_size = 4
     seq_len = 10
-    vocab_size = 100
 
-    # Create predictions where argmax gives unique tokens: 0, 1, 2, 3, ...
-    predictions = np.zeros((batch_size, seq_len, vocab_size))
-    for i in range(batch_size):
-        for j in range(seq_len):
-            token_id = i * seq_len + j
-            predictions[i, j, token_id] = 1.0
+    # Create token ID predictions: 0, 1, 2, 3, ... (all unique)
+    predictions = np.arange(batch_size * seq_len).reshape(batch_size, seq_len)
 
     # No padding
     labels = np.ones((batch_size, seq_len), dtype=int)
@@ -42,11 +77,9 @@ def test_distinctness_complete_collapse():
     """Test case where model predicts same token everywhere (complete collapse)."""
     batch_size = 4
     seq_len = 10
-    vocab_size = 100
 
-    # All predictions have highest probability for token 42
-    predictions = np.zeros((batch_size, seq_len, vocab_size))
-    predictions[:, :, 42] = 1.0
+    # All predictions are token 42
+    predictions = np.full((batch_size, seq_len), 42)
 
     labels = np.ones((batch_size, seq_len), dtype=int)
 
@@ -65,19 +98,17 @@ def test_distinctness_repetitive_sequences():
     """Test case where each sequence repeats a few tokens (like 'true true text text')."""
     batch_size = 4
     seq_len = 8
-    vocab_size = 100
-
-    predictions = np.zeros((batch_size, seq_len, vocab_size))
 
     # Each sequence repeats 2 tokens (4 times each)
     # Seq 0: [10, 10, 10, 10, 20, 20, 20, 20]
     # Seq 1: [30, 30, 30, 30, 40, 40, 40, 40]
     # etc.
+    predictions = np.zeros((batch_size, seq_len), dtype=int)
     for i in range(batch_size):
         token_a = i * 20 + 10
         token_b = i * 20 + 20
-        predictions[i, :4, token_a] = 1.0
-        predictions[i, 4:, token_b] = 1.0
+        predictions[i, :4] = token_a
+        predictions[i, 4:] = token_b
 
     labels = np.ones((batch_size, seq_len), dtype=int)
 
@@ -95,20 +126,16 @@ def test_distinctness_with_padding():
     """Test that padding tokens are correctly masked out."""
     batch_size = 2
     seq_len = 10
-    vocab_size = 100
 
-    predictions = np.zeros((batch_size, seq_len, vocab_size))
+    predictions = np.zeros((batch_size, seq_len), dtype=int)
 
     # First sequence: tokens 0-7 valid, last 2 padded
-    # Predict tokens [0, 1, 2, 3, 4, 5, 6, 7] in valid positions
-    for j in range(8):
-        predictions[0, j, j] = 1.0
-    predictions[0, 8:, 99] = 1.0  # Padded positions (shouldn't count)
+    predictions[0, :8] = np.arange(8)
+    predictions[0, 8:] = 99  # Padded positions (shouldn't count)
 
     # Second sequence: tokens 0-5 valid, last 4 padded
-    for j in range(6):
-        predictions[1, j, j + 10] = 1.0
-    predictions[1, 6:, 99] = 1.0  # Padded positions
+    predictions[1, :6] = np.arange(10, 16)
+    predictions[1, 6:] = 99  # Padded positions
 
     # Labels with -100 indicating padding
     labels = np.ones((batch_size, seq_len), dtype=int)
@@ -163,20 +190,16 @@ def test_distinctness_realistic_pathological():
     """
     batch_size = 8
     seq_len = 20
-    vocab_size = 32768
-
-    predictions = np.zeros((batch_size, seq_len, vocab_size))
 
     # Simulate collapse to 3 tokens: 100 ('following'), 200 ('true'), 300 ('text')
     # Distribute somewhat randomly but with heavy repetition
     collapse_tokens = [100, 200, 300]
 
     np.random.seed(42)
+    predictions = np.zeros((batch_size, seq_len), dtype=int)
     for i in range(batch_size):
         for j in range(seq_len):
-            # Heavily biased toward the 3 collapse tokens
-            token = np.random.choice(collapse_tokens)
-            predictions[i, j, token] = 1.0
+            predictions[i, j] = np.random.choice(collapse_tokens)
 
     labels = np.ones((batch_size, seq_len), dtype=int)
 

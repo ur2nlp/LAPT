@@ -12,7 +12,7 @@ from transformers import (
 
 from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
 from model_utils import initialize_model_and_tokenizer, set_random_seeds, format_number
-from eval_utils import compute_distinctness_metrics
+from eval_utils import compute_distinctness_metrics, preprocess_logits_for_metrics
 
 
 OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))
@@ -370,7 +370,8 @@ def lapt(args: DictConfig):
         data_collator=data_collator,
         train_dataset=dataset['train'],
         eval_dataset=eval_dataset,
-        compute_metrics=compute_distinctness_metrics
+        compute_metrics=compute_distinctness_metrics,
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics
     )
 
     broken_loss_callback = DetectBrokenLossCallback(trainer)
