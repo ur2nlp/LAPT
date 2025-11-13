@@ -357,7 +357,7 @@ def lapt(args: DictConfig):
         warmup_ratio=float(args.training.warmup_ratio),
         warmup_steps=args.training.warmup_steps,
         max_grad_norm=args.training.max_grad_norm,
-        gradient_checkpointing=True
+        gradient_checkpointing=args.training.gradient_checkpointing
     )
 
     data_collator = DataCollatorForLanguageModeling(
