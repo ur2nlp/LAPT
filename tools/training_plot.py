@@ -18,11 +18,19 @@ Usage:
     # Multiple metrics
     python tools/training_plot.py --metrics loss eval_loss learning_rate --state-file path/to/trainer_state.json
 
+    # Glob patterns for metrics
+    python tools/training_plot.py --metrics "eval_*" --state-file path/to/trainer_state.json
+    python tools/training_plot.py --metric "eval_distinct_*" --state-file path/to/trainer_state.json
+
+    # Mix literal names and patterns
+    python tools/training_plot.py --metrics loss "eval_*" learning_rate --state-file path/to/trainer_state.json
+
     # Save to file instead of showing
     python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --output plot.png
 """
 
 import argparse
+import fnmatch
 import glob
 import json
 import sys
@@ -151,6 +159,46 @@ def plot_metric(data, metric, x_axis='step', output=None, title=None):
     return plot
 
 
+def expand_metric_patterns(patterns, available_metrics):
+    """
+    Expand glob patterns to matching metric names.
+
+    Supports literal metric names, glob patterns (*, ?, []), and mixed usage.
+
+    Args:
+        patterns: List of metric names or glob patterns
+        available_metrics: List of all available metric names
+
+    Returns:
+        List of matched metric names (preserving order, no duplicates)
+
+    Examples:
+        expand_metric_patterns(['eval_*'], ['eval_loss', 'loss', 'eval_acc'])
+        # Returns: ['eval_acc', 'eval_loss']
+
+        expand_metric_patterns(['loss', 'eval_*'], ['eval_loss', 'loss'])
+        # Returns: ['loss', 'eval_loss']
+    """
+    expanded = []
+    seen = set()
+
+    for pattern in patterns:
+        if any(char in pattern for char in ['*', '?', '[', ']']):
+            # It's a glob pattern - find matches
+            matches = fnmatch.filter(available_metrics, pattern)
+            for match in sorted(matches):
+                if match not in seen:
+                    expanded.append(match)
+                    seen.add(match)
+        else:
+            # It's a literal metric name
+            if pattern not in seen:
+                expanded.append(pattern)
+                seen.add(pattern)
+
+    return expanded
+
+
 def plot_multiple_metrics(data, metrics, x_axis='step', output=None):
     """Create subplots for multiple metrics."""
     # Reshape data for faceting
@@ -235,20 +283,42 @@ def main():
         skip_lines=args.skip_lines
     )
 
+    # Get available metrics
+    available_metrics = [col for col in data.columns if data[col].notna().any() and col not in ['run', 'step', 'epoch']]
+
     # List metrics if requested
     if args.list_metrics:
-        available_metrics = [col for col in data.columns if data[col].notna().any() and col not in ['run', 'step', 'epoch']]
         print("Available metrics:")
         for metric in sorted(available_metrics):
             count = data[metric].notna().sum()
             print(f"  {metric} ({count} values)")
         return
 
-    # Plot
+    # Expand metric patterns
     if args.metrics:
-        plot_multiple_metrics(data, args.metrics, x_axis=args.x_axis, output=args.output)
+        metrics = expand_metric_patterns(args.metrics, available_metrics)
+        if not metrics:
+            print(f"Error: No metrics matched the patterns: {args.metrics}", file=sys.stderr)
+            print(f"Available metrics: {sorted(available_metrics)}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Plotting {len(metrics)} metric(s): {', '.join(metrics)}", file=sys.stderr)
+        plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output)
     else:
-        plot_metric(data, args.metric, x_axis=args.x_axis, output=args.output, title=args.title)
+        # Single metric - also support pattern matching
+        if any(char in args.metric for char in ['*', '?', '[', ']']):
+            metrics = expand_metric_patterns([args.metric], available_metrics)
+            if not metrics:
+                print(f"Error: No metrics matched the pattern: {args.metric}", file=sys.stderr)
+                print(f"Available metrics: {sorted(available_metrics)}", file=sys.stderr)
+                sys.exit(1)
+            if len(metrics) > 1:
+                print(f"Pattern matched {len(metrics)} metrics, plotting all: {', '.join(metrics)}", file=sys.stderr)
+                plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output)
+            else:
+                print(f"Plotting: {metrics[0]}", file=sys.stderr)
+                plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title)
+        else:
+            plot_metric(data, args.metric, x_axis=args.x_axis, output=args.output, title=args.title)
 
 
 if __name__ == '__main__':
