@@ -263,7 +263,14 @@ def _handle_cache_cleanup(args: DictConfig):
         # Also clear FOCUS training data if applicable
         if args.focus.enabled:
             focus_suffix = _get_focus_suffix(args)
-            focus_data_dir = f"data/{args.dataset.language}_focus/{focus_suffix}"
+            # FOCUS data is stored in the cache_dir of the dataset it was sampled from
+            if args.focus.dataset is not None:
+                # Using separate FOCUS dataset
+                focus_data_dir = f"{args.focus.dataset.cache_dir}/focus_{focus_suffix}"
+            else:
+                # Using training dataset
+                focus_data_dir = f"{args.dataset.cache_dir}/focus_{focus_suffix}"
+
             if os.path.exists(focus_data_dir):
                 print(f"  Removing {focus_data_dir}", file=sys.stderr)
                 shutil.rmtree(focus_data_dir)
