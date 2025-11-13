@@ -68,8 +68,8 @@ def test_distinctness_perfect_diversity():
     metrics = compute_distinctness_metrics(eval_pred)
 
     # With all unique tokens, both metrics should be 1.0
-    assert metrics['distinct_1_batch'] == 1.0
-    assert metrics['distinct_1_within_seq'] == 1.0
+    assert metrics['distinct-1-batch'] == 1.0
+    assert metrics['distinct-1-seq'] == 1.0
     assert metrics['num_eval_tokens'] == batch_size * seq_len
 
 
@@ -87,10 +87,10 @@ def test_distinctness_complete_collapse():
     metrics = compute_distinctness_metrics(eval_pred)
 
     # Only one unique token, so both metrics should be very low
-    # distinct_1_batch = 1 unique / 40 total = 0.025
-    # distinct_1_within_seq = 1 unique / 10 per seq = 0.1
-    assert metrics['distinct_1_batch'] == 1.0 / (batch_size * seq_len)
-    assert metrics['distinct_1_within_seq'] == 1.0 / seq_len
+    # distinct-1-batch = 1 unique / 40 total = 0.025
+    # distinct-1-seq = 1 unique / 10 per seq = 0.1
+    assert metrics['distinct-1-batch'] == 1.0 / (batch_size * seq_len)
+    assert metrics['distinct-1-seq'] == 1.0 / seq_len
     assert metrics['num_eval_tokens'] == batch_size * seq_len
 
 
@@ -116,10 +116,10 @@ def test_distinctness_repetitive_sequences():
     metrics = compute_distinctness_metrics(eval_pred)
 
     # Each sequence has 2 unique tokens out of 8 = 0.25
-    assert metrics['distinct_1_within_seq'] == 2.0 / seq_len
+    assert metrics['distinct-1-seq'] == 2.0 / seq_len
 
     # Across batch: 8 unique tokens (2 per sequence) out of 32 total = 0.25
-    assert metrics['distinct_1_batch'] == (batch_size * 2) / (batch_size * seq_len)
+    assert metrics['distinct-1-batch'] == (batch_size * 2) / (batch_size * seq_len)
 
 
 def test_distinctness_with_padding():
@@ -149,12 +149,12 @@ def test_distinctness_with_padding():
     assert metrics['num_eval_tokens'] == 14
 
     # All 14 non-padded tokens are unique
-    assert metrics['distinct_1_batch'] == 1.0
+    assert metrics['distinct-1-batch'] == 1.0
 
     # Seq 0: 8 unique / 8 = 1.0
     # Seq 1: 6 unique / 6 = 1.0
     # Average: 1.0
-    assert metrics['distinct_1_within_seq'] == 1.0
+    assert metrics['distinct-1-seq'] == 1.0
 
 
 def test_distinctness_argmaxed_input():
@@ -175,10 +175,10 @@ def test_distinctness_argmaxed_input():
     metrics = compute_distinctness_metrics(eval_pred)
 
     # Across batch: 5 unique tokens (10, 20, 30, 40, 50) / 10 total = 0.5
-    assert metrics['distinct_1_batch'] == 0.5
+    assert metrics['distinct-1-batch'] == 0.5
 
     # Within seq: (3/5 + 2/5) / 2 = 0.5
-    assert metrics['distinct_1_within_seq'] == 0.5
+    assert metrics['distinct-1-seq'] == 0.5
 
 
 def test_distinctness_realistic_pathological():
@@ -207,8 +207,8 @@ def test_distinctness_realistic_pathological():
     metrics = compute_distinctness_metrics(eval_pred)
 
     # Should have very low distinctness (only 3 unique tokens out of 160)
-    assert metrics['distinct_1_batch'] < 0.05
-    assert metrics['distinct_1_within_seq'] < 0.2  # At most 3/20 = 0.15
+    assert metrics['distinct-1-batch'] < 0.05
+    assert metrics['distinct-1-seq'] < 0.2  # At most 3/20 = 0.15
 
     # Exact values depend on random distribution
     print(f"Pathological case metrics: {metrics}")
