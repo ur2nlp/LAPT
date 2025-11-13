@@ -93,20 +93,21 @@ def _initialize_focus_model(args: DictConfig):
         focus_suffix += "_no_additional"
 
     # Prepare JSONL training data for FOCUS
-    training_data_output = f"data/{args.dataset.language}_focus/{focus_suffix}/training_subset.jsonl"
-
-    # Use separate FOCUS dataset if configured, otherwise use training dataset
+    # Store FOCUS training data alongside the dataset it's sampled from
     if args.focus.dataset is not None:
+        # Using separate FOCUS dataset - store in that dataset's cache dir
+        focus_data_cache = args.focus.dataset.cache_dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=training_data_output,
+            output_jsonl_path=f"{focus_data_cache}/focus_{focus_suffix}/training_subset.jsonl",
             seed=args.seed,
             dataset_config=args.focus.dataset
         )
     else:
+        # Using training dataset - store in training dataset's cache dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=training_data_output,
+            output_jsonl_path=f"{args.dataset.cache_dir}/focus_{focus_suffix}/training_subset.jsonl",
             seed=args.seed,
             train_dataset_cache=args.dataset.cache_dir
         )
