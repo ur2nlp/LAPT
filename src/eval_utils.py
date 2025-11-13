@@ -7,7 +7,32 @@ high-frequency tokens.
 """
 
 import numpy as np
+import torch
 from typing import Dict
+
+
+def preprocess_logits_for_metrics(logits, labels):
+    """
+    Preprocess logits before accumulation to reduce memory usage.
+
+    This function is called by HuggingFace Trainer after each eval batch,
+    before accumulating predictions. By converting full logits
+    (batch, seq, vocab_size) to argmax token IDs (batch, seq), we reduce
+    memory usage by ~256x for models with large vocabularies like XGLM.
+
+    Without this, Trainer accumulates full logits from all eval batches in GPU
+    memory, causing OOM errors with large vocabularies (256K tokens).
+
+    Args:
+        logits: (batch_size, seq_len, vocab_size) prediction logits from model
+        labels: (batch_size, seq_len) ground truth labels (unused, but required by interface)
+
+    Returns:
+        (batch_size, seq_len) tensor of predicted token IDs
+    """
+    if isinstance(logits, tuple):
+        logits = logits[0]
+    return logits.argmax(dim=-1)
 
 
 def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
@@ -32,7 +57,7 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
 
     Args:
         eval_pred: EvalPrediction object with:
-            - predictions: (batch_size, seq_len, vocab_size) logits
+            - predictions: (batch_size, seq_len) token IDs (already argmaxed by preprocess_logits_for_metrics)
             - label_ids: (batch_size, seq_len) with -100 for padding
 
     Returns:
@@ -40,16 +65,26 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
             - distinct_1_batch: Unique tokens / total tokens across batch
             - distinct_1_within_seq: Average unique tokens / seq_len per sequence
             - num_eval_tokens: Total number of non-padding tokens evaluated
+
+    Note:
+        This function expects predictions to already be argmaxed token IDs, not logits.
+        Use preprocess_logits_for_metrics with Trainer to ensure this.
     """
     predictions, labels = eval_pred
 
-    # Take argmax to get predicted token IDs
-    # predictions shape: (batch_size, seq_len, vocab_size) -> (batch_size, seq_len)
-    if len(predictions.shape) == 3:
-        pred_tokens = predictions.argmax(axis=-1)
+    # Convert to numpy if needed
+    if torch.is_tensor(predictions):
+        pred_tokens = predictions.cpu().numpy()
     else:
-        # Already argmaxed
         pred_tokens = predictions
+
+    # Predictions should already be argmaxed by preprocess_logits_for_metrics
+    # Shape: (batch_size, seq_len)
+    if len(pred_tokens.shape) == 3:
+        raise ValueError(
+            "compute_distinctness_metrics received 3D predictions (logits), but expects "
+            "2D token IDs. Make sure to use preprocess_logits_for_metrics with Trainer."
+        )
 
     # Create mask for non-padding positions (labels == -100 indicates padding)
     if labels is not None:
