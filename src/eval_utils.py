@@ -45,12 +45,12 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
     captures uniformity vs. diversity across predictions.
 
     Two complementary metrics are computed:
-    1. distinct_1_batch: Fraction of unique tokens across entire batch
+    1. distinct-1-batch: Fraction of unique tokens across entire batch
        - Detects: "Every sequence predicts the same tokens"
        - Healthy models: >0.3-0.5
        - Pathological: <0.1 (collapsed to majority class)
 
-    2. distinct_1_within_seq: Average fraction of unique tokens per sequence
+    2. distinct-1-seq: Average fraction of unique tokens per sequence
        - Detects: "Each sequence repeats itself"
        - Healthy models: >0.2-0.4 depending on domain
        - Pathological: <0.1 (degenerate repetition like "true true true...")
@@ -62,8 +62,8 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
 
     Returns:
         Dictionary with:
-            - distinct_1_batch: Unique tokens / total tokens across batch
-            - distinct_1_within_seq: Average unique tokens / seq_len per sequence
+            - distinct-1-batch: Unique tokens / total tokens across batch
+            - distinct-1-seq: Average unique tokens / seq_len per sequence
             - num_eval_tokens: Total number of non-padding tokens evaluated
 
     Note:
@@ -111,7 +111,7 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
     distinct_1_within_seq = np.mean(distinct_1_per_seq) if distinct_1_per_seq else 0.0
 
     return {
-        'distinct_1_batch': distinct_1_batch,
-        'distinct_1_within_seq': distinct_1_within_seq,
+        'distinct-1-batch': distinct_1_batch,
+        'distinct-1-seq': distinct_1_within_seq,
         'num_eval_tokens': total_tokens,
     }
