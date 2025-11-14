@@ -398,8 +398,9 @@ def lapt(args: DictConfig):
     with open(config_path, 'w') as f:
         OmegaConf.save(args, f)
 
-    # start training
-    trainer.train()
+    # start training (resume from checkpoint if specified)
+    resume_checkpoint = args.get('resume_from_checkpoint', None)
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     # save the best model (loaded by trainer at end) to a known location
     best_checkpoint_path = os.path.join(output_dir, 'best-checkpoint')
