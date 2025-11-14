@@ -393,6 +393,11 @@ def lapt(args: DictConfig):
             unfreeze_callback = UnfreezeCallback(trainer, args.training.unfreeze_step_ratio)
             trainer.add_callback(unfreeze_callback)
 
+    # save the full training configuration for reproducibility (in output dir with checkpoints)
+    config_path = os.path.join(output_dir, 'training_config.yaml')
+    with open(config_path, 'w') as f:
+        OmegaConf.save(args, f)
+
     # start training
     trainer.train()
 
@@ -400,6 +405,12 @@ def lapt(args: DictConfig):
     best_checkpoint_path = os.path.join(output_dir, 'best-checkpoint')
     trainer.save_model(best_checkpoint_path)
     trainer.save_state()
+
+    # save config in best-checkpoint directory too
+    best_config_path = os.path.join(best_checkpoint_path, 'training_config.yaml')
+    with open(best_config_path, 'w') as f:
+        OmegaConf.save(args, f)
+
     print(f"Best model saved to: {best_checkpoint_path}", file=sys.stderr)
 
     # evaluate model
