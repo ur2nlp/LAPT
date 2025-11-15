@@ -124,7 +124,10 @@ def _initialize_focus_model(args: DictConfig):
             vocab_size=args.focus.vocab_size,
             output_path=tokenizer_output_dir,
             inherit_additional_special_tokens=args.focus.get('inherit_additional_special_tokens', True),
-            character_coverage=args.focus.get('character_coverage', 1.0)
+            character_coverage=args.focus.get('character_coverage', 1.0),
+            use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
+            seed_filter_single_chars=args.focus.get('seed_filter_single_chars', True),
+            seed_min_frequency=args.focus.get('seed_min_frequency', 1)
         )
 
     # Load model and apply FOCUS
