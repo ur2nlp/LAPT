@@ -75,11 +75,21 @@ class UnfreezeCallback(TrainerCallback):
     ):
         reached_unfreeze_step = state.global_step >= int(self.unfreeze_step_ratio * state.max_steps)
         if reached_unfreeze_step and not self.already_unfrozen:
+            # Save checkpoint before unfreezing (won't be deleted by checkpoint rotation)
+            checkpoint_name = f"checkpoint-{state.global_step}-before-unfreeze"
+            checkpoint_path = os.path.join(args.output_dir, checkpoint_name)
+            self.trainer.save_model(checkpoint_path)
+            print(
+                f"\nSaved checkpoint before unfreezing: {checkpoint_path}",
+                file=sys.stderr
+            )
+
+            # Unfreeze all parameters
             for param in self.trainer.model.parameters():
                 param.requires_grad = True
             self.already_unfrozen = True
             print(
-                f"\nAll model parameters unfrozen after global step {state.global_step}",
+                f"All model parameters unfrozen after global step {state.global_step}",
                 file=sys.stderr
             )
 
@@ -393,13 +403,25 @@ def lapt(args: DictConfig):
             unfreeze_callback = UnfreezeCallback(trainer, args.training.unfreeze_step_ratio)
             trainer.add_callback(unfreeze_callback)
 
-    # start training
-    trainer.train()
+    # save the full training configuration for reproducibility (in output dir with checkpoints)
+    config_path = os.path.join(output_dir, 'training_config.yaml')
+    with open(config_path, 'w') as f:
+        OmegaConf.save(args, f)
+
+    # start training (resume from checkpoint if specified)
+    resume_checkpoint = args.get('resume_from_checkpoint', None)
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     # save the best model (loaded by trainer at end) to a known location
     best_checkpoint_path = os.path.join(output_dir, 'best-checkpoint')
     trainer.save_model(best_checkpoint_path)
     trainer.save_state()
+
+    # save config in best-checkpoint directory too
+    best_config_path = os.path.join(best_checkpoint_path, 'training_config.yaml')
+    with open(best_config_path, 'w') as f:
+        OmegaConf.save(args, f)
+
     print(f"Best model saved to: {best_checkpoint_path}", file=sys.stderr)
 
     # evaluate model
