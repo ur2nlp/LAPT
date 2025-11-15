@@ -11,7 +11,7 @@ from transformers import (
 )
 
 from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
-from model_utils import initialize_model_and_tokenizer, set_random_seeds, format_number
+from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_focus_suffix
 from eval_utils import compute_distinctness_metrics, preprocess_logits_for_metrics
 
 
@@ -131,26 +131,6 @@ class DelayedEarlyStoppingCallback(EarlyStoppingCallback):
         return super().on_evaluate(args, state, control, **kwargs)
 
 
-def _get_focus_suffix(args: DictConfig) -> str:
-    """
-    Build FOCUS path suffix encoding vocab size, num samples, and additional token inheritance.
-
-    Args:
-        args: Hydra configuration object
-
-    Returns:
-        Suffix string like "vocab16k_samples25k" or "vocab16k_samples25k_no_additional"
-    """
-    vocab_str = format_number(args.focus.vocab_size)
-    samples_str = format_number(args.focus.num_samples)
-    suffix = f"vocab{vocab_str}_samples{samples_str}"
-
-    if not args.focus.get('inherit_additional_special_tokens', True):
-        suffix += "_no_additional"
-
-    return suffix
-
-
 def _get_tokenizer_path(args: DictConfig) -> str:
     """
     Compute tokenizer path based on FOCUS configuration.
@@ -164,7 +144,7 @@ def _get_tokenizer_path(args: DictConfig) -> str:
     if not args.focus.enabled:
         return None
 
-    focus_suffix = _get_focus_suffix(args)
+    focus_suffix = get_focus_suffix(args)
     return f"tokenizers/{args.dataset.language}/{focus_suffix}"
 
 
@@ -179,7 +159,7 @@ def _get_tokenized_path(args: DictConfig) -> str:
         Path to tokenized dataset directory
     """
     if args.focus.enabled:
-        focus_suffix = _get_focus_suffix(args)
+        focus_suffix = get_focus_suffix(args)
         return f"{args.dataset.cache_dir}/tokenized_focus_{focus_suffix}"
     else:
         return f"{args.dataset.cache_dir}/tokenized"
@@ -202,7 +182,7 @@ def _get_output_dir(args: DictConfig) -> str:
 
     # Build base path
     if args.focus.enabled:
-        focus_suffix = _get_focus_suffix(args)
+        focus_suffix = get_focus_suffix(args)
         base_path = f"{args.output_dir}/{args.dataset.language}/focus_{focus_suffix}_{training_config}"
     else:
         base_path = f"{args.output_dir}/{args.dataset.language}/{training_config}"
@@ -273,7 +253,7 @@ def _handle_cache_cleanup(args: DictConfig):
 
         # Also clear FOCUS training data if applicable
         if args.focus.enabled:
-            focus_suffix = _get_focus_suffix(args)
+            focus_suffix = get_focus_suffix(args)
             # FOCUS data is stored in the cache_dir of the dataset it was sampled from
             if args.focus.dataset is not None:
                 # Using separate FOCUS dataset

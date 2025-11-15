@@ -19,6 +19,114 @@ from datasets import load_from_disk
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, PreTrainedTokenizerFast
 
 
+def extract_base_vocabulary_frequencies(
+    text_file_path: str,
+    base_tokenizer_name: str,
+    output_seed_file: str,
+    filter_special_tokens: bool = True,
+    filter_single_chars: bool = False,
+    min_frequency: int = 1
+) -> str:
+    """
+    Tokenize corpus with base tokenizer and extract vocabulary frequencies for seeding.
+
+    This creates a seed vocabulary file that biases SentencePiece training toward
+    tokens that overlap with the base tokenizer, improving embedding initialization.
+
+    Args:
+        text_file_path: Path to plain text training file (one sentence per line)
+        base_tokenizer_name: Name of base model tokenizer
+        output_seed_file: Path where seed vocabulary file will be saved
+        filter_special_tokens: Filter out <unk>, <s>, </s>, <pad>, and <madeupword*> tokens
+        filter_single_chars: Filter out single-character tokens (may indicate inefficient tokenization)
+        min_frequency: Minimum frequency threshold to include a token (default: 1)
+
+    Returns:
+        Path to the created seed vocabulary file
+    """
+    if os.path.exists(output_seed_file):
+        print(f"Seed vocabulary already exists at {output_seed_file}, skipping generation", file=sys.stderr)
+        return output_seed_file
+
+    print(f"Extracting base vocabulary frequencies from {text_file_path}", file=sys.stderr)
+
+    # Load base tokenizer
+    base_tokenizer = AutoTokenizer.from_pretrained(base_tokenizer_name, use_fast=True)
+
+    # Count token frequencies
+    from collections import Counter
+    token_counts = Counter()
+
+    with open(text_file_path, 'r', encoding='utf-8') as f:
+        for line_idx, line in enumerate(f):
+            if line_idx % 1000 == 0 and line_idx > 0:
+                print(f"  Processed {line_idx} lines...", file=sys.stderr)
+
+            text = line.strip()
+            if not text:
+                continue
+
+            token_ids = base_tokenizer.encode(text, add_special_tokens=False)
+            for token_id in token_ids:
+                token_counts[token_id] += 1
+
+    print(f"  Found {len(token_counts)} unique tokens in corpus", file=sys.stderr)
+
+    # Convert token IDs to strings and filter
+    filtered_vocab = {}
+    filtered_reasons = Counter()
+
+    for token_id, count in token_counts.items():
+        if count < min_frequency:
+            filtered_reasons['below_min_frequency'] += 1
+            continue
+
+        token_str = base_tokenizer.convert_ids_to_tokens(token_id)
+
+        # Filter special tokens
+        if filter_special_tokens:
+            # Check for common special token patterns
+            if token_str in ['<unk>', '<s>', '</s>', '<pad>', '<mask>']:
+                filtered_reasons['special_token'] += 1
+                continue
+            if token_str.startswith('<madeupword'):
+                filtered_reasons['madeupword_token'] += 1
+                continue
+            # Also check if it's registered as a special token
+            if token_str in base_tokenizer.all_special_tokens:
+                filtered_reasons['registered_special'] += 1
+                continue
+
+        # Filter single-character tokens (optional)
+        if filter_single_chars:
+            # Remove the metaspace character for length check
+            clean_token = token_str.replace('▁', '')
+            if len(clean_token) == 1:
+                filtered_reasons['single_char'] += 1
+                continue
+
+        filtered_vocab[token_str] = count
+
+    print(f"  After filtering: {len(filtered_vocab)} tokens", file=sys.stderr)
+    if filtered_reasons:
+        print(f"  Filtered out:", file=sys.stderr)
+        for reason, count in filtered_reasons.most_common():
+            print(f"    {reason}: {count}", file=sys.stderr)
+
+    # Write seed vocabulary file in SentencePiece format: <token>\t<frequency>
+    os.makedirs(os.path.dirname(output_seed_file), exist_ok=True)
+    with open(output_seed_file, 'w', encoding='utf-8') as f:
+        # Sort by frequency (descending) for better readability
+        for token_str, count in sorted(filtered_vocab.items(), key=lambda x: x[1], reverse=True):
+            f.write(f"{token_str}\t{count}\n")
+
+    print(f"Seed vocabulary saved to {output_seed_file}", file=sys.stderr)
+    print(f"  Total tokens: {len(filtered_vocab)}", file=sys.stderr)
+    print(f"  Total frequency: {sum(filtered_vocab.values())}", file=sys.stderr)
+
+    return output_seed_file
+
+
 def prepare_focus_training_data(
     num_samples: int,
     output_jsonl_path: str,
@@ -102,7 +210,10 @@ def train_new_tokenizer(
     vocab_size: int,
     output_path: str,
     inherit_additional_special_tokens: bool = True,
-    character_coverage: float = 1.0
+    character_coverage: float = 1.0,
+    use_seed_vocabulary: bool = False,
+    seed_filter_single_chars: bool = True,
+    seed_min_frequency: int = 1
 ) -> PreTrainedTokenizerFast:
     """
     Train a new tokenizer on JSONL data using SentencePiece library.
@@ -119,6 +230,11 @@ def train_new_tokenizer(
         character_coverage: Fraction of character occurrences to cover (0-1). Characters
             making up the bottom (1-character_coverage) fraction become UNK. Use 1.0 for
             small character sets, 0.9995 for rich character sets like CJK (default: 1.0)
+        use_seed_vocabulary: Whether to generate and use seed vocabulary to bias training
+            toward base tokenizer overlap, improving embedding initialization (default: False)
+        seed_filter_single_chars: Filter single-character tokens from seed vocabulary to
+            avoid biasing toward inefficient char-level tokenization (default: True)
+        seed_min_frequency: Minimum frequency for including tokens in seed vocabulary (default: 1)
 
     Returns:
         Trained tokenizer
@@ -159,6 +275,19 @@ def train_new_tokenizer(
 
     os.makedirs(output_path, exist_ok=True)
 
+    # Generate seed vocabulary if enabled
+    seed_file = None
+    if use_seed_vocabulary:
+        seed_file = os.path.join(output_path, 'seed_vocab.txt')
+        seed_file = extract_base_vocabulary_frequencies(
+            text_file_path=text_file_path,
+            base_tokenizer_name=base_tokenizer_name,
+            output_seed_file=seed_file,
+            filter_special_tokens=True,
+            filter_single_chars=seed_filter_single_chars,
+            min_frequency=seed_min_frequency
+        )
+
     # Train SentencePiece model
     sp_model = _train_sentencepiece_model(
         text_file_path=text_file_path,
@@ -166,7 +295,8 @@ def train_new_tokenizer(
         vocab_size=vocab_size,
         special_tokens_config=special_tokens_config,
         output_path=output_path,
-        character_coverage=character_coverage
+        character_coverage=character_coverage,
+        seed_sentencepieces_file=seed_file
     )
 
     # Extract vocabulary with scores for HuggingFace tokenizer initialization
@@ -235,7 +365,8 @@ def _train_sentencepiece_model(
     vocab_size: int,
     special_tokens_config: dict,
     output_path: str,
-    character_coverage: float = 1.0
+    character_coverage: float = 1.0,
+    seed_sentencepieces_file: Optional[str] = None
 ) -> spm.SentencePieceProcessor:
     """
     Train a SentencePiece model and return the loaded processor.
@@ -247,6 +378,7 @@ def _train_sentencepiece_model(
         special_tokens_config: Dict of special token configs (from _extract_special_tokens)
         output_path: Directory where model files will be saved
         character_coverage: Fraction of character occurrences to cover (0-1)
+        seed_sentencepieces_file: Optional path to seed vocabulary file
 
     Returns:
         Loaded SentencePieceProcessor with the trained model
@@ -266,6 +398,10 @@ def _train_sentencepiece_model(
         'normalization_rule_name': 'identity',
         'hard_vocab_limit': True,
     }
+
+    # Add seed vocabulary file if provided
+    if seed_sentencepieces_file is not None:
+        train_args['seed_sentencepieces_file'] = seed_sentencepieces_file
 
     train_args.update(special_tokens_config)
 

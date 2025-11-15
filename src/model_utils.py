@@ -38,6 +38,56 @@ def format_number(n: int) -> str:
     return str(n)
 
 
+def get_model_shortname(hf_model: str) -> str:
+    """
+    Extract a short identifier from HuggingFace model name.
+
+    Args:
+        hf_model: Full HuggingFace model name (e.g., "facebook/xglm-564M")
+
+    Returns:
+        Short identifier (e.g., "xglm564m")
+    """
+    # Take the part after "/" if present, otherwise use full name
+    model_name = hf_model.split('/')[-1]
+    # Remove dots and dashes, lowercase, make compact
+    shortname = model_name.replace('-', '').replace('.', '').lower()
+    return shortname
+
+
+def get_focus_suffix(args: DictConfig) -> str:
+    """
+    Build FOCUS path suffix encoding model, vocab size, num samples, and other tokenizer parameters.
+
+    Args:
+        args: Hydra configuration object
+
+    Returns:
+        Suffix string like "xglm564m_v16k_s25k", "xglm564m_v16k_s25k_seeded", or
+        "xglm564m_v16k_s25k_no-additional_seeded-min2-chars"
+    """
+    model_short = get_model_shortname(args.hf_model)
+    vocab_str = format_number(args.focus.vocab_size)
+    samples_str = format_number(args.focus.num_samples)
+    suffix = f"{model_short}_v{vocab_str}_s{samples_str}"
+
+    if not args.focus.get('inherit_additional_special_tokens', True):
+        suffix += "_no-additional"
+
+    # Include seed vocabulary status in path to avoid cache collision
+    if args.focus.get('use_seed_vocabulary', False):
+        suffix += "_seeded"
+        # Add non-default parameters to suffix
+        min_freq = args.focus.get('seed_min_frequency', 1)
+        if min_freq > 1:
+            suffix += f"-min{min_freq}"
+        filter_chars = args.focus.get('seed_filter_single_chars', True)
+        if not filter_chars:
+            suffix += "-chars"
+
+    return suffix
+
+
 def set_random_seeds(seed: int):
     """
     Set all random seeds for reproducibility.
@@ -84,13 +134,7 @@ def _initialize_focus_model(args: DictConfig):
     print("=" * 60, file=sys.stderr)
 
     # Build directory paths with formatted vocab size and sample count
-    vocab_str = format_number(args.focus.vocab_size)
-    samples_str = format_number(args.focus.num_samples)
-    focus_suffix = f"vocab{vocab_str}_samples{samples_str}"
-
-    # Include inherit_additional_special_tokens in path to avoid cache collision
-    if not args.focus.get('inherit_additional_special_tokens', True):
-        focus_suffix += "_no_additional"
+    focus_suffix = get_focus_suffix(args)
 
     # Prepare JSONL training data for FOCUS
     # Store FOCUS training data alongside the dataset it's sampled from
@@ -124,7 +168,10 @@ def _initialize_focus_model(args: DictConfig):
             vocab_size=args.focus.vocab_size,
             output_path=tokenizer_output_dir,
             inherit_additional_special_tokens=args.focus.get('inherit_additional_special_tokens', True),
-            character_coverage=args.focus.get('character_coverage', 1.0)
+            character_coverage=args.focus.get('character_coverage', 1.0),
+            use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
+            seed_filter_single_chars=args.focus.get('seed_filter_single_chars', True),
+            seed_min_frequency=args.focus.get('seed_min_frequency', 1)
         )
 
     # Load model and apply FOCUS
