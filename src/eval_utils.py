@@ -35,25 +35,14 @@ def preprocess_logits_for_metrics(logits, labels):
     return logits.argmax(dim=-1)
 
 
-def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
+def compute_ttr_metrics(eval_pred) -> Dict[str, float]:
     """
-    Compute distinct-n metrics to measure prediction diversity.
+    Compute type-token ratio (TTR) to measure prediction diversity.
 
     This function measures whether the model is collapsing to a small set of
     majority-class predictions, which can happen after embedding reinitialization
-    (e.g., with FOCUS). Unlike per-prediction confidence metrics, distinct-n
-    captures uniformity vs. diversity across predictions.
-
-    Two complementary metrics are computed:
-    1. distinct-1-batch: Fraction of unique tokens across entire batch
-       - Detects: "Every sequence predicts the same tokens"
-       - Healthy models: >0.3-0.5
-       - Pathological: <0.1 (collapsed to majority class)
-
-    2. distinct-1-seq: Average fraction of unique tokens per sequence
-       - Detects: "Each sequence repeats itself"
-       - Healthy models: >0.2-0.4 depending on domain
-       - Pathological: <0.1 (degenerate repetition like "true true true...")
+    (e.g., with FOCUS). TTR (unique tokens / total tokens) captures vocabulary
+    diversity within each sequence.
 
     Args:
         eval_pred: EvalPrediction object with:
@@ -62,9 +51,7 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
 
     Returns:
         Dictionary with:
-            - distinct-1-batch: Unique tokens / total tokens across batch
-            - distinct-1-seq: Average unique tokens / seq_len per sequence
-            - num_eval_tokens: Total number of non-padding tokens evaluated
+            - ttr-seq: Average unique tokens / seq_len per sequence
 
     Note:
         This function expects predictions to already be argmaxed token IDs, not logits.
@@ -82,7 +69,7 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
     # Shape: (batch_size, seq_len)
     if len(pred_tokens.shape) == 3:
         raise ValueError(
-            "compute_distinctness_metrics received 3D predictions (logits), but expects "
+            "compute_ttr_metrics received 3D predictions (logits), but expects "
             "2D token IDs. Make sure to use preprocess_logits_for_metrics with Trainer."
         )
 
@@ -93,25 +80,17 @@ def compute_distinctness_metrics(eval_pred) -> Dict[str, float]:
         # No padding information, use all positions
         mask = np.ones_like(pred_tokens, dtype=bool)
 
-    # Compute distinct-1 across entire batch
-    valid_pred_tokens = pred_tokens[mask]
-    total_tokens = len(valid_pred_tokens)
-    unique_tokens = len(np.unique(valid_pred_tokens))
-    distinct_1_batch = unique_tokens / total_tokens if total_tokens > 0 else 0.0
-
-    # Compute distinct-1 within each sequence, then average
-    distinct_1_per_seq = []
+    # Compute TTR (type-token ratio) within each sequence, then average
+    ttr_per_seq = []
     for i in range(len(pred_tokens)):
         seq_tokens = pred_tokens[i][mask[i]]
         seq_len = len(seq_tokens)
         if seq_len > 0:
             seq_unique = len(np.unique(seq_tokens))
-            distinct_1_per_seq.append(seq_unique / seq_len)
+            ttr_per_seq.append(seq_unique / seq_len)
 
-    distinct_1_within_seq = np.mean(distinct_1_per_seq) if distinct_1_per_seq else 0.0
+    avg_ttr = np.mean(ttr_per_seq) if ttr_per_seq else 0.0
 
     return {
-        'distinct-1-batch': distinct_1_batch,
-        'distinct-1-seq': distinct_1_within_seq,
-        'num_eval_tokens': total_tokens,
+        'ttr-seq': avg_ttr,
     }
