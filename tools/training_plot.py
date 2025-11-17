@@ -66,40 +66,49 @@ def load_from_raw_log(filepath, skip_lines=0):
     return pd.read_json(jsonl_text, lines=True)
 
 
-def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=None, skip_lines=0):
+def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=None, skip_lines=0, run_names=None):
     """Load training data from various sources."""
     dataframes = []
+    files = []
 
     if state_pattern:
         # Multiple trainer_state.json files
-        files = glob.glob(state_pattern)
+        files = sorted(glob.glob(state_pattern))
         if not files:
             print(f"Warning: No files found matching pattern: {state_pattern}", file=sys.stderr)
-        for filepath in files:
+        for idx, filepath in enumerate(files):
             df = load_from_trainer_state(filepath)
-            df['run'] = str(Path(filepath).parent.parent.name)  # Extract run name from path
+            # Use custom name if provided, otherwise use full filepath
+            if run_names and idx < len(run_names):
+                df['run'] = run_names[idx]
+            else:
+                df['run'] = filepath
             dataframes.append(df)
 
     elif state_file:
         # Single trainer_state.json file
         df = load_from_trainer_state(state_file)
-        df['run'] = Path(state_file).parent.parent.name
+        df['run'] = run_names[0] if run_names else state_file
         dataframes.append(df)
 
     elif log_pattern:
         # Multiple raw log files
-        files = glob.glob(log_pattern)
+        files = sorted(glob.glob(log_pattern))
         if not files:
             print(f"Warning: No files found matching pattern: {log_pattern}", file=sys.stderr)
-        for filepath in files:
+        for idx, filepath in enumerate(files):
             df = load_from_raw_log(filepath, skip_lines)
-            df['run'] = str(Path(filepath).stem)
+            # Use custom name if provided, otherwise use full filepath
+            if run_names and idx < len(run_names):
+                df['run'] = run_names[idx]
+            else:
+                df['run'] = filepath
             dataframes.append(df)
 
     elif log_file:
         # Single raw log file
         df = load_from_raw_log(log_file, skip_lines)
-        df['run'] = Path(log_file).stem
+        df['run'] = run_names[0] if run_names else log_file
         dataframes.append(df)
 
     else:
@@ -263,6 +272,7 @@ def main():
                        help='X-axis variable (default: step)')
     parser.add_argument('--output', type=str, help='Save plot to file instead of showing')
     parser.add_argument('--title', type=str, help='Custom plot title')
+    parser.add_argument('--run-names', nargs='+', help='Custom names for runs (in order of matched files)')
     parser.add_argument('--list-metrics', action='store_true', help='List available metrics and exit')
 
     args = parser.parse_args()
@@ -280,7 +290,8 @@ def main():
         state_pattern=args.state_pattern,
         log_file=args.log_file,
         log_pattern=args.log_pattern,
-        skip_lines=args.skip_lines
+        skip_lines=args.skip_lines,
+        run_names=args.run_names
     )
 
     # Get available metrics

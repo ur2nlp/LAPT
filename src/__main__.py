@@ -12,7 +12,7 @@ from transformers import (
 
 from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
 from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_focus_suffix
-from eval_utils import compute_distinctness_metrics, preprocess_logits_for_metrics
+from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 
 
 OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))
@@ -354,15 +354,21 @@ def lapt(args: DictConfig):
         tokenizer=tokenizer, mlm=False,
     )
 
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        data_collator=data_collator,
-        train_dataset=dataset['train'],
-        eval_dataset=eval_dataset,
-        compute_metrics=compute_distinctness_metrics,
-        preprocess_logits_for_metrics=preprocess_logits_for_metrics
-    )
+    trainer_kwargs = {
+        'model': model,
+        'args': training_args,
+        'data_collator': data_collator,
+        'train_dataset': dataset['train'],
+        'eval_dataset': eval_dataset,
+    }
+
+    # Conditionally enable TTR metric computation
+    compute_ttr = args.training.get('compute_ttr', False)
+    if compute_ttr:
+        trainer_kwargs['compute_metrics'] = compute_ttr_metrics
+        trainer_kwargs['preprocess_logits_for_metrics'] = preprocess_logits_for_metrics
+
+    trainer = Trainer(**trainer_kwargs)
 
     broken_loss_callback = DetectBrokenLossCallback(trainer)
     trainer.add_callback(broken_loss_callback)
