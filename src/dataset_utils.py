@@ -399,11 +399,18 @@ def _load_multinomial_dataset(
         # Sample and upsample TRAIN data only
         selected_train_datasets = []
         for idx, (dataset, num_samples) in enumerate(zip(train_datasets, samples_per_source)):
-            # Sample without replacement if we have enough data, otherwise with replacement
+            # Use "exhaust-first" sampling to maximize coverage of unique examples
             if num_samples <= len(dataset):
+                # Sample without replacement
                 indices = random.sample(range(len(dataset)), num_samples)
             else:
-                indices = random.choices(range(len(dataset)), k=num_samples)
+                # Include ALL examples once, then sample remainder with replacement
+                # This ensures we always see all unique examples before any duplication
+                all_indices = list(range(len(dataset)))
+                num_additional = num_samples - len(dataset)
+                additional_indices = random.choices(range(len(dataset)), k=num_additional)
+                indices = all_indices + additional_indices
+                random.shuffle(indices)  # Shuffle to mix exhaustive + repeated samples
 
             # .select() keeps data memory-mapped, handles duplicate indices for sampling with replacement
             selected = dataset.select(indices)
