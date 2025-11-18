@@ -56,6 +56,13 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
     if dataset_type == 'oscar':
         language_code = dataset_config.language
         return _load_oscar_dataset(cache_dir, language_code)
+    elif dataset_type == 'huggingface':
+        name = dataset_config.name
+        config = getattr(dataset_config, 'config', None)
+        split = getattr(dataset_config, 'split', 'train')
+        text_column = getattr(dataset_config, 'text_column', 'text')
+        max_samples = getattr(dataset_config, 'max_samples', None)
+        return _load_huggingface_dataset(cache_dir, name, config, split, text_column, max_samples)
     elif dataset_type == 'plaintext':
         file_path = dataset_config.path
         return _load_plaintext_dataset(cache_dir, file_path)
@@ -101,6 +108,78 @@ def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
             remove_columns=dataset['train'].column_names # type: ignore
         )
         dataset.save_to_disk(untokenized_path)
+        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
+
+    return untokenized_path
+
+
+def _load_huggingface_dataset(
+    cache_dir: str,
+    name: str,
+    config: str = None,
+    split: str = 'train',
+    text_column: str = 'text',
+    max_samples: int = None
+) -> str:
+    """
+    Load a generic HuggingFace dataset.
+
+    Args:
+        cache_dir: Base directory for caching dataset artifacts
+        name: HuggingFace dataset name (e.g., 'wikitext', 'c4')
+        config: Dataset configuration/subset (e.g., 'wikitext-103-v1'), optional
+        split: Which split to load (default: 'train')
+        text_column: Name of the column containing text (default: 'text')
+        max_samples: Maximum number of samples to load, uses streaming if specified (optional)
+
+    Returns:
+        Path to the untokenized dataset
+    """
+    untokenized_path = os.path.join(cache_dir, "untokenized")
+
+    if not os.path.exists(untokenized_path):
+        print(f"Downloading and preparing HuggingFace dataset: {name}", file=sys.stderr)
+        if config:
+            print(f"  Config: {config}", file=sys.stderr)
+        print(f"  Split: {split}", file=sys.stderr)
+        if max_samples:
+            print(f"  Max samples: {max_samples}", file=sys.stderr)
+
+        # Use streaming if max_samples specified to avoid downloading entire dataset
+        if max_samples:
+            dataset = load_dataset(
+                name,
+                config,
+                split=split,
+                streaming=True
+            )
+            # Take only max_samples and convert to regular dataset
+            samples = []
+            for i, example in enumerate(dataset):
+                if i >= max_samples:
+                    break
+                samples.append(example)
+
+            dataset = Dataset.from_list(samples)
+            print(f"Loaded {len(dataset)} samples", file=sys.stderr)
+        else:
+            dataset = load_dataset(name, config, split=split)
+
+        # Standardize column name to 'text' if needed
+        if text_column != 'text':
+            dataset = dataset.rename_column(text_column, 'text')
+
+        # Convert to line-based format (split documents on newlines)
+        original_columns = dataset.column_names
+        dataset = dataset.map(
+            docs_to_lines,
+            batched=True,
+            remove_columns=original_columns
+        )
+
+        # Wrap in DatasetDict for consistency with other loaders
+        dataset_dict = DatasetDict({'train': dataset})
+        dataset_dict.save_to_disk(untokenized_path)
         print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
 
     return untokenized_path
