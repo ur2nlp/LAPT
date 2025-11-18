@@ -40,6 +40,7 @@ from omegaconf import DictConfig
 
 from dataset_utils import (
     _load_plaintext_dataset,
+    _load_plaintext_dir_dataset,
     _load_concat_dataset,
     load_untokenized_dataset,
 )
@@ -305,3 +306,206 @@ class TestConcatLoader:
         # Should NOT have called load_untokenized_dataset because cache exists
         assert second_call_count == 0
         assert result_path1 == result_path2
+
+
+class TestPlaintextDirLoader:
+    """
+    Tests for loading multiple plaintext files from a directory.
+
+    Testing strategy:
+    - Use real files (via tmp_path) to test actual I/O
+    - Test pattern matching (glob pattern filtering)
+    - Test error cases (no matching files, empty directory)
+    """
+
+    def test_load_plaintext_dir_basic(self, tmp_path):
+        """
+        Test loading multiple plaintext files from directory with glob pattern.
+
+        Strategy: Create multiple .txt files, verify they're all loaded and concatenated.
+        """
+        # Setup: Create directory with multiple text files
+        data_dir = tmp_path / "texts"
+        data_dir.mkdir()
+
+        (data_dir / "file1.txt").write_text("Line 1\nLine 2")
+        (data_dir / "file2.txt").write_text("Line 3\nLine 4\nLine 5")
+        (data_dir / "file3.txt").write_text("Line 6")
+        (data_dir / "other.md").write_text("Ignore me")  # Wrong extension
+
+        cache_dir = tmp_path / "cache"
+
+        # Act: Load with *.txt pattern
+        result_path = _load_plaintext_dir_dataset(
+            cache_dir=str(cache_dir),
+            directory=str(data_dir),
+            pattern="*.txt"
+        )
+
+        # Assert: Check return value
+        expected_path = cache_dir / "untokenized"
+        assert result_path == str(expected_path)
+        assert expected_path.exists()
+
+        # Assert: Load and verify dataset contents
+        dataset_dict = load_from_disk(result_path)
+        assert 'train' in dataset_dict
+
+        # Should have 6 lines from 3 .txt files (ignoring .md file)
+        assert len(dataset_dict['train']) == 6
+
+        # Verify all lines are present (order may vary based on file system)
+        texts = set(dataset_dict['train']['text'])
+        expected_lines = {f"Line {i}" for i in range(1, 7)}
+        assert texts == expected_lines
+
+    def test_load_plaintext_dir_different_pattern(self, tmp_path):
+        """
+        Test loading with custom glob pattern (e.g., *.on.txt for Old Norse).
+        """
+        data_dir = tmp_path / "sagas"
+        data_dir.mkdir()
+
+        (data_dir / "saga1.on.txt").write_text("Old Norse 1")
+        (data_dir / "saga2.on.txt").write_text("Old Norse 2")
+        (data_dir / "saga1.en.txt").write_text("English translation")  # Different pattern
+
+        cache_dir = tmp_path / "cache"
+
+        result_path = _load_plaintext_dir_dataset(
+            cache_dir=str(cache_dir),
+            directory=str(data_dir),
+            pattern="*.on.txt"
+        )
+
+        dataset_dict = load_from_disk(result_path)
+
+        # Should only have 2 lines from *.on.txt files
+        assert len(dataset_dict['train']) == 2
+        texts = set(dataset_dict['train']['text'])
+        assert texts == {"Old Norse 1", "Old Norse 2"}
+
+    def test_load_plaintext_dir_strips_empty_lines(self, tmp_path):
+        """
+        Test that empty lines are filtered out across all files.
+        """
+        data_dir = tmp_path / "texts"
+        data_dir.mkdir()
+
+        (data_dir / "file1.txt").write_text("Line 1\n\n\nLine 2")
+        (data_dir / "file2.txt").write_text("   \nLine 3\n\n")
+
+        cache_dir = tmp_path / "cache"
+
+        result_path = _load_plaintext_dir_dataset(
+            cache_dir=str(cache_dir),
+            directory=str(data_dir),
+            pattern="*.txt"
+        )
+
+        dataset_dict = load_from_disk(result_path)
+
+        # Should only have 3 non-empty lines total
+        assert len(dataset_dict['train']) == 3
+
+    def test_load_plaintext_dir_no_matching_files(self, tmp_path):
+        """
+        Test that loading directory with no matching files raises error.
+
+        Edge case: directory exists but has no files matching pattern.
+        """
+        data_dir = tmp_path / "empty"
+        data_dir.mkdir()
+
+        # Create files that don't match pattern
+        (data_dir / "file.md").write_text("Markdown file")
+        (data_dir / "file.py").write_text("Python file")
+
+        cache_dir = tmp_path / "cache"
+
+        with pytest.raises(ValueError) as exc_info:
+            _load_plaintext_dir_dataset(
+                cache_dir=str(cache_dir),
+                directory=str(data_dir),
+                pattern="*.txt"
+            )
+
+        assert "no files found" in str(exc_info.value).lower()
+
+    def test_load_plaintext_dir_nonexistent_directory(self, tmp_path):
+        """
+        Test that loading non-existent directory raises appropriate error.
+        """
+        cache_dir = tmp_path / "cache"
+        nonexistent_dir = tmp_path / "doesnt_exist"
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            _load_plaintext_dir_dataset(
+                cache_dir=str(cache_dir),
+                directory=str(nonexistent_dir),
+                pattern="*.txt"
+            )
+
+        assert "not found" in str(exc_info.value).lower() or "does not exist" in str(exc_info.value).lower()
+
+    def test_load_plaintext_dir_caching(self, tmp_path):
+        """
+        Test that calling twice doesn't reload - uses cached version.
+
+        Strategy: Load once, add new file to directory, load again.
+        Second load should still have original data (from cache).
+        """
+        data_dir = tmp_path / "texts"
+        data_dir.mkdir()
+
+        (data_dir / "file1.txt").write_text("Original line")
+
+        cache_dir = tmp_path / "cache"
+
+        # First load
+        result_path1 = _load_plaintext_dir_dataset(
+            cache_dir=str(cache_dir),
+            directory=str(data_dir),
+            pattern="*.txt"
+        )
+        dataset1 = load_from_disk(result_path1)
+        assert len(dataset1['train']) == 1
+        assert dataset1['train']['text'][0] == "Original line"
+
+        # Add new file to directory
+        (data_dir / "file2.txt").write_text("New line")
+
+        # Second load - should use cache, not see new file
+        result_path2 = _load_plaintext_dir_dataset(
+            cache_dir=str(cache_dir),
+            directory=str(data_dir),
+            pattern="*.txt"
+        )
+        dataset2 = load_from_disk(result_path2)
+
+        # Should still have only 1 line (cached)
+        assert len(dataset2['train']) == 1
+        assert dataset2['train']['text'][0] == "Original line"
+
+    def test_load_plaintext_dir_all_files_empty(self, tmp_path):
+        """
+        Test error when all matching files contain only whitespace.
+
+        Edge case: files exist and match pattern but have no content.
+        """
+        data_dir = tmp_path / "empty_files"
+        data_dir.mkdir()
+
+        (data_dir / "file1.txt").write_text("\n\n   \n")
+        (data_dir / "file2.txt").write_text("    \n")
+
+        cache_dir = tmp_path / "cache"
+
+        with pytest.raises(ValueError) as exc_info:
+            _load_plaintext_dir_dataset(
+                cache_dir=str(cache_dir),
+                directory=str(data_dir),
+                pattern="*.txt"
+            )
+
+        assert "no non-empty lines" in str(exc_info.value).lower()
