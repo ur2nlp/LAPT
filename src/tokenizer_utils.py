@@ -161,7 +161,8 @@ def prepare_focus_training_data(
         focus_cache = os.path.dirname(output_jsonl_path)
         untokenized_path = load_untokenized_dataset(
             dataset_config=dataset_config,
-            cache_dir=focus_cache
+            cache_dir=focus_cache,
+            dev_size=-1  # FOCUS doesn't need dev split (only uses train for tokenizer/embeddings)
         )
         dataset = load_from_disk(untokenized_path)
     else:
