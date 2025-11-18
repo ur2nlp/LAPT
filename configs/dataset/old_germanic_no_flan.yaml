@@ -1,0 +1,29 @@
+type: multinomial
+language: old_germanic
+sources:
+  - type: plaintext
+    language: ang
+    path: data/beowulf/beowulf_clean.txt
+  - type: plaintext
+    language: got
+    path: data/gotica/gotica_clean.txt
+  - type: concat
+    language: non
+    sources:
+      - type: plaintext
+        path: data/sagas/sagas_clean.txt
+      - type: plaintext
+        path: data/icecorpus-texts/icepahc_12th-18th_clean.txt
+  - type: plaintext
+    language: got-eng
+    path: data/parallel/gothic_english.txt
+  - type: huggingface
+    language: eng
+    name: wikitext
+    config: wikitext-103-v1
+    split: train
+    text_column: text
+    max_samples: 100000
+alpha: 0.7
+total_samples: 200000
+cache_dir: "data/old_germanic_no_flan"
