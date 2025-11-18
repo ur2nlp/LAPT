@@ -310,13 +310,15 @@ def train_new_tokenizer(
     # Note: Asymmetric API - BPE can load from file, Unigram must be built manually
     if model_type == 'bpe':
         # SentencePieceBPETokenizer has .from_file() - can directly load .model file
-        from tokenizers import SentencePieceBPETokenizer
+        from tokenizers import SentencePieceBPETokenizer, decoders
         model_file = os.path.join(output_path, 'spm.model')
         backend_tokenizer = SentencePieceBPETokenizer.from_file(
             vocab=model_file,
             replacement="▁",
             add_prefix_space=True
         )
+        # Add decoder to convert ▁ back to spaces
+        backend_tokenizer.decoder = decoders.Metaspace(replacement="▁", prepend_scheme="always")
     else:
         # Unigram lacks .from_file() - must manually construct from vocab+scores
         unk_id = special_tokens_config.get('unk_id', 0)
@@ -468,7 +470,7 @@ def _create_unigram_tokenizer(vocab_scores: list[tuple[str, float]], unk_id: int
     Returns:
         Configured Tokenizer object ready for use with PreTrainedTokenizerFast
     """
-    from tokenizers import Tokenizer, normalizers
+    from tokenizers import Tokenizer, normalizers, decoders
     from tokenizers.models import Unigram
     from tokenizers.pre_tokenizers import Metaspace
 
@@ -479,9 +481,11 @@ def _create_unigram_tokenizer(vocab_scores: list[tuple[str, float]], unk_id: int
 
     # Configure tokenization pipeline to match SentencePiece behavior:
     # - Empty normalizer: no text transformations (matches normalization_rule_name='identity')
-    # - Metaspace: handle spaces as ▁ tokens (SentencePiece convention)
+    # - Metaspace pre-tokenizer: handle spaces as ▁ tokens (SentencePiece convention)
+    # - Metaspace decoder: convert ▁ back to spaces when decoding
     backend_tokenizer.normalizer = normalizers.Sequence(normalizers=[])  # type: ignore
     backend_tokenizer.pre_tokenizer = Metaspace(replacement="▁", prepend_scheme="always")
+    backend_tokenizer.decoder = decoders.Metaspace(replacement="▁", prepend_scheme="always")
 
     return backend_tokenizer
 
