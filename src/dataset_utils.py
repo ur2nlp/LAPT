@@ -325,17 +325,36 @@ def _load_multinomial_dataset(
         raise ValueError(f"alpha must be positive, got {alpha}")
     if dev_size is None:
         raise ValueError("dev_size must be provided for multinomial sampling")
-    if not (0 < dev_size < 1):
+
+    # Check for explicit "no dev split" flag
+    skip_dev_split = (dev_size == -1)
+
+    if dev_size == 0:
         raise ValueError(
-            f"Multinomial sampling requires fractional dev_size (between 0 and 1), got {dev_size}. "
+            "dev_size=0 is ambiguous. Use dev_size=-1 to explicitly skip dev split, "
+            "or use a value > 0 for fractional split size."
+        )
+    elif not skip_dev_split and not (0 < dev_size < 1):
+        raise ValueError(
+            f"Multinomial sampling requires fractional dev_size (0 < dev_size < 1), got {dev_size}. "
+            "Use dev_size=-1 to skip dev split (e.g., for FOCUS training). "
             "Fixed-size dev sets are not supported for multinomial sampling."
         )
+
+    if skip_dev_split:
+        print("WARNING: dev_size=-1 skips dev split creation.", file=sys.stderr)
+        print("  If using this dataset for model training (not FOCUS), this will cause", file=sys.stderr)
+        print("  dev-set contamination as upsampled training data won't have a held-out dev set.", file=sys.stderr)
+        print("  Only use dev_size=-1 for datasets that don't need evaluation (e.g., FOCUS).", file=sys.stderr)
 
     untokenized_path = os.path.join(cache_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
         print(f"Multinomial sampling from {len(sources)} sources with alpha={alpha}", file=sys.stderr)
-        print(f"Dev split: {dev_size:.1%} of each source (before upsampling)", file=sys.stderr)
+        if not skip_dev_split:
+            print(f"Dev split: {dev_size:.1%} of each source (before upsampling)", file=sys.stderr)
+        else:
+            print("No dev split (dev_size=-1, using all data for training)", file=sys.stderr)
 
         train_datasets = []
         dev_datasets = []
@@ -355,10 +374,15 @@ def _load_multinomial_dataset(
             source_dataset = load_from_disk(source_path)
             full_data = source_dataset['train']
 
-            # Split into train/dev BEFORE upsampling
-            split_dataset = full_data.train_test_split(test_size=dev_size, seed=1)
-            train_data = split_dataset['train']
-            dev_data = split_dataset['test']
+            # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
+            if not skip_dev_split:
+                split_dataset = full_data.train_test_split(test_size=dev_size, seed=1)
+                train_data = split_dataset['train']
+                dev_data = split_dataset['test']
+            else:
+                # No dev split - use all data for training
+                train_data = full_data
+                dev_data = None
 
             # Determine dev split name from language field or default to source index
             language = getattr(source_dict_config, 'language', None)
@@ -368,11 +392,15 @@ def _load_multinomial_dataset(
                 dev_name = f"source{idx}"
 
             train_datasets.append(train_data)
-            dev_datasets.append(dev_data)
-            dev_names.append(dev_name)
+            if not skip_dev_split:
+                dev_datasets.append(dev_data)
+                dev_names.append(dev_name)
             train_sizes.append(len(train_data))
 
-            print(f"  Source {idx} ({dev_name}): {len(train_data)} train, {len(dev_data)} dev examples", file=sys.stderr)
+            if not skip_dev_split:
+                print(f"  Source {idx} ({dev_name}): {len(train_data)} train, {len(dev_data)} dev examples", file=sys.stderr)
+            else:
+                print(f"  Source {idx}: {len(train_data)} examples (no dev split)", file=sys.stderr)
 
         # Check for empty datasets
         if all(size == 0 for size in train_sizes):
@@ -431,7 +459,8 @@ def _load_multinomial_dataset(
 
         print(f"Multinomial sampled dataset saved to {untokenized_path}", file=sys.stderr)
         print(f"  Train: {len(concatenated_train)} examples (upsampled)", file=sys.stderr)
-        print(f"  Dev splits: {', '.join(dev_names)} ({sum(len(d) for d in dev_datasets)} examples total, natural proportions)", file=sys.stderr)
+        if not skip_dev_split:
+            print(f"  Dev splits: {', '.join(dev_names)} ({sum(len(d) for d in dev_datasets)} examples total, natural proportions)", file=sys.stderr)
 
     return untokenized_path
 
