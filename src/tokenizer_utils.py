@@ -59,9 +59,6 @@ def extract_base_vocabulary_frequencies(
 
     with open(text_file_path, 'r', encoding='utf-8') as f:
         for line_idx, line in enumerate(f):
-            if line_idx % 1000 == 0 and line_idx > 0:
-                print(f"  Processed {line_idx} lines...", file=sys.stderr)
-
             text = line.strip()
             if not text:
                 continue
