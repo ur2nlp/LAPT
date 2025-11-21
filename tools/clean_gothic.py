@@ -5,8 +5,11 @@ Clean Gothic Bible text by removing metadata and extracting pure Gothic text.
 Input: data/gotica/gotica.txt
 Output: data/gotica/gotica_clean.txt
 
-Format: One verse per line, no metadata. Deduplicates verses that appear in
-multiple codices by randomly selecting one variant per verse reference.
+Format: One verse per line, no metadata.
+
+By default, deduplicates verses that appear in multiple codices by randomly
+selecting one variant per verse reference. Use --keep_all_variants to preserve
+all codex variants (one line per variant).
 """
 
 import argparse
@@ -15,14 +18,20 @@ import re
 from collections import defaultdict
 
 
-def clean_gothic(input_path: str, output_path: str, seed: int = 1):
+def clean_gothic(
+    input_path: str,
+    output_path: str,
+    seed: int = 1,
+    keep_all_variants: bool = False
+):
     """
-    Extract Gothic text from verses, removing all metadata and deduplicating.
+    Extract Gothic text from verses, removing all metadata.
 
     Args:
         input_path: Path to raw Gothic Bible file
         output_path: Path for cleaned output
-        seed: Random seed for reproducible deduplication
+        seed: Random seed for reproducible deduplication (only used when keep_all_variants=False)
+        keep_all_variants: If True, keep all codex variants; if False, randomly select one per verse
     """
     random.seed(seed)
 
@@ -65,25 +74,42 @@ def clean_gothic(input_path: str, output_path: str, seed: int = 1):
 
                     verse_groups[verse_ref].append(gothic_text)
 
-    # Second pass: randomly select one variant per verse and write
+    # Second pass: write verses (all variants or deduplicated)
     total_verses = len(verse_order)
     duplicates_found = sum(1 for variants in verse_groups.values() if len(variants) > 1)
+    total_variants = sum(len(variants) for variants in verse_groups.values())
 
     print(f"Found {total_verses} unique verse references")
     print(f"Found {duplicates_found} verses with multiple codex variants")
-    print(f"Using random seed: {seed}")
+    print(f"Total variants across all codices: {total_variants}")
+
+    if keep_all_variants:
+        print("Mode: Keeping all codex variants")
+    else:
+        print(f"Mode: Deduplicating (using random seed: {seed})")
 
     with open(output_path, 'w', encoding='utf-8') as f_out:
+        lines_written = 0
         for verse_ref in verse_order:
             variants = verse_groups[verse_ref]
-            # Randomly select one variant
-            chosen_text = random.choice(variants)
-            f_out.write(chosen_text + '\n')
+
+            if keep_all_variants:
+                # Write all variants
+                for variant_text in variants:
+                    f_out.write(variant_text + '\n')
+                    lines_written += 1
+            else:
+                # Randomly select one variant
+                chosen_text = random.choice(variants)
+                f_out.write(chosen_text + '\n')
+                lines_written += 1
+
+        print(f"Wrote {lines_written} lines to {output_path}")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Clean Gothic Bible text and deduplicate verses with multiple codex variants'
+        description='Clean Gothic Bible text with optional deduplication of codex variants'
     )
     parser.add_argument(
         '--input_file',
@@ -99,11 +125,21 @@ if __name__ == '__main__':
         '--seed',
         type=int,
         default=1,
-        help='Random seed for reproducible deduplication (default: 1)'
+        help='Random seed for reproducible deduplication (default: 1, only used when not keeping all variants)'
+    )
+    parser.add_argument(
+        '--keep_all_variants',
+        action='store_true',
+        help='Keep all codex variants instead of randomly selecting one per verse (default: False)'
     )
 
     args = parser.parse_args()
 
     print(f"Cleaning Gothic Bible: {args.input_file} → {args.output_file}")
-    clean_gothic(args.input_file, args.output_file, args.seed)
+    clean_gothic(
+        args.input_file,
+        args.output_file,
+        args.seed,
+        args.keep_all_variants
+    )
     print("Done!")
