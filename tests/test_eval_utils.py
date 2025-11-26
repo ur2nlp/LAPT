@@ -7,7 +7,7 @@ import pytest
 import torch
 from collections import namedtuple
 
-from eval_utils import compute_distinctness_metrics, preprocess_logits_for_metrics
+from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 
 
 # Create a simple EvalPrediction-like object for testing
@@ -65,7 +65,7 @@ def test_distinctness_perfect_diversity():
     labels = np.ones((batch_size, seq_len), dtype=int)
 
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
-    metrics = compute_distinctness_metrics(eval_pred)
+    metrics = compute_ttr_metrics(eval_pred)
 
     # With all unique tokens, both metrics should be 1.0
     assert metrics['distinct-1-batch'] == 1.0
@@ -84,7 +84,7 @@ def test_distinctness_complete_collapse():
     labels = np.ones((batch_size, seq_len), dtype=int)
 
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
-    metrics = compute_distinctness_metrics(eval_pred)
+    metrics = compute_ttr_metrics(eval_pred)
 
     # Only one unique token, so both metrics should be very low
     # distinct-1-batch = 1 unique / 40 total = 0.025
@@ -113,7 +113,7 @@ def test_distinctness_repetitive_sequences():
     labels = np.ones((batch_size, seq_len), dtype=int)
 
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
-    metrics = compute_distinctness_metrics(eval_pred)
+    metrics = compute_ttr_metrics(eval_pred)
 
     # Each sequence has 2 unique tokens out of 8 = 0.25
     assert metrics['distinct-1-seq'] == 2.0 / seq_len
@@ -143,7 +143,7 @@ def test_distinctness_with_padding():
     labels[1, 6:] = -100  # Last 4 positions of seq 1 are padding
 
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
-    metrics = compute_distinctness_metrics(eval_pred)
+    metrics = compute_ttr_metrics(eval_pred)
 
     # Should only count non-padded tokens: 8 + 6 = 14 tokens
     assert metrics['num_eval_tokens'] == 14
@@ -172,7 +172,7 @@ def test_distinctness_argmaxed_input():
     labels = np.ones((batch_size, seq_len), dtype=int)
 
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
-    metrics = compute_distinctness_metrics(eval_pred)
+    metrics = compute_ttr_metrics(eval_pred)
 
     # Across batch: 5 unique tokens (10, 20, 30, 40, 50) / 10 total = 0.5
     assert metrics['distinct-1-batch'] == 0.5
@@ -204,7 +204,7 @@ def test_distinctness_realistic_pathological():
     labels = np.ones((batch_size, seq_len), dtype=int)
 
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
-    metrics = compute_distinctness_metrics(eval_pred)
+    metrics = compute_ttr_metrics(eval_pred)
 
     # Should have very low distinctness (only 3 unique tokens out of 160)
     assert metrics['distinct-1-batch'] < 0.05
