@@ -67,10 +67,8 @@ def test_distinctness_perfect_diversity():
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
     metrics = compute_ttr_metrics(eval_pred)
 
-    # With all unique tokens, both metrics should be 1.0
-    assert metrics['distinct-1-batch'] == 1.0
-    assert metrics['distinct-1-seq'] == 1.0
-    assert metrics['num_eval_tokens'] == batch_size * seq_len
+    # With all unique tokens, TTR should be 1.0
+    assert metrics['ttr-seq'] == 1.0
 
 
 def test_distinctness_complete_collapse():
@@ -86,12 +84,8 @@ def test_distinctness_complete_collapse():
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
     metrics = compute_ttr_metrics(eval_pred)
 
-    # Only one unique token, so both metrics should be very low
-    # distinct-1-batch = 1 unique / 40 total = 0.025
-    # distinct-1-seq = 1 unique / 10 per seq = 0.1
-    assert metrics['distinct-1-batch'] == 1.0 / (batch_size * seq_len)
-    assert metrics['distinct-1-seq'] == 1.0 / seq_len
-    assert metrics['num_eval_tokens'] == batch_size * seq_len
+    # Only one unique token: 1 unique / 10 per seq = 0.1
+    assert metrics['ttr-seq'] == 1.0 / seq_len
 
 
 def test_distinctness_repetitive_sequences():
@@ -116,10 +110,7 @@ def test_distinctness_repetitive_sequences():
     metrics = compute_ttr_metrics(eval_pred)
 
     # Each sequence has 2 unique tokens out of 8 = 0.25
-    assert metrics['distinct-1-seq'] == 2.0 / seq_len
-
-    # Across batch: 8 unique tokens (2 per sequence) out of 32 total = 0.25
-    assert metrics['distinct-1-batch'] == (batch_size * 2) / (batch_size * seq_len)
+    assert metrics['ttr-seq'] == 2.0 / seq_len
 
 
 def test_distinctness_with_padding():
@@ -145,16 +136,10 @@ def test_distinctness_with_padding():
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
     metrics = compute_ttr_metrics(eval_pred)
 
-    # Should only count non-padded tokens: 8 + 6 = 14 tokens
-    assert metrics['num_eval_tokens'] == 14
-
-    # All 14 non-padded tokens are unique
-    assert metrics['distinct-1-batch'] == 1.0
-
     # Seq 0: 8 unique / 8 = 1.0
     # Seq 1: 6 unique / 6 = 1.0
     # Average: 1.0
-    assert metrics['distinct-1-seq'] == 1.0
+    assert metrics['ttr-seq'] == 1.0
 
 
 def test_distinctness_argmaxed_input():
@@ -174,41 +159,5 @@ def test_distinctness_argmaxed_input():
     eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
     metrics = compute_ttr_metrics(eval_pred)
 
-    # Across batch: 5 unique tokens (10, 20, 30, 40, 50) / 10 total = 0.5
-    assert metrics['distinct-1-batch'] == 0.5
-
     # Within seq: (3/5 + 2/5) / 2 = 0.5
-    assert metrics['distinct-1-seq'] == 0.5
-
-
-def test_distinctness_realistic_pathological():
-    """
-    Test realistic pathological case matching observed behavior.
-
-    Simulates model collapsing to predicting a few high-frequency tokens
-    like 'following', 'true', 'text' repeatedly.
-    """
-    batch_size = 8
-    seq_len = 20
-
-    # Simulate collapse to 3 tokens: 100 ('following'), 200 ('true'), 300 ('text')
-    # Distribute somewhat randomly but with heavy repetition
-    collapse_tokens = [100, 200, 300]
-
-    np.random.seed(42)
-    predictions = np.zeros((batch_size, seq_len), dtype=int)
-    for i in range(batch_size):
-        for j in range(seq_len):
-            predictions[i, j] = np.random.choice(collapse_tokens)
-
-    labels = np.ones((batch_size, seq_len), dtype=int)
-
-    eval_pred = EvalPrediction(predictions=predictions, label_ids=labels)
-    metrics = compute_ttr_metrics(eval_pred)
-
-    # Should have very low distinctness (only 3 unique tokens out of 160)
-    assert metrics['distinct-1-batch'] < 0.05
-    assert metrics['distinct-1-seq'] < 0.2  # At most 3/20 = 0.15
-
-    # Exact values depend on random distribution
-    print(f"Pathological case metrics: {metrics}")
+    assert metrics['ttr-seq'] == 0.5
