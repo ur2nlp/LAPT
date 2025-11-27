@@ -22,7 +22,8 @@ def clean_gothic(
     input_path: str,
     output_path: str,
     seed: int = 1,
-    keep_all_variants: bool = False
+    keep_all_variants: bool = False,
+    output_script: str = 'roman'
 ):
     """
     Extract Gothic text from verses, removing all metadata.
@@ -32,6 +33,7 @@ def clean_gothic(
         output_path: Path for cleaned output
         seed: Random seed for reproducible deduplication (only used when keep_all_variants=False)
         keep_all_variants: If True, keep all codex variants; if False, randomly select one per verse
+        output_script: Output script - 'roman' (default), 'script' (Gothic Unicode), or 'both'
     """
     random.seed(seed)
 
@@ -74,7 +76,7 @@ def clean_gothic(
 
                     verse_groups[verse_ref].append(gothic_text)
 
-    # Second pass: write verses (all variants or deduplicated)
+    # Second pass: collect verses (all variants or deduplicated)
     total_verses = len(verse_order)
     duplicates_found = sum(1 for variants in verse_groups.values() if len(variants) > 1)
     total_variants = sum(len(variants) for variants in verse_groups.values())
@@ -88,23 +90,38 @@ def clean_gothic(
     else:
         print(f"Mode: Deduplicating (using random seed: {seed})")
 
-    with open(output_path, 'w', encoding='utf-8') as f_out:
-        lines_written = 0
-        for verse_ref in verse_order:
-            variants = verse_groups[verse_ref]
+    # Collect lines to write
+    lines = []
+    for verse_ref in verse_order:
+        variants = verse_groups[verse_ref]
 
-            if keep_all_variants:
-                # Write all variants
-                for variant_text in variants:
-                    f_out.write(variant_text + '\n')
-                    lines_written += 1
-            else:
-                # Randomly select one variant
-                chosen_text = random.choice(variants)
-                f_out.write(chosen_text + '\n')
-                lines_written += 1
+        if keep_all_variants:
+            # Collect all variants
+            for variant_text in variants:
+                lines.append(variant_text)
+        else:
+            # Randomly select one variant
+            chosen_text = random.choice(variants)
+            lines.append(chosen_text)
 
-        print(f"Wrote {lines_written} lines to {output_path}")
+    # Write output based on script choice
+    if output_script in ['roman', 'both']:
+        # Write romanized version (default)
+        with open(output_path, 'w', encoding='utf-8') as f_out:
+            for line in lines:
+                f_out.write(line + '\n')
+        print(f"Wrote {len(lines)} lines to {output_path}")
+
+    if output_script in ['script', 'both']:
+        # Write Gothic Unicode script version
+        from transliterate import transliterate_latin_to_gothic
+
+        script_path = output_path.replace('.txt', '_script.txt')
+        with open(script_path, 'w', encoding='utf-8') as f_out:
+            for line in lines:
+                gothic_line = transliterate_latin_to_gothic(line)
+                f_out.write(gothic_line + '\n')
+        print(f"Wrote {len(lines)} lines (Gothic script) to {script_path}")
 
 
 if __name__ == '__main__':
@@ -132,6 +149,12 @@ if __name__ == '__main__':
         action='store_true',
         help='Keep all codex variants instead of randomly selecting one per verse (default: False)'
     )
+    parser.add_argument(
+        '--output_script',
+        choices=['roman', 'script', 'both'],
+        default='roman',
+        help='Output script: "roman" (default, with þ), "script" (Gothic Unicode), or "both" (write two files)'
+    )
 
     args = parser.parse_args()
 
@@ -140,6 +163,7 @@ if __name__ == '__main__':
         args.input_file,
         args.output_file,
         args.seed,
-        args.keep_all_variants
+        args.keep_all_variants,
+        args.output_script
     )
     print("Done!")

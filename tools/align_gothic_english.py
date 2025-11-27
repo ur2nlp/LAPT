@@ -170,7 +170,8 @@ def create_parallel_data(
     output_file: str,
     bidirectional: str = 'on',
     instruction_format: bool = True,
-    seed: int = 1
+    seed: int = 1,
+    gothic_script: str = 'roman'
 ):
     """
     Create parallel data from aligned Gothic and English verses.
@@ -182,6 +183,7 @@ def create_parallel_data(
         bidirectional: 'on' for both directions, 'off' for English→Gothic only, 'random' for random direction per pair
         instruction_format: If True, use instruction tuning format; if False, simple concatenation
         seed: Random seed for reproducible random direction selection
+        gothic_script: 'roman' for romanized (with þ), 'script' for Gothic Unicode, or 'both' for examples with both scripts
     """
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -194,10 +196,18 @@ def create_parallel_data(
     if bidirectional == 'random':
         random.seed(seed)
 
+    # Determine which script variants to generate
+    script_variants = []
+    if gothic_script in ['roman', 'both']:
+        script_variants.append('roman')
+    if gothic_script in ['script', 'both']:
+        from transliterate import transliterate_latin_to_gothic
+        script_variants.append('script')
+
     with open(output_file, 'w', encoding='utf-8') as f:
         for key in sorted(gothic_verses.keys()):
             book, chapter, verse = key
-            gothic_text = gothic_verses[key]
+            gothic_text_roman = gothic_verses[key]
 
             if key in english_verses:
                 english_text = english_verses[key]
@@ -216,31 +226,34 @@ def create_parallel_data(
                     write_eng_to_got = True
                     write_got_to_eng = False
 
-                if instruction_format:
-                    # Instruction tuning format
-                    if write_eng_to_got:
-                        eng_to_got = f"Translate to Gothic: {english_text} Translation: {gothic_text}"
-                        eng_to_got = ' '.join(eng_to_got.split())  # Collapse to single line
-                        f.write(eng_to_got + '\n')
-                        examples_written += 1
+                # Generate examples for each script variant
+                for script_variant in script_variants:
+                    # Get Gothic text in appropriate script
+                    if script_variant == 'script':
+                        gothic_text = transliterate_latin_to_gothic(gothic_text_roman)
+                    else:
+                        gothic_text = gothic_text_roman
 
-                    if write_got_to_eng:
-                        got_to_eng = f"Translate to English: {gothic_text} Translation: {english_text}"
-                        got_to_eng = ' '.join(got_to_eng.split())  # Collapse to single line
-                        f.write(got_to_eng + '\n')
-                        examples_written += 1
-                else:
-                    # Simple concatenation format for continued pretraining
-                    if write_eng_to_got:
-                        eng_to_got = f"{english_text} {gothic_text}"
-                        eng_to_got = ' '.join(eng_to_got.split())  # Collapse to single line
-                        f.write(eng_to_got + '\n')
-                        examples_written += 1
+                    # Collect examples to write for this script variant
+                    examples_to_write = []
 
-                    if write_got_to_eng:
-                        got_to_eng = f"{gothic_text} {english_text}"
-                        got_to_eng = ' '.join(got_to_eng.split())  # Collapse to single line
-                        f.write(got_to_eng + '\n')
+                    if instruction_format:
+                        # Instruction tuning format
+                        if write_eng_to_got:
+                            examples_to_write.append(f"Translate to Gothic: {english_text} Translation: {gothic_text}")
+                        if write_got_to_eng:
+                            examples_to_write.append(f"Translate to English: {gothic_text} Translation: {english_text}")
+                    else:
+                        # Simple concatenation format
+                        if write_eng_to_got:
+                            examples_to_write.append(f"{english_text} {gothic_text}")
+                        if write_got_to_eng:
+                            examples_to_write.append(f"{gothic_text} {english_text}")
+
+                    # Write all examples, collapsing whitespace
+                    for example in examples_to_write:
+                        collapsed = ' '.join(example.split())
+                        f.write(collapsed + '\n')
                         examples_written += 1
 
                 aligned_count += 1
@@ -254,6 +267,7 @@ def create_parallel_data(
     print(f"  Total Gothic verses: {len(gothic_verses)}", file=sys.stderr)
     print(f"  Bidirectional: {bidirectional}", file=sys.stderr)
     print(f"  Instruction format: {instruction_format}", file=sys.stderr)
+    print(f"  Gothic script: {gothic_script}", file=sys.stderr)
     print(f"\nWrote {examples_written} training examples to {output_file}", file=sys.stderr)
 
 
@@ -330,6 +344,13 @@ Output format (bidirectional=random, no instruction format):
         help='Random seed for selecting codex variants (default: 1)'
     )
 
+    parser.add_argument(
+        '--gothic-script',
+        choices=['roman', 'script', 'both'],
+        default='roman',
+        help='Script for Gothic text: "roman" (default, with þ), "script" (Gothic Unicode), or "both" (generate examples with both scripts)'
+    )
+
     args = parser.parse_args()
 
     print("Parsing Gothic Bible...", file=sys.stderr)
@@ -347,7 +368,8 @@ Output format (bidirectional=random, no instruction format):
         args.output,
         bidirectional=args.bidirectional,
         instruction_format=not args.no_instruction_format,
-        seed=args.seed
+        seed=args.seed,
+        gothic_script=args.gothic_script
     )
 
 
