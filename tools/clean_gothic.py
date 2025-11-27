@@ -69,6 +69,10 @@ def clean_gothic(
                 # Matches sequences of 2+ dots with optional spaces between them
                 gothic_text = re.sub(r'\.(\s*\.)+', '...', gothic_text)
 
+                # Remove meta-brackets (keeping their contents)
+                gothic_text = gothic_text.replace('<', '').replace('>', '')
+                gothic_text = gothic_text.replace('[', '').replace(']', '')
+
                 if gothic_text:
                     # Track first occurrence for ordering
                     if verse_ref not in verse_groups:

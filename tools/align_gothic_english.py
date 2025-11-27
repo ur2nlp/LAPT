@@ -85,6 +85,10 @@ def parse_gothic_bible(gothic_file: str, seed: int = 1) -> Dict[Tuple[str, int, 
                 # Replace multiple dots (with or without spaces) with single "..."
                 text = re.sub(r'\.(\s*\.)+', '...', text)
 
+                # Remove meta-brackets (keeping their contents)
+                text = text.replace('<', '').replace('>', '')
+                text = text.replace('[', '').replace(']', '')
+
                 if text and text != '...':  # Only include if there's actual text beyond lacunae
                     if book_abbrev in GOTHIC_TO_WEB_BOOKS:
                         book = GOTHIC_TO_WEB_BOOKS[book_abbrev]
