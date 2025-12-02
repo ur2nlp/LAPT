@@ -43,6 +43,7 @@ from plotnine import (
     element_text,
     facet_wrap,
     geom_line,
+    geom_point,
     ggplot,
     labs,
     theme,
@@ -66,7 +67,7 @@ def load_from_raw_log(filepath, skip_lines=0):
     return pd.read_json(jsonl_text, lines=True)
 
 
-def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=None, skip_lines=0, run_names=None):
+def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=None, skip_lines=0, run_names=None, exclude_pattern=None):
     """Load training data from various sources."""
     dataframes = []
     files = []
@@ -74,6 +75,11 @@ def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=No
     if state_pattern:
         # Multiple trainer_state.json files
         files = sorted(glob.glob(state_pattern))
+
+        # Filter out excluded files
+        if exclude_pattern:
+            files = [f for f in files if not fnmatch.fnmatch(f, exclude_pattern)]
+
         if not files:
             print(f"Warning: No files found matching pattern: {state_pattern}", file=sys.stderr)
         for idx, filepath in enumerate(files):
@@ -94,6 +100,11 @@ def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=No
     elif log_pattern:
         # Multiple raw log files
         files = sorted(glob.glob(log_pattern))
+
+        # Filter out excluded files
+        if exclude_pattern:
+            files = [f for f in files if not fnmatch.fnmatch(f, exclude_pattern)]
+
         if not files:
             print(f"Warning: No files found matching pattern: {log_pattern}", file=sys.stderr)
         for idx, filepath in enumerate(files):
@@ -138,9 +149,16 @@ def plot_metric(data, metric, x_axis='step', output=None, title=None):
         # Fallback to epoch if step not available
         x_axis = 'epoch' if 'epoch' in metric_data.columns else 'step'
 
+    # Find min and max points to mark
+    min_idx = metric_data[metric].idxmin()
+    max_idx = metric_data[metric].idxmax()
+    extrema_data = metric_data.loc[[min_idx, max_idx]].copy()
+
     plot = (
         ggplot(metric_data, aes(x=x_axis, y=metric)) +
         (geom_line(aes(color='run'), size=1.2) if multiple_runs else geom_line(size=1.2)) +
+        (geom_point(aes(color='run'), data=extrema_data, size=4, shape='x') if multiple_runs
+         else geom_point(data=extrema_data, size=4, shape='x')) +
         labs(
             title=title or f'{metric} over training',
             x=x_axis.capitalize(),
@@ -208,23 +226,68 @@ def expand_metric_patterns(patterns, available_metrics):
     return expanded
 
 
+def print_metric_summary(data, metrics, x_axis='step'):
+    """Print summary statistics for metrics (min/max values and where they occurred)."""
+    print("\n" + "="*80)
+    print("METRIC SUMMARY")
+    print("="*80)
+
+    for metric in metrics:
+        metric_data = data[data[metric].notna()].copy()
+
+        if len(metric_data) == 0:
+            continue
+
+        print(f"\n{metric}:")
+        print("-" * 80)
+
+        # Find min and max
+        min_idx = metric_data[metric].idxmin()
+        max_idx = metric_data[metric].idxmax()
+
+        min_val = metric_data.loc[min_idx, metric]
+        max_val = metric_data.loc[max_idx, metric]
+        min_step = metric_data.loc[min_idx, x_axis] if x_axis in metric_data.columns else 'N/A'
+        max_step = metric_data.loc[max_idx, x_axis] if x_axis in metric_data.columns else 'N/A'
+        min_run = metric_data.loc[min_idx, 'run']
+        max_run = metric_data.loc[max_idx, 'run']
+
+        print(f"  Min: {min_val:.6f} at {x_axis}={min_step} (run: {min_run})")
+        print(f"  Max: {max_val:.6f} at {x_axis}={max_step} (run: {max_run})")
+
+    print("\n" + "="*80 + "\n")
+
+
 def plot_multiple_metrics(data, metrics, x_axis='step', output=None):
     """Create subplots for multiple metrics."""
     # Reshape data for faceting
     plot_data = []
+    extrema_data = []
+
     for metric in metrics:
         metric_data = data[data[metric].notna()].copy()
         metric_data['metric_name'] = metric
         metric_data['metric_value'] = metric_data[metric]
         plot_data.append(metric_data[[x_axis, 'run', 'metric_name', 'metric_value']])
 
+        # Find min and max points for this metric
+        min_idx = metric_data[metric].idxmin()
+        max_idx = metric_data[metric].idxmax()
+        extrema = metric_data.loc[[min_idx, max_idx]].copy()
+        extrema['metric_name'] = metric
+        extrema['metric_value'] = extrema[metric]
+        extrema_data.append(extrema[[x_axis, 'run', 'metric_name', 'metric_value']])
+
     plot_data = pd.concat(plot_data, ignore_index=True)
+    extrema_data = pd.concat(extrema_data, ignore_index=True)
 
     multiple_runs = len(plot_data['run'].unique()) > 1
 
     plot = (
         ggplot(plot_data, aes(x=x_axis, y='metric_value')) +
         (geom_line(aes(color='run'), size=1.0) if multiple_runs else geom_line(size=1.0)) +
+        (geom_point(aes(color='run'), data=extrema_data, size=3, shape='x') if multiple_runs
+         else geom_point(data=extrema_data, size=3, shape='x')) +
         facet_wrap('~metric_name', scales='free_y', ncol=2) +
         labs(x=x_axis.capitalize(), y='Value') +
         theme_minimal() +
@@ -262,6 +325,7 @@ def main():
     parser.add_argument('--log-file', type=str, help='Path to raw log file (legacy)')
     parser.add_argument('--log-pattern', type=str, help='Glob pattern for multiple raw log files (legacy)')
     parser.add_argument('--skip-lines', type=int, default=0, help='Skip N lines from raw logs (default: 0)')
+    parser.add_argument('--exclude-pattern', type=str, help='Glob pattern to exclude files (e.g., "*v14*")')
 
     # Metrics to plot
     parser.add_argument('--metric', type=str, help='Single metric to plot (e.g., loss, eval_loss)')
@@ -291,7 +355,8 @@ def main():
         log_file=args.log_file,
         log_pattern=args.log_pattern,
         skip_lines=args.skip_lines,
-        run_names=args.run_names
+        run_names=args.run_names,
+        exclude_pattern=args.exclude_pattern
     )
 
     # Get available metrics
@@ -314,6 +379,7 @@ def main():
             sys.exit(1)
         print(f"Plotting {len(metrics)} metric(s): {', '.join(metrics)}", file=sys.stderr)
         plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output)
+        print_metric_summary(data, metrics, x_axis=args.x_axis)
     else:
         # Single metric - also support pattern matching
         if any(char in args.metric for char in ['*', '?', '[', ']']):
@@ -325,11 +391,14 @@ def main():
             if len(metrics) > 1:
                 print(f"Pattern matched {len(metrics)} metrics, plotting all: {', '.join(metrics)}", file=sys.stderr)
                 plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output)
+                print_metric_summary(data, metrics, x_axis=args.x_axis)
             else:
                 print(f"Plotting: {metrics[0]}", file=sys.stderr)
                 plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title)
+                print_metric_summary(data, [metrics[0]], x_axis=args.x_axis)
         else:
             plot_metric(data, args.metric, x_axis=args.x_axis, output=args.output, title=args.title)
+            print_metric_summary(data, [args.metric], x_axis=args.x_axis)
 
 
 if __name__ == '__main__':
