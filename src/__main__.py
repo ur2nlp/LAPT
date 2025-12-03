@@ -255,7 +255,7 @@ def _handle_cache_cleanup(args: DictConfig):
         if args.focus.enabled:
             focus_suffix = get_focus_suffix(args)
             # FOCUS data is stored in the cache_dir of the dataset it was sampled from
-            if args.focus.dataset is not None:
+            if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
                 # Using separate FOCUS dataset
                 focus_data_dir = f"{args.focus.dataset.cache_dir}/focus_{focus_suffix}"
             else:

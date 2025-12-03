@@ -77,7 +77,7 @@ def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
     }
 
     # Include either training dataset or separate FOCUS dataset config
-    if args.focus.dataset is not None:
+    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
         # Use separate FOCUS dataset
         focus_dataset_config = OmegaConf.to_container(args.focus.dataset, resolve=True)
         config['focus_dataset'] = focus_dataset_config

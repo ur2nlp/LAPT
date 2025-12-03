@@ -138,7 +138,7 @@ def _initialize_focus_model(args: DictConfig):
 
     # Prepare JSONL training data for FOCUS
     # Store FOCUS training data alongside the dataset it's sampled from
-    if args.focus.dataset is not None:
+    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
         # Using separate FOCUS dataset - store in that dataset's cache dir
         focus_data_cache = args.focus.dataset.cache_dir
         jsonl_path = prepare_focus_training_data(
