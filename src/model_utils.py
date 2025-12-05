@@ -81,9 +81,9 @@ def get_focus_suffix(args: DictConfig) -> str:
         min_freq = args.focus.get('seed_min_frequency', 1)
         if min_freq > 1:
             suffix += f"-min{min_freq}"
-        filter_chars = args.focus.get('seed_filter_single_chars', True)
-        if not filter_chars:
-            suffix += "-chars"
+        seed_lambda = args.focus.get('seed_lambda', 1.0)
+        if seed_lambda != 1.0:
+            suffix += f"-lambda{seed_lambda}"
 
     return suffix
 
@@ -170,8 +170,8 @@ def _initialize_focus_model(args: DictConfig):
             inherit_additional_special_tokens=args.focus.get('inherit_additional_special_tokens', True),
             character_coverage=args.focus.get('character_coverage', 1.0),
             use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
-            seed_filter_single_chars=args.focus.get('seed_filter_single_chars', True),
-            seed_min_frequency=args.focus.get('seed_min_frequency', 1)
+            seed_min_frequency=args.focus.get('seed_min_frequency', 1),
+            seed_lambda=args.focus.get('seed_lambda', 1.0)
         )
 
     # Load model and apply FOCUS
