@@ -3,4 +3,4 @@ defaults:
 
 use_seed_vocabulary: true  # Enable seed vocabulary for better base tokenizer overlap
 seed_min_frequency: 1  # Minimum frequency for including tokens in seed vocabulary
-seed_filter_single_chars: true  # Filter single-character tokens from seed vocabulary
+seed_lambda: 1.0  # Scale factor for seed vocabulary frequencies (0-1): 1.0 = full weight, 0.5 = half weight. Lower values allow more language-specific tokens but reduce embedding reuse

@@ -60,8 +60,8 @@ def main():
         vocab_size=3500,
         output_path=f"{test_dir}/tokenizer_with_seed",
         use_seed_vocabulary=True,
-        seed_filter_single_chars=True,
-        seed_min_frequency=1
+        seed_min_frequency=1,
+        seed_lambda=1.0
     )
     print(f"   Tokenizer vocab size: {len(tokenizer_with_seed)}")
 

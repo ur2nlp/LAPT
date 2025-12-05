@@ -71,8 +71,8 @@ def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
         'inherit_additional_special_tokens': args.focus.get('inherit_additional_special_tokens', True),
         'character_coverage': args.focus.get('character_coverage', 1.0),
         'use_seed_vocabulary': args.focus.get('use_seed_vocabulary', False),
-        'seed_filter_single_chars': args.focus.get('seed_filter_single_chars', True),
         'seed_min_frequency': args.focus.get('seed_min_frequency', 1),
+        'seed_lambda': args.focus.get('seed_lambda', 1.0),
         'seed': args.seed,
     }
 

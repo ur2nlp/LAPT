@@ -24,8 +24,8 @@ def extract_base_vocabulary_frequencies(
     base_tokenizer_name: str,
     output_seed_file: str,
     filter_special_tokens: bool = True,
-    filter_single_chars: bool = False,
-    min_frequency: int = 1
+    min_frequency: int = 1,
+    seed_lambda: float = 1.0
 ) -> str:
     """
     Tokenize corpus with base tokenizer and extract vocabulary frequencies for seeding.
@@ -38,17 +38,27 @@ def extract_base_vocabulary_frequencies(
         base_tokenizer_name: Name of base model tokenizer
         output_seed_file: Path where seed vocabulary file will be saved
         filter_special_tokens: Filter out <unk>, <s>, </s>, <pad>, and <madeupword*> tokens
-        filter_single_chars: Filter out single-character tokens (may indicate inefficient tokenization)
         min_frequency: Minimum frequency threshold to include a token (default: 1)
+        seed_lambda: Scale factor for seed frequencies (0-1): 1.0 = full weight, lower values reduce bias
 
     Returns:
         Path to the created seed vocabulary file
     """
+    if seed_lambda == 0.0:
+        print(
+            "WARNING: seed_lambda=0.0 effectively disables seed vocabulary. "
+            "Consider setting use_seed_vocabulary=false instead to avoid unnecessary work.",
+            file=sys.stderr
+        )
+        return None
+
     if os.path.exists(output_seed_file):
         print(f"Seed vocabulary already exists at {output_seed_file}, skipping generation", file=sys.stderr)
         return output_seed_file
 
     print(f"Extracting base vocabulary frequencies from {text_file_path}", file=sys.stderr)
+    if seed_lambda != 1.0:
+        print(f"  Scaling seed frequencies with lambda={seed_lambda}", file=sys.stderr)
 
     # Load base tokenizer
     base_tokenizer = AutoTokenizer.from_pretrained(base_tokenizer_name, use_fast=True)
@@ -94,14 +104,6 @@ def extract_base_vocabulary_frequencies(
                 filtered_reasons['registered_special'] += 1
                 continue
 
-        # Filter single-character tokens (optional)
-        if filter_single_chars:
-            # Remove the metaspace character for length check
-            clean_token = token_str.replace('▁', '')
-            if len(clean_token) == 1:
-                filtered_reasons['single_char'] += 1
-                continue
-
         filtered_vocab[token_str] = count
 
     print(f"  After filtering: {len(filtered_vocab)} tokens", file=sys.stderr)
@@ -109,6 +111,13 @@ def extract_base_vocabulary_frequencies(
         print(f"  Filtered out:", file=sys.stderr)
         for reason, count in filtered_reasons.most_common():
             print(f"    {reason}: {count}", file=sys.stderr)
+
+    # Scale frequencies by seed_lambda
+    if seed_lambda != 1.0:
+        filtered_vocab = {
+            token: round(count * seed_lambda)
+            for token, count in filtered_vocab.items()
+        }
 
     # Write seed vocabulary file in SentencePiece format: <token>\t<frequency>
     os.makedirs(os.path.dirname(output_seed_file), exist_ok=True)
@@ -210,8 +219,8 @@ def train_new_tokenizer(
     inherit_additional_special_tokens: bool = True,
     character_coverage: float = 1.0,
     use_seed_vocabulary: bool = False,
-    seed_filter_single_chars: bool = True,
-    seed_min_frequency: int = 1
+    seed_min_frequency: int = 1,
+    seed_lambda: float = 1.0
 ) -> PreTrainedTokenizerFast:
     """
     Train a new tokenizer on JSONL data using SentencePiece library.
@@ -230,9 +239,8 @@ def train_new_tokenizer(
             small character sets, 0.9995 for rich character sets like CJK (default: 1.0)
         use_seed_vocabulary: Whether to generate and use seed vocabulary to bias training
             toward base tokenizer overlap, improving embedding initialization (default: False)
-        seed_filter_single_chars: Filter single-character tokens from seed vocabulary to
-            avoid biasing toward inefficient char-level tokenization (default: True)
         seed_min_frequency: Minimum frequency for including tokens in seed vocabulary (default: 1)
+        seed_lambda: Scale factor for seed frequencies (0-1): 1.0 = full weight, lower values reduce bias
 
     Returns:
         Trained tokenizer
@@ -282,8 +290,8 @@ def train_new_tokenizer(
             base_tokenizer_name=base_tokenizer_name,
             output_seed_file=seed_file,
             filter_special_tokens=True,
-            filter_single_chars=seed_filter_single_chars,
-            min_frequency=seed_min_frequency
+            min_frequency=seed_min_frequency,
+            seed_lambda=seed_lambda
         )
 
     # Train SentencePiece model

@@ -109,8 +109,8 @@ class TestGetFocusSuffix:
                 'num_samples': 50000,
                 'inherit_additional_special_tokens': True,
                 'use_seed_vocabulary': True,
-                'seed_min_frequency': 1,  # default
-                'seed_filter_single_chars': True  # default
+                'seed_min_frequency': 1,
+                'seed_lambda': 1.0
             }
         })
         assert get_focus_suffix(args) == "xglm564m_v16k_s50k_seeded"
@@ -125,13 +125,13 @@ class TestGetFocusSuffix:
                 'inherit_additional_special_tokens': True,
                 'use_seed_vocabulary': True,
                 'seed_min_frequency': 5,
-                'seed_filter_single_chars': True
+                'seed_lambda': 1.0
             }
         })
         assert get_focus_suffix(args) == "xglm564m_v16k_s50k_seeded-min5"
 
-    def test_suffix_with_seed_vocabulary_no_char_filtering(self):
-        """Test suffix when not filtering single-char tokens from seed."""
+    def test_suffix_with_seed_lambda(self):
+        """Test suffix with non-default seed lambda."""
         args = DictConfig({
             'hf_model': 'facebook/xglm-564M',
             'focus': {
@@ -140,10 +140,10 @@ class TestGetFocusSuffix:
                 'inherit_additional_special_tokens': True,
                 'use_seed_vocabulary': True,
                 'seed_min_frequency': 1,
-                'seed_filter_single_chars': False
+                'seed_lambda': 0.5
             }
         })
-        assert get_focus_suffix(args) == "xglm564m_v16k_s50k_seeded-chars"
+        assert get_focus_suffix(args) == "xglm564m_v16k_s50k_seeded-lambda0.5"
 
     def test_suffix_with_all_flags(self):
         """Test suffix with all optional flags enabled."""
@@ -155,10 +155,10 @@ class TestGetFocusSuffix:
                 'inherit_additional_special_tokens': False,
                 'use_seed_vocabulary': True,
                 'seed_min_frequency': 10,
-                'seed_filter_single_chars': False
+                'seed_lambda': 0.7
             }
         })
-        assert get_focus_suffix(args) == "xglm564m_v32k_s1m_no-additional_seeded-min10-chars"
+        assert get_focus_suffix(args) == "xglm564m_v32k_s1m_no-additional_seeded-min10-lambda0.7"
 
     def test_suffix_respects_number_formatting(self):
         """Test that vocab and sample sizes use format_number() correctly."""
