@@ -114,10 +114,19 @@ def extract_base_vocabulary_frequencies(
 
     # Scale frequencies by seed_lambda
     if seed_lambda != 1.0:
-        filtered_vocab = {
+        scaled_vocab = {
             token: round(count * seed_lambda)
             for token, count in filtered_vocab.items()
         }
+        # Filter out tokens that scaled to zero frequency
+        num_zeros = sum(1 for count in scaled_vocab.values() if count == 0)
+        filtered_vocab = {
+            token: count
+            for token, count in scaled_vocab.items()
+            if count > 0
+        }
+        if num_zeros > 0:
+            print(f"  Removed {num_zeros} tokens that scaled to zero frequency", file=sys.stderr)
 
     # Write seed vocabulary file in SentencePiece format: <token>\t<frequency>
     os.makedirs(os.path.dirname(output_seed_file), exist_ok=True)
