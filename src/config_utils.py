@@ -73,6 +73,7 @@ def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
         'use_seed_vocabulary': args.focus.get('use_seed_vocabulary', False),
         'seed_min_frequency': args.focus.get('seed_min_frequency', 1),
         'seed_lambda': args.focus.get('seed_lambda', 1.0),
+        'seed_round_mode': args.focus.get('seed_round_mode', 'round'),
         'seed': args.seed,
     }
 

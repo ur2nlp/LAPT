@@ -171,7 +171,8 @@ def _initialize_focus_model(args: DictConfig):
             character_coverage=args.focus.get('character_coverage', 1.0),
             use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
             seed_min_frequency=args.focus.get('seed_min_frequency', 1),
-            seed_lambda=args.focus.get('seed_lambda', 1.0)
+            seed_lambda=args.focus.get('seed_lambda', 1.0),
+            seed_round_mode=args.focus.get('seed_round_mode', 'round')
         )
 
     # Load model and apply FOCUS
