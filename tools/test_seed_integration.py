@@ -61,7 +61,8 @@ def main():
         output_path=f"{test_dir}/tokenizer_with_seed",
         use_seed_vocabulary=True,
         seed_min_frequency=1,
-        seed_lambda=1.0
+        seed_lambda=1.0,
+        seed_round_mode="round"
     )
     print(f"   Tokenizer vocab size: {len(tokenizer_with_seed)}")
 

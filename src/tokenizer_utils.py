@@ -25,7 +25,8 @@ def extract_base_vocabulary_frequencies(
     output_seed_file: str,
     filter_special_tokens: bool = True,
     min_frequency: int = 1,
-    seed_lambda: float = 1.0
+    seed_lambda: float = 1.0,
+    seed_round_mode: str = "round"
 ) -> str:
     """
     Tokenize corpus with base tokenizer and extract vocabulary frequencies for seeding.
@@ -40,6 +41,7 @@ def extract_base_vocabulary_frequencies(
         filter_special_tokens: Filter out <unk>, <s>, </s>, <pad>, and <madeupword*> tokens
         min_frequency: Minimum frequency threshold to include a token (default: 1)
         seed_lambda: Scale factor for seed frequencies (0-1): 1.0 = full weight, lower values reduce bias
+        seed_round_mode: Rounding method for scaled frequencies: "round", "floor", or "ceil"
 
     Returns:
         Path to the created seed vocabulary file
@@ -114,8 +116,19 @@ def extract_base_vocabulary_frequencies(
 
     # Scale frequencies by seed_lambda
     if seed_lambda != 1.0:
+        import math
+        # Select rounding function based on mode
+        if seed_round_mode == "floor":
+            round_func = math.floor
+        elif seed_round_mode == "ceil":
+            round_func = math.ceil
+        elif seed_round_mode == "round":
+            round_func = round
+        else:
+            raise ValueError(f"Invalid seed_round_mode: {seed_round_mode}. Must be 'round', 'floor', or 'ceil'")
+
         scaled_vocab = {
-            token: round(count * seed_lambda)
+            token: round_func(count * seed_lambda)
             for token, count in filtered_vocab.items()
         }
         # Filter out tokens that scaled to zero frequency
@@ -229,7 +242,8 @@ def train_new_tokenizer(
     character_coverage: float = 1.0,
     use_seed_vocabulary: bool = False,
     seed_min_frequency: int = 1,
-    seed_lambda: float = 1.0
+    seed_lambda: float = 1.0,
+    seed_round_mode: str = "round"
 ) -> PreTrainedTokenizerFast:
     """
     Train a new tokenizer on JSONL data using SentencePiece library.
@@ -250,6 +264,7 @@ def train_new_tokenizer(
             toward base tokenizer overlap, improving embedding initialization (default: False)
         seed_min_frequency: Minimum frequency for including tokens in seed vocabulary (default: 1)
         seed_lambda: Scale factor for seed frequencies (0-1): 1.0 = full weight, lower values reduce bias
+        seed_round_mode: Rounding method for scaled frequencies: "round", "floor", or "ceil"
 
     Returns:
         Trained tokenizer
@@ -300,7 +315,8 @@ def train_new_tokenizer(
             output_seed_file=seed_file,
             filter_special_tokens=True,
             min_frequency=seed_min_frequency,
-            seed_lambda=seed_lambda
+            seed_lambda=seed_lambda,
+            seed_round_mode=seed_round_mode
         )
 
     # Train SentencePiece model
