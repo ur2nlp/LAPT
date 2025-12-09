@@ -55,6 +55,35 @@ def get_model_shortname(hf_model: str) -> str:
     return shortname
 
 
+def get_seed_tokenizer_suffix(
+    hf_model: str,
+    vocab_size: int,
+    num_samples: int,
+    seed_vocab_multiplier: float
+) -> str:
+    """
+    Build path suffix for seed tokenizer used in hybrid seed vocabulary approach.
+
+    The seed tokenizer is the intermediate large tokenizer trained to extract target
+    vocabulary. It can be shared across different lambda values since it doesn't depend
+    on the merging parameters (lambda, round_mode).
+
+    Args:
+        hf_model: Base HuggingFace model name
+        vocab_size: Target vocabulary size (not the intermediate size)
+        num_samples: Number of training samples
+        seed_vocab_multiplier: Multiplier for seed tokenizer size
+
+    Returns:
+        Suffix like "xglm564m_v16k_s200k_seed-5.0x"
+    """
+    model_short = get_model_shortname(hf_model)
+    vocab_str = format_number(vocab_size)
+    samples_str = format_number(num_samples)
+
+    return f"{model_short}_v{vocab_str}_s{samples_str}_seed-{seed_vocab_multiplier}x"
+
+
 def get_focus_suffix(args: DictConfig) -> str:
     """
     Build FOCUS path suffix encoding model, vocab size, num samples, and other tokenizer parameters.
@@ -63,8 +92,8 @@ def get_focus_suffix(args: DictConfig) -> str:
         args: Hydra configuration object
 
     Returns:
-        Suffix string like "xglm564m_v16k_s25k", "xglm564m_v16k_s25k_seeded", or
-        "xglm564m_v16k_s25k_no-additional_seeded-min2-chars"
+        Suffix string like "xglm564m_v16k_s25k", "xglm564m_v16k_s25k_seeded-5.0x-lambda0.5", or
+        "xglm564m_v16k_s25k_no-additional_seeded-5.0x-lambda0.7-min2"
     """
     model_short = get_model_shortname(args.hf_model)
     vocab_str = format_number(args.focus.vocab_size)
@@ -77,13 +106,16 @@ def get_focus_suffix(args: DictConfig) -> str:
     # Include seed vocabulary status in path to avoid cache collision
     if args.focus.get('use_seed_vocabulary', False):
         suffix += "_seeded"
-        # Add non-default parameters to suffix
+        # Add multiplier (modifies seeded approach)
+        vocab_multiplier = args.focus.get('seed_vocab_multiplier', 5.0)
+        suffix += f"-{vocab_multiplier}x"
+        # Add lambda (the varying parameter in sweeps)
+        seed_lambda = args.focus.get('seed_lambda', 0.5)
+        suffix += f"-lambda{seed_lambda}"
+        # Add other non-default parameters
         min_freq = args.focus.get('seed_min_frequency', 1)
         if min_freq > 1:
             suffix += f"-min{min_freq}"
-        seed_lambda = args.focus.get('seed_lambda', 1.0)
-        if seed_lambda != 1.0:
-            suffix += f"-lambda{seed_lambda}"
 
     return suffix
 
@@ -167,12 +199,15 @@ def _initialize_focus_model(args: DictConfig):
             base_tokenizer_name=args.hf_model,
             vocab_size=args.focus.vocab_size,
             output_path=tokenizer_output_dir,
+            num_samples=args.focus.num_samples,
             inherit_additional_special_tokens=args.focus.get('inherit_additional_special_tokens', True),
             character_coverage=args.focus.get('character_coverage', 1.0),
             use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
             seed_min_frequency=args.focus.get('seed_min_frequency', 1),
-            seed_lambda=args.focus.get('seed_lambda', 1.0),
-            seed_round_mode=args.focus.get('seed_round_mode', 'round')
+            seed_lambda=args.focus.get('seed_lambda', 0.5),
+            seed_round_mode=args.focus.get('seed_round_mode', 'ceil'),
+            seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
+            seed_target_mass=args.focus.get('seed_target_mass', 10_000_000)
         )
 
     # Load model and apply FOCUS

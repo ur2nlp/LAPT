@@ -308,3 +308,76 @@ class TestTokenizerTraining:
 
         # Both tokenizers should have same vocab size
         assert len(tokenizer1) == len(tokenizer2) == vocab_size
+
+    def test_seed_tokenizer_caching(self, sample_jsonl_path, tmp_path):
+        """
+        Test that seed tokenizer is cached separately and reused across lambda values.
+
+        Strategy:
+        1. Train tokenizer with seeded vocab and lambda=0.5
+        2. Train another with lambda=0.7 (same vocab_size, num_samples, multiplier)
+        3. Verify seed tokenizer is in separate directory
+        4. Verify seed tokenizer was NOT retrained for second lambda
+        """
+        # Use small vocab sizes that work with our 10-sentence test corpus
+        # Note: Test corpus has 38 unique characters + 11 special tokens = 49 minimum
+        vocab_size = 50
+        num_samples = 10
+        multiplier = 2.0  # Results in 100 tokens for seed tokenizer
+
+        # Create directory structure like production:
+        # tmp_path/tokenizers/test_lang/
+        tokenizers_dir = tmp_path / "tokenizers" / "test_lang"
+        tokenizers_dir.mkdir(parents=True)
+
+        # First tokenizer with lambda=0.5
+        output_dir_1 = tokenizers_dir / "xglm564m_v50_s10_seeded-2.0x-lambda0.5"
+        tokenizer1 = train_new_tokenizer(
+            jsonl_path=str(sample_jsonl_path),
+            base_tokenizer_name="facebook/xglm-564M",
+            vocab_size=vocab_size,
+            output_path=str(output_dir_1),
+            num_samples=num_samples,
+            use_seed_vocabulary=True,
+            seed_lambda=0.5,
+            seed_vocab_multiplier=multiplier,
+            seed_target_mass=1000,  # Small for testing
+            character_coverage=0.9995  # Reduce coverage to allow smaller vocab
+        )
+
+        # Verify seed tokenizer directory exists at sibling level
+        seed_dir = tokenizers_dir / "xglm564m_v50_s10_seed-2.0x"
+        assert seed_dir.exists(), f"Seed tokenizer should exist at {seed_dir}"
+        assert (seed_dir / "spm.model").exists()
+
+        # Get timestamp of seed tokenizer
+        seed_model_file = seed_dir / "spm.model"
+        seed_mtime_before = seed_model_file.stat().st_mtime
+
+        # Second tokenizer with different lambda (should reuse seed tokenizer)
+        output_dir_2 = tokenizers_dir / "xglm564m_v50_s10_seeded-2.0x-lambda0.7"
+        tokenizer2 = train_new_tokenizer(
+            jsonl_path=str(sample_jsonl_path),
+            base_tokenizer_name="facebook/xglm-564M",
+            vocab_size=vocab_size,
+            output_path=str(output_dir_2),
+            num_samples=num_samples,
+            use_seed_vocabulary=True,
+            seed_lambda=0.7,  # Different lambda
+            seed_vocab_multiplier=multiplier,
+            seed_target_mass=1000,
+            character_coverage=0.9995
+        )
+
+        # Verify seed tokenizer was NOT retrained (timestamp unchanged)
+        seed_mtime_after = seed_model_file.stat().st_mtime
+        assert seed_mtime_after == seed_mtime_before, \
+            "Seed tokenizer should be reused, not retrained"
+
+        # Verify both final tokenizers were created in separate directories
+        assert (output_dir_1 / "tokenizer.json").exists()
+        assert (output_dir_2 / "tokenizer.json").exists()
+
+        # Verify both have correct vocab size
+        assert len(tokenizer1) == vocab_size
+        assert len(tokenizer2) == vocab_size
