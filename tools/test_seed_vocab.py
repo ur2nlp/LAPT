@@ -82,7 +82,7 @@ def test_hybrid_seed_vocabulary(
         use_temp = True
         print(f"Using temporary directory: {base_dir}")
 
-    tokenizers_dir = base_dir / "tokenizers" / "test"
+    tokenizers_dir = base_dir
     tokenizers_dir.mkdir(parents=True, exist_ok=True)
     print(f"Tokenizers will be saved to: {tokenizers_dir}")
     print()
@@ -96,7 +96,7 @@ def test_hybrid_seed_vocabulary(
         # Step 1: Train tokenizer WITHOUT seed vocabulary (baseline)
         print("Step 1: Training baseline tokenizer (unseeded)")
         print("-" * 80)
-        baseline_output = tokenizers_dir / f"xglm564m_v{vocab_str}_s{samples_str}_unseeded"
+        baseline_output = tokenizers_dir / f"xglm564m_focus-v{vocab_str}-s{samples_str}_unseeded"
         try:
             baseline_tokenizer = train_new_tokenizer(
                 jsonl_path=jsonl_path,
@@ -120,7 +120,7 @@ def test_hybrid_seed_vocabulary(
         # Step 2: Train tokenizer WITH hybrid seed vocabulary
         print(f"Step 2: Training hybrid seeded tokenizer (lambda={seed_lambda})")
         print("-" * 80)
-        seeded_output = tokenizers_dir / f"xglm564m_v{vocab_str}_s{samples_str}_seeded-{seed_vocab_multiplier}x-lambda{seed_lambda}"
+        seeded_output = tokenizers_dir / f"xglm564m_focus-v{vocab_str}-s{samples_str}_seeded-{seed_vocab_multiplier}x-lambda{seed_lambda}"
         try:
             seeded_tokenizer = train_new_tokenizer(
                 jsonl_path=str(jsonl_path),
@@ -140,7 +140,7 @@ def test_hybrid_seed_vocabulary(
             print(f"Saved to: {seeded_output}")
 
             # Check that seed tokenizer exists at sibling level
-            seed_tokenizer_dir = tokenizers_dir / f"xglm564m_v{vocab_str}_s{samples_str}_seed-{seed_vocab_multiplier}x"
+            seed_tokenizer_dir = tokenizers_dir / f"xglm564m_focus-v{vocab_str}-s{samples_str}_seed-{seed_vocab_multiplier}x"
             if seed_tokenizer_dir.exists():
                 print(f"Seed tokenizer saved to: {seed_tokenizer_dir}")
                 print(f"  (Can be reused for other lambda values)")

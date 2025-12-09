@@ -56,49 +56,45 @@ def get_model_shortname(hf_model: str) -> str:
 
 
 def get_seed_tokenizer_suffix(
-    hf_model: str,
     vocab_size: int,
     num_samples: int,
     seed_vocab_multiplier: float
 ) -> str:
     """
-    Build path suffix for seed tokenizer used in hybrid seed vocabulary approach.
+    Build tokenizer suffix for seed tokenizer used in hybrid seed vocabulary approach.
 
     The seed tokenizer is the intermediate large tokenizer trained to extract target
     vocabulary. It can be shared across different lambda values since it doesn't depend
     on the merging parameters (lambda, round_mode).
 
     Args:
-        hf_model: Base HuggingFace model name
         vocab_size: Target vocabulary size (not the intermediate size)
         num_samples: Number of training samples
         seed_vocab_multiplier: Multiplier for seed tokenizer size
 
     Returns:
-        Suffix like "xglm564m_v16k_s200k_seed-5.0x"
+        Suffix like "focus-v16k-s200k_seed-5.0x"
     """
-    model_short = get_model_shortname(hf_model)
     vocab_str = format_number(vocab_size)
     samples_str = format_number(num_samples)
 
-    return f"{model_short}_v{vocab_str}_s{samples_str}_seed-{seed_vocab_multiplier}x"
+    return f"focus-v{vocab_str}-s{samples_str}_seed-{seed_vocab_multiplier}x"
 
 
-def get_focus_suffix(args: DictConfig) -> str:
+def get_tokenizer_suffix(args: DictConfig) -> str:
     """
-    Build FOCUS path suffix encoding model, vocab size, num samples, and other tokenizer parameters.
+    Build tokenizer suffix encoding vocab size, num samples, and other tokenizer parameters.
 
     Args:
         args: Hydra configuration object
 
     Returns:
-        Suffix string like "xglm564m_v16k_s25k", "xglm564m_v16k_s25k_seeded-5.0x-lambda0.5", or
-        "xglm564m_v16k_s25k_no-additional_seeded-5.0x-lambda0.7-min2"
+        Suffix string like "focus-v16k-s200k", "focus-v16k-s200k_seeded-5.0x-lambda0.5", or
+        "focus-v16k-s200k_no-additional_seeded-5.0x-lambda0.7-min2"
     """
-    model_short = get_model_shortname(args.hf_model)
     vocab_str = format_number(args.focus.vocab_size)
     samples_str = format_number(args.focus.num_samples)
-    suffix = f"{model_short}_v{vocab_str}_s{samples_str}"
+    suffix = f"focus-v{vocab_str}-s{samples_str}"
 
     if not args.focus.get('inherit_additional_special_tokens', True):
         suffix += "_no-additional"
@@ -166,7 +162,9 @@ def _initialize_focus_model(args: DictConfig):
     print("=" * 60, file=sys.stderr)
 
     # Build directory paths with formatted vocab size and sample count
-    focus_suffix = get_focus_suffix(args)
+    model_short = get_model_shortname(args.hf_model)
+    tokenizer_suffix = get_tokenizer_suffix(args)
+    focus_suffix = f"{model_short}_{tokenizer_suffix}"
 
     # Prepare JSONL training data for FOCUS
     # Store FOCUS training data alongside the dataset it's sampled from
@@ -175,7 +173,7 @@ def _initialize_focus_model(args: DictConfig):
         focus_data_cache = args.focus.dataset.cache_dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{focus_data_cache}/focus_{focus_suffix}/training_subset.jsonl",
+            output_jsonl_path=f"{focus_data_cache}/{focus_suffix}/training_subset.jsonl",
             seed=args.seed,
             dataset_config=args.focus.dataset
         )
@@ -183,7 +181,7 @@ def _initialize_focus_model(args: DictConfig):
         # Using training dataset - store in training dataset's cache dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{args.dataset.cache_dir}/focus_{focus_suffix}/training_subset.jsonl",
+            output_jsonl_path=f"{args.dataset.cache_dir}/{focus_suffix}/training_subset.jsonl",
             seed=args.seed,
             train_dataset_cache=args.dataset.cache_dir
         )

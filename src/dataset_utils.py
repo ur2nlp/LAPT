@@ -27,11 +27,12 @@ def docs_to_lines(examples):
         examples: Batch of examples with 'text' field containing documents
 
     Returns:
-        Dictionary with 'text' field containing individual lines
+        Dictionary with 'text' field containing individual lines (blank lines filtered out)
     """
     return {
         'text': list(chain(
-            *[doc.split('\n') for doc in examples['text']]
+            *[[line.strip() for line in doc.split('\n') if line.strip()]
+              for doc in examples['text']]
         ))
     }
 
