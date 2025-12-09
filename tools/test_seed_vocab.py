@@ -82,7 +82,7 @@ def test_hybrid_seed_vocabulary(
         use_temp = True
         print(f"Using temporary directory: {base_dir}")
 
-    tokenizers_dir = base_dir / "tokenizers" / "test"
+    tokenizers_dir = base_dir
     tokenizers_dir.mkdir(parents=True, exist_ok=True)
     print(f"Tokenizers will be saved to: {tokenizers_dir}")
     print()
