@@ -331,7 +331,7 @@ class TestTokenizerTraining:
         tokenizers_dir.mkdir(parents=True)
 
         # First tokenizer with lambda=0.5
-        output_dir_1 = tokenizers_dir / "xglm564m_v50_s10_seeded-2.0x-lambda0.5"
+        output_dir_1 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.5"
         tokenizer1 = train_new_tokenizer(
             jsonl_path=str(sample_jsonl_path),
             base_tokenizer_name="facebook/xglm-564M",
@@ -346,7 +346,7 @@ class TestTokenizerTraining:
         )
 
         # Verify seed tokenizer directory exists at sibling level
-        seed_dir = tokenizers_dir / "xglm564m_v50_s10_seed-2.0x"
+        seed_dir = tokenizers_dir / "xglm564m_focus-v50-s10_seed-2.0x"
         assert seed_dir.exists(), f"Seed tokenizer should exist at {seed_dir}"
         assert (seed_dir / "spm.model").exists()
 
@@ -355,7 +355,7 @@ class TestTokenizerTraining:
         seed_mtime_before = seed_model_file.stat().st_mtime
 
         # Second tokenizer with different lambda (should reuse seed tokenizer)
-        output_dir_2 = tokenizers_dir / "xglm564m_v50_s10_seeded-2.0x-lambda0.7"
+        output_dir_2 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.7"
         tokenizer2 = train_new_tokenizer(
             jsonl_path=str(sample_jsonl_path),
             base_tokenizer_name="facebook/xglm-564M",

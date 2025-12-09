@@ -410,18 +410,18 @@ def train_new_tokenizer(
 
         if num_samples is not None:
             # Import here to avoid circular dependency (model_utils imports from tokenizer_utils)
-            from model_utils import get_seed_tokenizer_suffix
+            from model_utils import get_seed_tokenizer_suffix, get_model_shortname
 
             # Construct seed tokenizer path - saved alongside final tokenizer, not nested inside it
-            # Example: tokenizers/old_germanic/xglm564m_v16k_s200k_seed-5.0x/
+            # Example: tokenizers/old_germanic/xglm564m_focus-v16k-s200k_seed-5.0x/
             parent_dir = os.path.dirname(output_path)
-            seed_suffix = get_seed_tokenizer_suffix(
-                hf_model=base_tokenizer_name,
+            model_short = get_model_shortname(base_tokenizer_name)
+            tokenizer_suffix = get_seed_tokenizer_suffix(
                 vocab_size=vocab_size,
                 num_samples=num_samples,
                 seed_vocab_multiplier=seed_vocab_multiplier
             )
-            seed_output_path = os.path.join(parent_dir, seed_suffix)
+            seed_output_path = os.path.join(parent_dir, f"{model_short}_{tokenizer_suffix}")
         else:
             # Fallback: nest inside output_path (old behavior for backward compatibility)
             seed_output_path = f"{output_path}_seed"

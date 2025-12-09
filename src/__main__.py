@@ -11,7 +11,7 @@ from transformers import (
 )
 
 from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
-from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_focus_suffix
+from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 
 
@@ -144,8 +144,9 @@ def _get_tokenizer_path(args: DictConfig) -> str:
     if not args.focus.enabled:
         return None
 
-    focus_suffix = get_focus_suffix(args)
-    return f"tokenizers/{args.dataset.language}/{focus_suffix}"
+    model_short = get_model_shortname(args.hf_model)
+    tokenizer_suffix = get_tokenizer_suffix(args)
+    return f"tokenizers/{args.dataset.language}/{model_short}_{tokenizer_suffix}"
 
 
 def _get_tokenized_path(args: DictConfig) -> str:
@@ -159,8 +160,9 @@ def _get_tokenized_path(args: DictConfig) -> str:
         Path to tokenized dataset directory
     """
     if args.focus.enabled:
-        focus_suffix = get_focus_suffix(args)
-        return f"{args.dataset.cache_dir}/tokenized_focus_{focus_suffix}"
+        model_short = get_model_shortname(args.hf_model)
+        tokenizer_suffix = get_tokenizer_suffix(args)
+        return f"{args.dataset.cache_dir}/tokenized_{model_short}_{tokenizer_suffix}"
     else:
         return f"{args.dataset.cache_dir}/tokenized"
 
@@ -182,8 +184,9 @@ def _get_output_dir(args: DictConfig) -> str:
 
     # Build base path
     if args.focus.enabled:
-        focus_suffix = get_focus_suffix(args)
-        base_path = f"{args.output_dir}/{args.dataset.language}/focus_{focus_suffix}_{training_config}"
+        model_short = get_model_shortname(args.hf_model)
+        tokenizer_suffix = get_tokenizer_suffix(args)
+        base_path = f"{args.output_dir}/{args.dataset.language}/{model_short}_{tokenizer_suffix}_{training_config}"
     else:
         base_path = f"{args.output_dir}/{args.dataset.language}/{training_config}"
 
@@ -253,14 +256,16 @@ def _handle_cache_cleanup(args: DictConfig):
 
         # Also clear FOCUS training data if applicable
         if args.focus.enabled:
-            focus_suffix = get_focus_suffix(args)
+            model_short = get_model_shortname(args.hf_model)
+            tokenizer_suffix = get_tokenizer_suffix(args)
+            focus_suffix = f"{model_short}_{tokenizer_suffix}"
             # FOCUS data is stored in the cache_dir of the dataset it was sampled from
             if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
                 # Using separate FOCUS dataset
-                focus_data_dir = f"{args.focus.dataset.cache_dir}/focus_{focus_suffix}"
+                focus_data_dir = f"{args.focus.dataset.cache_dir}/{focus_suffix}"
             else:
                 # Using training dataset
-                focus_data_dir = f"{args.dataset.cache_dir}/focus_{focus_suffix}"
+                focus_data_dir = f"{args.dataset.cache_dir}/{focus_suffix}"
 
             if os.path.exists(focus_data_dir):
                 print(f"  Removing {focus_data_dir}", file=sys.stderr)
