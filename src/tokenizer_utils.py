@@ -202,10 +202,20 @@ def prepare_focus_training_data(
     os.makedirs(os.path.dirname(output_jsonl_path), exist_ok=True)
 
     with open(output_jsonl_path, 'w', encoding='utf-8') as f:
+        written_count = 0
         for idx in indices:
             text = train_data[idx]['text']
-            json.dump({'text': text}, f, ensure_ascii=False)
-            f.write('\n')
+            # Skip blank lines
+            if text.strip():
+                json.dump({'text': text}, f, ensure_ascii=False)
+                f.write('\n')
+                written_count += 1
+
+        if written_count < num_samples:
+            print(
+                f"Warning: Filtered out {num_samples - written_count} blank lines from FOCUS training data",
+                file=sys.stderr
+            )
 
     print(f"JSONL data saved to {output_jsonl_path}", file=sys.stderr)
     return output_jsonl_path
