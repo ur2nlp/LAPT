@@ -1,7 +1,21 @@
 defaults:
   - basic
 
-use_seed_vocabulary: true  # Enable seed vocabulary for better base tokenizer overlap
-seed_min_frequency: 1  # Minimum frequency for including tokens in seed vocabulary
-seed_lambda: 1.0  # Scale factor for seed vocabulary frequencies (0-1): 1.0 = full weight, 0.5 = half weight. Lower values allow more language-specific tokens but reduce embedding reuse
-seed_round_mode: round  # Rounding method for scaled frequencies: "round" (nearest int), "floor" (round down), "ceil" (round up)
+# Hybrid seed vocabulary: merges base tokenizer vocab with target-extracted vocab
+# Allows smooth interpolation between embedding reuse and language-specific tokens
+use_seed_vocabulary: true
+
+# Interpolation weight between base and target vocabularies (0-1)
+# 0.0 = pure target (unseeded), 1.0 = pure base (maximum embedding reuse), 0.5 = balanced mix
+seed_lambda: 0.5
+
+# Size multiplier for seed tokenizer training (target vocab extraction)
+# Higher values preserve more candidates but increase training time
+seed_vocab_multiplier: 5.0
+
+# Normalization target for vocabulary merging (controls long-tail preservation)
+seed_target_mass: 10000000  # 10 million tokens
+
+# Additional parameters
+seed_min_frequency: 1  # Minimum frequency for base tokenizer tokens
+seed_round_mode: ceil  # Rounding when merging: "ceil" preserves rare tokens, "floor" filters aggressively, "round" splits difference
