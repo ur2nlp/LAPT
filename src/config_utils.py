@@ -20,6 +20,9 @@ def extract_dataset_config(args: DictConfig) -> dict:
     """
     Extract the configuration subset that affects untokenized dataset caching.
 
+    This should mirror all parameters used by load_untokenized_dataset() in dataset_utils.py
+    that affect the dataset artifact (not just input/output paths).
+
     Args:
         args: Full Hydra configuration
 
@@ -54,6 +57,9 @@ def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
     """
     Extract the configuration subset that affects tokenizer training (FOCUS only).
 
+    This should mirror all parameters used by train_new_tokenizer() in tokenizer_utils.py
+    that affect the tokenizer artifact (not just input/output paths).
+
     Args:
         args: Full Hydra configuration
 
@@ -72,8 +78,10 @@ def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
         'character_coverage': args.focus.get('character_coverage', 1.0),
         'use_seed_vocabulary': args.focus.get('use_seed_vocabulary', False),
         'seed_min_frequency': args.focus.get('seed_min_frequency', 1),
-        'seed_lambda': args.focus.get('seed_lambda', 1.0),
-        'seed_round_mode': args.focus.get('seed_round_mode', 'round'),
+        'seed_lambda': args.focus.get('seed_lambda', 0.5),
+        'seed_round_mode': args.focus.get('seed_round_mode', 'ceil'),
+        'seed_vocab_multiplier': args.focus.get('seed_vocab_multiplier', 5.0),
+        'seed_target_mass': args.focus.get('seed_target_mass', 10_000_000),
         'seed': args.seed,
     }
 
@@ -92,6 +100,9 @@ def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
 def extract_tokenized_config(args: DictConfig) -> dict:
     """
     Extract the configuration subset that affects tokenized dataset caching.
+
+    This should mirror all parameters used by load_or_tokenize_dataset() in dataset_utils.py
+    that affect the tokenized dataset artifact, plus all upstream dependencies.
 
     Args:
         args: Full Hydra configuration
@@ -204,19 +215,22 @@ def check_config_match(
     cached_config: Optional[dict],
     current_config: dict,
     artifact_name: str,
-    warn: bool = True
+    error_on_mismatch: bool = True
 ) -> bool:
     """
-    Check if cached config matches current config, optionally warning if different.
+    Check if cached config matches current config, raising error if different.
 
     Args:
         cached_config: Configuration saved with cached artifact (None if not found)
         current_config: Current configuration
-        artifact_name: Name of artifact for warning messages
-        warn: Whether to print warning if configs differ
+        artifact_name: Name of artifact for error messages
+        error_on_mismatch: Whether to raise error on mismatch (vs returning False)
 
     Returns:
-        True if configs match, False otherwise
+        True if configs match, False otherwise (if error_on_mismatch=False)
+
+    Raises:
+        ValueError: If configs don't match and error_on_mismatch=True
     """
     if cached_config is None:
         # No cached config found - this is expected for old caches
@@ -225,18 +239,27 @@ def check_config_match(
     diffs = _dict_diff(cached_config, current_config)
 
     if diffs:
-        if warn:
-            warnings.warn(
-                f"\n{'=' * 60}\n"
-                f"CONFIG MISMATCH WARNING: {artifact_name}\n"
-                f"{'=' * 60}\n"
-                f"Cached artifact has different config than current settings:\n"
-                + "\n".join(f"  - {diff}" for diff in diffs)
-                + f"\n\nUsing cached version. To regenerate with current config, use appropriate --fresh-* flag.\n"
-                f"{'=' * 60}",
-                stacklevel=2
-            )
-        return False
+        error_msg = (
+            f"\n{'=' * 70}\n"
+            f"CONFIG MISMATCH: {artifact_name}\n"
+            f"{'=' * 70}\n"
+            f"Cached artifact was created with different parameters:\n\n"
+            + "\n".join(f"  {diff}" for diff in diffs)
+            + f"\n\n"
+            f"The cached config file represents what actually created this artifact.\n"
+            f"To proceed, either:\n\n"
+            f"  1. Regenerate with current config:\n"
+            f"     Add fresh_dataset=true (dataset), fresh_tokenizer=true (tokenizer),\n"
+            f"     or fresh_model=true (model) to your command\n\n"
+            f"  2. Update your config to match the cached version\n"
+            f"{'=' * 70}\n"
+        )
+
+        if error_on_mismatch:
+            raise ValueError(error_msg)
+        else:
+            print(error_msg, file=sys.stderr)
+            return False
 
     return True
 

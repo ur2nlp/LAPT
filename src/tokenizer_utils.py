@@ -152,6 +152,10 @@ def prepare_focus_training_data(
 
     Returns:
         Path to the created JSONL file
+
+    NOTE: Parameters affecting FOCUS training data (num_samples, seed, dataset source) are
+    tracked via extract_tokenizer_config() in config_utils.py since this data is only used
+    for tokenizer training.
     """
     if os.path.exists(output_jsonl_path):
         print(f"JSONL data already exists at {output_jsonl_path}, skipping generation", file=sys.stderr)
@@ -372,6 +376,9 @@ def train_new_tokenizer(
 
     Returns:
         Trained tokenizer
+
+    NOTE: When adding parameters that affect the tokenizer artifact (not just input/output
+    paths), update extract_tokenizer_config() in config_utils.py to include them.
     """
     # Check if tokenizer already trained and cached
     if os.path.exists(output_path) and os.path.exists(os.path.join(output_path, "tokenizer.json")):

@@ -13,6 +13,12 @@ from transformers import (
 from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
 from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
+from config_utils import (
+    check_dataset_config, save_dataset_config,
+    check_tokenizer_config, save_tokenizer_config,
+    check_tokenized_config, save_tokenized_config,
+    save_model_config
+)
 
 
 OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))
@@ -288,6 +294,20 @@ def lapt(args: DictConfig):
     # Handle cache cleanup if requested
     _handle_cache_cleanup(args)
 
+    # Check if dataset cache and config exist
+    dataset_cache_exists = os.path.exists(f"{args.dataset.cache_dir}/untokenized")
+    dataset_config_exists = os.path.exists(f"{args.dataset.cache_dir}/untokenized/config.yaml")
+
+    # Verify config matches if both cache and config exist
+    if dataset_cache_exists and dataset_config_exists:
+        check_dataset_config(args, args.dataset.cache_dir)
+    elif dataset_cache_exists and not dataset_config_exists:
+        print(
+            f"Note: Using cached dataset at {args.dataset.cache_dir}/untokenized without config tracking\n"
+            f"      (artifact was created before config tracking was implemented)",
+            file=sys.stderr
+        )
+
     # Load or download untokenized dataset first (needed for FOCUS or standard training)
     untokenized_path = load_untokenized_dataset(
         dataset_config=args.dataset,
@@ -295,11 +315,29 @@ def lapt(args: DictConfig):
         dev_size=args.training.dev_size
     )
 
+    # Save config if we just created the dataset
+    if not dataset_cache_exists:
+        save_dataset_config(args, args.dataset.cache_dir)
+
     # Initialize model and tokenizer (with optional FOCUS)
     model, tokenizer, tokenized_path = initialize_model_and_tokenizer(args)
 
     # Determine output directory for checkpoints
     output_dir = _get_output_dir(args)
+
+    # Check if tokenized dataset cache and config exist
+    tokenized_cache_exists = os.path.exists(tokenized_path)
+    tokenized_config_exists = os.path.exists(os.path.join(tokenized_path, "config.yaml"))
+
+    # Verify config matches if both cache and config exist
+    if tokenized_cache_exists and tokenized_config_exists:
+        check_tokenized_config(args, tokenized_path)
+    elif tokenized_cache_exists and not tokenized_config_exists:
+        print(
+            f"Note: Using cached tokenized dataset at {tokenized_path} without config tracking\n"
+            f"      (artifact was created before config tracking was implemented)",
+            file=sys.stderr
+        )
 
     # Tokenize dataset with appropriate tokenizer
     dataset = load_or_tokenize_dataset(
@@ -309,6 +347,10 @@ def lapt(args: DictConfig):
         max_length=args.training.max_length,
         dev_size=args.training.dev_size
     )
+
+    # Save config if we just created the tokenized dataset
+    if not tokenized_cache_exists:
+        save_tokenized_config(args, tokenized_path)
 
     # Prepare eval datasets - either single 'test' split or dict of per-language dev splits
     # Dev splits are any non-train splits except 'test'
@@ -394,10 +436,8 @@ def lapt(args: DictConfig):
             unfreeze_callback = UnfreezeCallback(trainer, args.training.unfreeze_step_ratio)
             trainer.add_callback(unfreeze_callback)
 
-    # save the full training configuration for reproducibility (in output dir with checkpoints)
-    config_path = os.path.join(output_dir, 'training_config.yaml')
-    with open(config_path, 'w') as f:
-        OmegaConf.save(args, f)
+    # Save the full training configuration for reproducibility
+    save_model_config(args, output_dir)
 
     # start training (resume from checkpoint if specified)
     resume_checkpoint = args.get('resume_from_checkpoint', None)
