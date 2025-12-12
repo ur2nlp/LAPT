@@ -50,6 +50,10 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
 
     Returns:
         Path to the untokenized dataset
+
+    NOTE: Parameters affecting the dataset artifact vary by type (language for OSCAR, path for
+    plaintext, alpha/total_samples for multinomial, etc.). When adding new dataset types or
+    parameters, update extract_dataset_config() in config_utils.py to track them.
     """
     # Default to oscar for backward compatibility if type not specified
     dataset_type = getattr(dataset_config, 'type', 'oscar')
@@ -492,6 +496,10 @@ def load_or_tokenize_dataset(
         - Simple datasets: {'train': ..., 'test': ...}
         - Multinomial datasets: {'train': ..., '{language}': ..., '{language}': ..., ...}
           (e.g., {'train': ..., 'got': ..., 'ang': ..., 'non': ...})
+
+    NOTE: Parameters affecting the tokenized dataset artifact (max_length, dev_size, plus all
+    upstream dataset and tokenizer parameters) should be tracked in extract_tokenized_config()
+    in config_utils.py.
     """
     if not os.path.exists(tokenized_path):
         print(f"Tokenizing dataset with vocab size {len(tokenizer)}", file=sys.stderr)

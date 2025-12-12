@@ -19,6 +19,7 @@ from tokenizer_utils import (
     prepare_focus_training_data,
     train_new_tokenizer
 )
+from config_utils import check_tokenizer_config, save_tokenizer_config
 
 
 def format_number(n: int) -> str:
@@ -89,8 +90,8 @@ def get_tokenizer_suffix(args: DictConfig) -> str:
         args: Hydra configuration object
 
     Returns:
-        Suffix string like "focus-v16k-s200k", "focus-v16k-s200k_seeded-5.0x-lambda0.5", or
-        "focus-v16k-s200k_no-additional_seeded-5.0x-lambda0.7-min2"
+        Suffix string like "focus-v16k-s200k", "focus-v16k-s200k_seeded-5.0x-lambda0.5",
+        "focus-v16k-s200k_customdata", or "focus-v16k-s200k_no-additional_seeded-5.0x-lambda0.7-min2"
     """
     vocab_str = format_number(args.focus.vocab_size)
     samples_str = format_number(args.focus.num_samples)
@@ -98,6 +99,10 @@ def get_tokenizer_suffix(args: DictConfig) -> str:
 
     if not args.focus.get('inherit_additional_special_tokens', True):
         suffix += "_no-additional"
+
+    # Indicate if using separate FOCUS dataset (not training dataset)
+    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
+        suffix += "_customdata"
 
     # Include seed vocabulary status in path to avoid cache collision
     if args.focus.get('use_seed_vocabulary', False):
@@ -192,6 +197,21 @@ def _initialize_focus_model(args: DictConfig):
         tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
     else:
         tokenizer_output_dir = f"tokenizers/{args.dataset.language}/{focus_suffix}"
+
+        # Check if tokenizer cache and config exist
+        tokenizer_cache_exists = os.path.exists(os.path.join(tokenizer_output_dir, "tokenizer.json"))
+        tokenizer_config_exists = os.path.exists(os.path.join(tokenizer_output_dir, "training_config.yaml"))
+
+        # Verify config matches if both cache and config exist
+        if tokenizer_cache_exists and tokenizer_config_exists:
+            check_tokenizer_config(args, tokenizer_output_dir)
+        elif tokenizer_cache_exists and not tokenizer_config_exists:
+            print(
+                f"Note: Using cached tokenizer at {tokenizer_output_dir} without config tracking\n"
+                f"      (artifact was created before config tracking was implemented)",
+                file=sys.stderr
+            )
+
         tokenizer = train_new_tokenizer(
             jsonl_path=jsonl_path,
             base_tokenizer_name=args.hf_model,
@@ -207,6 +227,10 @@ def _initialize_focus_model(args: DictConfig):
             seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
             seed_target_mass=args.focus.get('seed_target_mass', 10_000_000)
         )
+
+        # Save config if we just created the tokenizer
+        if not tokenizer_cache_exists:
+            save_tokenizer_config(args, tokenizer_output_dir)
 
     # Load model and apply FOCUS
     print(f"Loading model: {args.hf_model}", file=sys.stderr)
