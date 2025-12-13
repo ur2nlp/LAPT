@@ -392,9 +392,16 @@ def lapt(args: DictConfig):
         overwrite_output_dir=True,
         lr_scheduler_type=args.training.lr_scheduler_type,
         warmup_ratio=float(args.training.warmup_ratio),
-        warmup_steps=args.training.warmup_steps,
         max_grad_norm=args.training.max_grad_norm,
-        gradient_checkpointing=args.training.gradient_checkpointing
+        gradient_checkpointing=args.training.gradient_checkpointing,
+        bf16=args.training.get('bf16', False),
+        fp16=args.training.get('fp16', False),
+        optim=args.training.get('optim', 'adamw_torch'),
+        dataloader_num_workers=args.training.get('dataloader_num_workers', 0),
+        dataloader_pin_memory=args.training.get('dataloader_pin_memory', True),
+        torch_compile=args.training.get('torch_compile', False),
+        torch_compile_backend=args.training.get('torch_compile_backend', None),
+        torch_compile_mode=args.training.get('torch_compile_mode', None)
     )
 
     data_collator = DataCollatorForLanguageModeling(
