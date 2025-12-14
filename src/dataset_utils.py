@@ -536,3 +536,83 @@ def load_or_tokenize_dataset(
         dataset = load_from_disk(tokenized_path)
 
     return dataset
+
+
+def load_and_tokenize_external_eval_set(
+    eval_config: dict,
+    tokenizer: PreTrainedTokenizer,
+    max_length: int
+) -> Dataset:
+    """
+    Load and tokenize an external evaluation dataset.
+
+    Args:
+        eval_config: Dictionary with 'name', 'path', and optional 'format' keys
+                    - name: Name for the eval set (used in metrics)
+                    - path: Path to the data file
+                    - format: 'plaintext' (default) or 'jsonl'
+                    - text_column: Column name for jsonl format (default: 'text')
+        tokenizer: Tokenizer to use for tokenization
+        max_length: Maximum sequence length for tokenization
+
+    Returns:
+        Tokenized Dataset ready for evaluation
+    """
+    name = eval_config['name']
+    path = eval_config['path']
+    file_format = eval_config.get('format', 'plaintext')
+    text_column = eval_config.get('text_column', 'text')
+
+    print(f"Loading external eval set '{name}' from {path}", file=sys.stderr)
+
+    if not os.path.exists(path):
+        raise ValueError(f"External eval set file not found: {path}")
+
+    # Load data based on format
+    if file_format == 'plaintext':
+        # Read lines from plaintext file
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f if line.strip()]
+        dataset = Dataset.from_dict({'text': lines})
+
+    elif file_format == 'jsonl':
+        # Load JSONL file
+        import json
+        data = []
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    obj = json.loads(line)
+                    if text_column in obj:
+                        data.append(obj[text_column])
+                    else:
+                        raise ValueError(
+                            f"JSONL file missing '{text_column}' column: {path}"
+                        )
+        dataset = Dataset.from_dict({'text': data})
+
+    else:
+        raise ValueError(
+            f"Unsupported format '{file_format}' for external eval set. "
+            f"Supported formats: 'plaintext', 'jsonl'"
+        )
+
+    print(f"  Loaded {len(dataset)} examples", file=sys.stderr)
+
+    # Tokenize the dataset
+    def tokenize_function(examples):
+        return tokenizer(
+            examples['text'],
+            truncation=True,
+            max_length=max_length,
+            padding=False
+        )
+
+    dataset = dataset.map(
+        tokenize_function,
+        batched=True,
+        remove_columns=['text'],
+        desc=f"Tokenizing external eval set '{name}'"
+    )
+
+    return dataset

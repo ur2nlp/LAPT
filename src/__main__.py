@@ -10,7 +10,10 @@ from transformers import (
     Trainer, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 )
 
-from dataset_utils import load_untokenized_dataset, load_or_tokenize_dataset
+from dataset_utils import (
+    load_untokenized_dataset, load_or_tokenize_dataset,
+    load_and_tokenize_external_eval_set
+)
 from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 from config_utils import (
@@ -362,6 +365,34 @@ def lapt(args: DictConfig):
     else:
         # Standard case: single dev/test split
         eval_dataset = dataset['test']
+
+    # Load external evaluation sets if configured
+    external_eval_sets = args.get('external_eval_sets', None)
+    if external_eval_sets:
+        # If eval_dataset is not already a dict, convert it
+        if not isinstance(eval_dataset, dict):
+            # Keep the original dev/test set as 'dev'
+            eval_dataset = {'dev': eval_dataset}
+            print("Converted single eval dataset to dict for external eval sets", file=sys.stderr)
+
+        # Load and add each external eval set
+        for eval_config in external_eval_sets:
+            name = eval_config['name']
+
+            # Check for name conflicts
+            if name in eval_dataset:
+                raise ValueError(
+                    f"External eval set name '{name}' conflicts with existing eval set. "
+                    f"Existing eval sets: {list(eval_dataset.keys())}"
+                )
+
+            external_dataset = load_and_tokenize_external_eval_set(
+                eval_config=eval_config,
+                tokenizer=tokenizer,
+                max_length=args.training.max_length
+            )
+            eval_dataset[name] = external_dataset
+            print(f"Added external eval set '{name}' with {len(external_dataset)} examples", file=sys.stderr)
 
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as
