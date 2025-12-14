@@ -43,6 +43,7 @@ from dataset_utils import (
     _load_plaintext_dir_dataset,
     _load_concat_dataset,
     load_untokenized_dataset,
+    load_and_tokenize_external_eval_set,
 )
 
 
@@ -509,3 +510,244 @@ class TestPlaintextDirLoader:
             )
 
         assert "no non-empty lines" in str(exc_info.value).lower()
+
+
+class TestExternalEvalSetLoader:
+    """
+    Tests for loading and tokenizing external evaluation datasets.
+
+    Testing strategy:
+    - Use real files (via tmp_path) to test actual I/O
+    - Mock tokenizer for controlled tokenization behavior
+    - Test both plaintext and JSONL formats
+    - Test error cases (missing file, invalid format, missing columns)
+    """
+
+    def test_load_external_eval_plaintext(self, tmp_path):
+        """
+        Test loading a plaintext external eval set.
+
+        Strategy: Create real text file, mock tokenizer, verify tokenization.
+        """
+        # Setup: Create test plaintext file
+        test_file = tmp_path / "eval_data.txt"
+        test_lines = [
+            "First eval example",
+            "Second eval example",
+            "Third eval example",
+        ]
+        test_file.write_text("\n".join(test_lines))
+
+        # Create mock tokenizer
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.return_value = {
+            'input_ids': [[1, 2, 3]] * 3,
+            'attention_mask': [[1, 1, 1]] * 3
+        }
+
+        eval_config = {
+            'name': 'held_out',
+            'path': str(test_file),
+            'format': 'plaintext'
+        }
+
+        # Act: Load and tokenize
+        dataset = load_and_tokenize_external_eval_set(
+            eval_config=eval_config,
+            tokenizer=mock_tokenizer,
+            max_length=512
+        )
+
+        # Assert: Verify dataset structure
+        assert isinstance(dataset, Dataset)
+        assert len(dataset) == 3
+
+        # Verify tokenizer was called correctly
+        assert mock_tokenizer.called
+        call_args = mock_tokenizer.call_args
+        assert call_args[1]['truncation'] is True
+        assert call_args[1]['max_length'] == 512
+        assert call_args[1]['padding'] is False
+
+    def test_load_external_eval_jsonl(self, tmp_path):
+        """
+        Test loading a JSONL external eval set.
+
+        Strategy: Create JSONL file, verify correct field extraction.
+        """
+        import json
+
+        # Setup: Create test JSONL file
+        test_file = tmp_path / "eval_data.jsonl"
+        test_data = [
+            {"text": "Example 1", "label": "A"},
+            {"text": "Example 2", "label": "B"},
+        ]
+        with open(test_file, 'w') as f:
+            for item in test_data:
+                f.write(json.dumps(item) + '\n')
+
+        # Create mock tokenizer
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.return_value = {
+            'input_ids': [[1, 2]] * 2,
+            'attention_mask': [[1, 1]] * 2
+        }
+
+        eval_config = {
+            'name': 'test_set',
+            'path': str(test_file),
+            'format': 'jsonl'
+        }
+
+        # Act: Load and tokenize
+        dataset = load_and_tokenize_external_eval_set(
+            eval_config=eval_config,
+            tokenizer=mock_tokenizer,
+            max_length=256
+        )
+
+        # Assert: Verify dataset
+        assert len(dataset) == 2
+        assert mock_tokenizer.called
+
+    def test_load_external_eval_jsonl_custom_column(self, tmp_path):
+        """
+        Test loading JSONL with custom text column name.
+
+        Strategy: Use different field name, verify it's read correctly.
+        """
+        import json
+
+        test_file = tmp_path / "eval_data.jsonl"
+        test_data = [
+            {"content": "Custom field 1"},
+            {"content": "Custom field 2"},
+        ]
+        with open(test_file, 'w') as f:
+            for item in test_data:
+                f.write(json.dumps(item) + '\n')
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.return_value = {
+            'input_ids': [[1]] * 2,
+            'attention_mask': [[1]] * 2
+        }
+
+        eval_config = {
+            'name': 'custom',
+            'path': str(test_file),
+            'format': 'jsonl',
+            'text_column': 'content'
+        }
+
+        # Act: Load and tokenize
+        dataset = load_and_tokenize_external_eval_set(
+            eval_config=eval_config,
+            tokenizer=mock_tokenizer,
+            max_length=256
+        )
+
+        # Assert: Should succeed
+        assert len(dataset) == 2
+
+    def test_load_external_eval_missing_file(self, tmp_path):
+        """
+        Test that loading non-existent file raises appropriate error.
+        """
+        mock_tokenizer = MagicMock()
+
+        eval_config = {
+            'name': 'missing',
+            'path': str(tmp_path / 'nonexistent.txt')
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            load_and_tokenize_external_eval_set(
+                eval_config=eval_config,
+                tokenizer=mock_tokenizer,
+                max_length=512
+            )
+
+        assert "not found" in str(exc_info.value).lower()
+
+    def test_load_external_eval_invalid_format(self, tmp_path):
+        """
+        Test that unsupported format raises appropriate error.
+        """
+        test_file = tmp_path / "data.csv"
+        test_file.write_text("col1,col2\nval1,val2")
+
+        mock_tokenizer = MagicMock()
+
+        eval_config = {
+            'name': 'csv_test',
+            'path': str(test_file),
+            'format': 'csv'  # Unsupported format
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            load_and_tokenize_external_eval_set(
+                eval_config=eval_config,
+                tokenizer=mock_tokenizer,
+                max_length=512
+            )
+
+        assert "unsupported format" in str(exc_info.value).lower()
+
+    def test_load_external_eval_jsonl_missing_column(self, tmp_path):
+        """
+        Test that JSONL with missing text column raises error.
+        """
+        import json
+
+        test_file = tmp_path / "bad_data.jsonl"
+        test_data = [{"wrong_field": "value"}]
+        with open(test_file, 'w') as f:
+            f.write(json.dumps(test_data[0]) + '\n')
+
+        mock_tokenizer = MagicMock()
+
+        eval_config = {
+            'name': 'bad_jsonl',
+            'path': str(test_file),
+            'format': 'jsonl',
+            'text_column': 'text'  # Expected column that doesn't exist
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            load_and_tokenize_external_eval_set(
+                eval_config=eval_config,
+                tokenizer=mock_tokenizer,
+                max_length=512
+            )
+
+        assert "missing" in str(exc_info.value).lower()
+
+    def test_load_external_eval_strips_empty_lines(self, tmp_path):
+        """
+        Test that empty lines are filtered out from plaintext files.
+        """
+        test_file = tmp_path / "data.txt"
+        test_file.write_text("Line 1\n\n\nLine 2\n   \n")
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.return_value = {
+            'input_ids': [[1]] * 2,
+            'attention_mask': [[1]] * 2
+        }
+
+        eval_config = {
+            'name': 'test',
+            'path': str(test_file)
+        }
+
+        # Act: Load and tokenize
+        dataset = load_and_tokenize_external_eval_set(
+            eval_config=eval_config,
+            tokenizer=mock_tokenizer,
+            max_length=512
+        )
+
+        # Assert: Should only have 2 non-empty lines
+        assert len(dataset) == 2
