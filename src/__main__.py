@@ -367,7 +367,11 @@ def lapt(args: DictConfig):
         eval_dataset = dataset['test']
 
     # Load external evaluation sets if configured
+    # Check both direct override (args.external_eval_sets) and config group (args.external_eval.external_eval_sets)
     external_eval_sets = args.get('external_eval_sets', None)
+    if external_eval_sets is None and hasattr(args, 'external_eval'):
+        external_eval_sets = args.external_eval.get('external_eval_sets', None)
+
     if external_eval_sets:
         # If eval_dataset is not already a dict, convert it
         if not isinstance(eval_dataset, dict):
