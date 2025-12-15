@@ -4,9 +4,13 @@ sources:
   - type: plaintext
     language: ang
     path: data/beowulf/beowulf_clean.txt
-  - type: plaintext
+  - type: concat
     language: got
-    path: data/gotica/gotica_clean_all_codices_both-scripts.txt
+    sources:
+      - type: plaintext
+        path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
+      - type: plaintext
+        path: data/gothic_prepared/transliteration_all-codices_both-directions_train.txt
   - type: concat
     language: non
     sources:
@@ -16,7 +20,7 @@ sources:
         path: data/icecorpus-texts/icepahc_12th-18th_clean.txt
   - type: plaintext
     language: got-eng
-    path: data/parallel/gothic_english_bd_both-scripts.txt
+    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_train.txt
   - type: plaintext
     language: eng
     path: data/flan_filtered/flan_nli_qa_short.txt
