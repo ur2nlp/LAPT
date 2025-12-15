@@ -124,6 +124,16 @@ def parse_english_bible(web_file: str) -> Dict[Tuple[str, int, int], str]:
                         if continuation:
                             verses[last_key] += ' ' + continuation
 
+    # Final cleanup pass: remove any remaining footnotes and collapse whitespace
+    for verse_id in verses:
+        text = verses[verse_id]
+        # Remove footnotes (in case any were missed or span multiple parts)
+        text = re.sub(r'\{[^}]*\}', '', text)
+        # Collapse multiple spaces to single space
+        text = re.sub(r' +', ' ', text)
+        # Clean up any leading/trailing whitespace
+        verses[verse_id] = text.strip()
+
     return verses
 
 
@@ -300,7 +310,8 @@ def generate_transliteration(
     gothic_verses: Dict[Tuple[str, int, int], List[str]],
     output_path: str,
     direction: str,
-    instruction_format: bool
+    instruction_format: bool,
+    delimiter: str = None
 ):
     """Generate transliteration parallel data."""
     lines_written = 0
@@ -323,18 +334,26 @@ def generate_transliteration(
                     if instruction_format:
                         examples.append(f"Transliterate to Gothic script: {roman_text} Transliteration: {gothic_text}")
                     else:
-                        examples.append(f"{roman_text} {gothic_text}")
+                        separator = delimiter if delimiter else ' '
+                        examples.append(f"{roman_text}{separator}{gothic_text}")
 
                 # Gothic → Roman
                 if direction in ['gothic_to_roman', 'both']:
                     if instruction_format:
                         examples.append(f"Transliterate to Latin script: {gothic_text} Transliteration: {roman_text}")
                     else:
-                        examples.append(f"{gothic_text} {roman_text}")
+                        separator = delimiter if delimiter else ' '
+                        examples.append(f"{gothic_text}{separator}{roman_text}")
 
                 for example in examples:
-                    # Collapse whitespace
-                    collapsed = ' '.join(example.split())
+                    # Collapse whitespace (but preserve delimiter if present)
+                    if delimiter:
+                        # Split by delimiter, collapse whitespace within each part, rejoin with delimiter
+                        parts = example.split(delimiter)
+                        parts = [' '.join(part.split()) for part in parts]
+                        collapsed = delimiter.join(parts)
+                    else:
+                        collapsed = ' '.join(example.split())
                     f.write(collapsed + '\n')
                     lines_written += 1
 
@@ -348,7 +367,8 @@ def generate_translation(
     output_path: str,
     script: str,
     direction: str,
-    instruction_format: bool
+    instruction_format: bool,
+    delimiter: str = None
 ):
     """Generate translation parallel data."""
     lines_written = 0
@@ -385,18 +405,26 @@ def generate_translation(
                         if instruction_format:
                             examples.append(f"Translate to Gothic: {english_text} Translation: {gothic_text}")
                         else:
-                            examples.append(f"{english_text} {gothic_text}")
+                            separator = delimiter if delimiter else ' '
+                            examples.append(f"{english_text}{separator}{gothic_text}")
 
                     # Gothic → English
                     if direction in ['gothic_to_eng', 'both']:
                         if instruction_format:
                             examples.append(f"Translate to English: {gothic_text} Translation: {english_text}")
                         else:
-                            examples.append(f"{gothic_text} {english_text}")
+                            separator = delimiter if delimiter else ' '
+                            examples.append(f"{gothic_text}{separator}{english_text}")
 
                     for example in examples:
-                        # Collapse whitespace
-                        collapsed = ' '.join(example.split())
+                        # Collapse whitespace (but preserve delimiter if present)
+                        if delimiter:
+                            # Split by delimiter, collapse whitespace within each part, rejoin with delimiter
+                            parts = example.split(delimiter)
+                            parts = [' '.join(part.split()) for part in parts]
+                            collapsed = delimiter.join(parts)
+                        else:
+                            collapsed = ' '.join(example.split())
                         f.write(collapsed + '\n')
                         lines_written += 1
 
@@ -416,6 +444,10 @@ Examples:
   # Generate only training data (no split suffix in filenames)
   python prepare_gothic_data.py --splits train
   # Output: monolingual_all-codices_both-scripts.txt, etc.
+
+  # Generate translation data with delimiter for LLM processing
+  python prepare_gothic_data.py --data-types translation --translation-direction eng_to_gothic --delimiter ' | '
+  # Output: English text | Gothic text (one per line)
 
   # Generate only Roman script monolingual with one codex per verse
   python prepare_gothic_data.py --data-types monolingual --monolingual-script roman --sample-one-codex
@@ -496,6 +528,12 @@ Examples:
         '--instruction-format',
         action='store_true',
         help='Use instruction tuning format (default: simple concatenation)'
+    )
+    parser.add_argument(
+        '--delimiter',
+        type=str,
+        default=None,
+        help='Delimiter between parallel sentences (e.g., " | " or " ||| "). Only used with simple concatenation format (not instruction format). (default: single space)'
     )
 
     # Monolingual options
@@ -609,7 +647,7 @@ Examples:
                 lines, verse_instances = generate_transliteration(
                     verse_ids_for_split, gothic_verses,
                     str(output_path), args.transliteration_direction,
-                    args.instruction_format
+                    args.instruction_format, args.delimiter
                 )
                 stats[str(output_path)] = {
                     'unique_verses': len(verse_ids_for_split),
@@ -621,7 +659,8 @@ Examples:
                 lines, verse_instances, skipped = generate_translation(
                     verse_ids_for_split, gothic_verses, english_verses,
                     str(output_path), args.translation_script,
-                    args.translation_direction, args.instruction_format
+                    args.translation_direction, args.instruction_format,
+                    args.delimiter
                 )
                 stats[str(output_path)] = {
                     'unique_verses': len(verse_ids_for_split),
