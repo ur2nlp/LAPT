@@ -77,7 +77,8 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         return _load_plaintext_dir_dataset(cache_dir, directory, pattern)
     elif dataset_type == 'concat':
         sources = dataset_config.sources
-        return _load_concat_dataset(cache_dir, sources)
+        parent_language = getattr(dataset_config, 'language', None)
+        return _load_concat_dataset(cache_dir, sources, parent_language)
     elif dataset_type == 'multinomial':
         sources = dataset_config.sources
         alpha = dataset_config.alpha
@@ -260,13 +261,14 @@ def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str) ->
     return _load_concat_dataset(cache_dir, sources)
 
 
-def _load_concat_dataset(cache_dir: str, sources: list) -> str:
+def _load_concat_dataset(cache_dir: str, sources: list, parent_language: str = None) -> str:
     """
     Concatenate multiple dataset sources into a single dataset.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations
+        sources: List of dataset source configurations (may include 'language' field for naming)
+        parent_language: Optional language code from parent concat config (used for fallback naming)
 
     Returns:
         Path to the untokenized concatenated dataset
@@ -281,9 +283,22 @@ def _load_concat_dataset(cache_dir: str, sources: list) -> str:
 
         datasets_to_concat = []
         for idx, source_config in enumerate(sources):
-            source_cache = os.path.join(cache_dir, f"source_{idx}")
             # Wrap in DictConfig for recursive dispatching
             source_dict_config = DictConfig(source_config)
+
+            # Determine source cache name:
+            # 1. Use source's language field if present
+            # 2. Use parent_language_{idx} if parent has language
+            # 3. Fall back to source_{idx}
+            source_language = getattr(source_dict_config, 'language', None)
+            if source_language:
+                source_name = source_language
+            elif parent_language:
+                source_name = f"{parent_language}_{idx}"
+            else:
+                source_name = f"source_{idx}"
+
+            source_cache = os.path.join(cache_dir, source_name)
 
             # Recursively load each source (supports nested concat/multinomial)
             source_path = load_untokenized_dataset(
@@ -293,7 +308,7 @@ def _load_concat_dataset(cache_dir: str, sources: list) -> str:
 
             source_dataset = load_from_disk(source_path)
             datasets_to_concat.append(source_dataset['train'])
-            print(f"  Source {idx}: {len(source_dataset['train'])} examples", file=sys.stderr)
+            print(f"  Source {idx} ({source_name}): {len(source_dataset['train'])} examples", file=sys.stderr)
 
         concatenated = concatenate_datasets(datasets_to_concat)
         dataset_dict = DatasetDict({'train': concatenated})
@@ -371,8 +386,16 @@ def _load_multinomial_dataset(
 
         # Load all sources, split into train/dev, and record train sizes
         for idx, source_config in enumerate(sources):
-            source_cache = os.path.join(cache_dir, f"source_{idx}")
             source_dict_config = DictConfig(source_config)
+
+            # Determine source name from language field or default to source_{idx}
+            source_language = getattr(source_dict_config, 'language', None)
+            if source_language:
+                source_name = source_language
+            else:
+                source_name = f"source_{idx}"
+
+            source_cache = os.path.join(cache_dir, source_name)
 
             source_path = load_untokenized_dataset(
                 dataset_config=source_dict_config,
@@ -397,12 +420,8 @@ def _load_multinomial_dataset(
                     f"Use dev_size=-1 to skip dev split for this source."
                 )
 
-            # Determine dev split name from language field or default to source index
-            language = getattr(source_dict_config, 'language', None)
-            if language:
-                dev_name = language
-            else:
-                dev_name = f"source{idx}"
+            # Use same name for dev split
+            dev_name = source_name
 
             # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
             if not skip_source_dev_split:
