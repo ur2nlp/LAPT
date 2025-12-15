@@ -314,10 +314,13 @@ def _load_multinomial_dataset(
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (should have 'language' field for naming)
+        sources: List of dataset source configurations (should have 'language' field for naming).
+                Each source can optionally include a 'dev_size' field to override the global dev_size.
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
         total_samples: Total number of training examples to sample (dev set size is separate)
-        dev_size: Fraction of each source to use for dev set (must be between 0 and 1)
+        dev_size: Global default fraction of each source to use for dev set (must be between 0 and 1).
+                 Individual sources can override this with their own dev_size field.
+                 Use -1 to skip dev split (either globally or per-source).
 
     Returns:
         Path to the untokenized sampled dataset (DatasetDict with train and per-language dev splits)
@@ -379,15 +382,20 @@ def _load_multinomial_dataset(
             source_dataset = load_from_disk(source_path)
             full_data = source_dataset['train']
 
-            # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
-            if not skip_dev_split:
-                split_dataset = full_data.train_test_split(test_size=dev_size, seed=1)
-                train_data = split_dataset['train']
-                dev_data = split_dataset['test']
-            else:
-                # No dev split - use all data for training
-                train_data = full_data
-                dev_data = None
+            # Check for per-source dev_size override (fallback to global dev_size)
+            source_dev_size = getattr(source_dict_config, 'dev_size', dev_size)
+            skip_source_dev_split = (source_dev_size == -1)
+
+            # Validate per-source dev_size
+            if source_dev_size == 0:
+                raise ValueError(
+                    f"Source {idx}: dev_size=0 is ambiguous. Use dev_size=-1 to explicitly skip dev split."
+                )
+            elif not skip_source_dev_split and not (0 < source_dev_size < 1):
+                raise ValueError(
+                    f"Source {idx}: Multinomial sampling requires fractional dev_size (0 < dev_size < 1), got {source_dev_size}. "
+                    f"Use dev_size=-1 to skip dev split for this source."
+                )
 
             # Determine dev split name from language field or default to source index
             language = getattr(source_dict_config, 'language', None)
@@ -396,16 +404,28 @@ def _load_multinomial_dataset(
             else:
                 dev_name = f"source{idx}"
 
+            # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
+            if not skip_source_dev_split:
+                split_dataset = full_data.train_test_split(test_size=source_dev_size, seed=1)
+                train_data = split_dataset['train']
+                dev_data = split_dataset['test']
+            else:
+                # No dev split - use all data for training
+                train_data = full_data
+                dev_data = None
+
             train_datasets.append(train_data)
-            if not skip_dev_split:
+            if not skip_source_dev_split:
                 dev_datasets.append(dev_data)
                 dev_names.append(dev_name)
             train_sizes.append(len(train_data))
 
-            if not skip_dev_split:
-                print(f"  Source {idx} ({dev_name}): {len(train_data)} train, {len(dev_data)} dev examples", file=sys.stderr)
+            # Log with indication if using per-source override
+            dev_size_label = f"dev_size={source_dev_size}" if hasattr(source_dict_config, 'dev_size') else f"global dev_size={source_dev_size}"
+            if not skip_source_dev_split:
+                print(f"  Source {idx} ({dev_name}): {len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})", file=sys.stderr)
             else:
-                print(f"  Source {idx}: {len(train_data)} examples (no dev split)", file=sys.stderr)
+                print(f"  Source {idx} ({dev_name}): {len(train_data)} examples (no dev split, {dev_size_label})", file=sys.stderr)
 
         # Check for empty datasets
         if all(size == 0 for size in train_sizes):
