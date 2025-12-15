@@ -6,6 +6,7 @@ sources:
     path: data/beowulf/beowulf_clean.txt
   - type: concat
     language: got
+    dev_size: -1  # No dev split - using external holdout instead
     sources:
       - type: plaintext
         path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
@@ -20,6 +21,7 @@ sources:
         path: data/icecorpus-texts/icepahc_12th-18th_clean.txt
   - type: plaintext
     language: got-eng
+    dev_size: -1  # No dev split - using external holdout instead
     path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_train.txt
   - type: plaintext
     language: eng
