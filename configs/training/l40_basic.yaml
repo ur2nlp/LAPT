@@ -12,10 +12,11 @@ lr_scheduler_type: linear
 warmup_ratio: 0.005
 max_grad_norm: 1.0
 
-# Dropout for regularization
+# Regularization
 dropout: 0.1
 attention_dropout: 0.1
 activation_dropout: 0.0
+weight_decay: 0.01
 
 logging_steps: ${divide:${training.max_steps},400}
 eval_strategy: steps

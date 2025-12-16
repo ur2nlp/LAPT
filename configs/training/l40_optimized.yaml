@@ -18,10 +18,11 @@ optim: "adamw_torch_fused"  # 10-15% faster than default AdamW
 dataloader_num_workers: 4  # Parallel data loading (adjust based on CPU cores)
 torch_compile: false  # 10-30% speedup, but adds compilation time on first run
 
-# Dropout for regularization
+# Regularization
 dropout: 0.1
 attention_dropout: 0.1
 activation_dropout: 0.0
+weight_decay: 0.01
 
 logging_steps: ${divide:${training.max_steps},400}
 eval_strategy: steps
