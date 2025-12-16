@@ -428,6 +428,7 @@ def lapt(args: DictConfig):
         lr_scheduler_type=args.training.lr_scheduler_type,
         warmup_ratio=float(args.training.warmup_ratio),
         max_grad_norm=args.training.max_grad_norm,
+        weight_decay=args.training.get('weight_decay', 0.0),
         gradient_checkpointing=args.training.gradient_checkpointing,
         bf16=args.training.get('bf16', False),
         fp16=args.training.get('fp16', False),
