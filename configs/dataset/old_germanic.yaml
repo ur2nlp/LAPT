@@ -23,9 +23,12 @@ sources:
     language: got-eng
     dev_size: -1  # No dev split - using external holdout instead
     path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_train.txt
-  - type: plaintext
+  - type: huggingface
     language: eng
-    path: data/flan_filtered/flan_nli_qa_short.txt
+    name: wikimedia/wikipedia
+    config: 20231101.en
+    split: train
+    max_samples: 200000
 alpha: 0.7
 total_samples: 200000
 cache_dir: "data/old_germanic"
