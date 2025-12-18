@@ -14,7 +14,7 @@ from dataset_utils import (
     load_untokenized_dataset, load_or_tokenize_dataset,
     load_and_tokenize_external_eval_set
 )
-from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname
+from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname, get_seed_tokenizer_suffix
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 from config_utils import (
     check_dataset_config, save_dataset_config,
@@ -244,8 +244,10 @@ def _handle_cache_cleanup(args: DictConfig):
             print(f"  Removing {args.dataset.cache_dir}", file=sys.stderr)
             shutil.rmtree(args.dataset.cache_dir)
         if tokenizer_path and os.path.exists(tokenizer_path):
-            print(f"  Removing {tokenizer_path}", file=sys.stderr)
-            shutil.rmtree(tokenizer_path)
+            # Remove entire tokenizer language directory (includes seed tokenizers and all variants)
+            tokenizer_lang_dir = os.path.dirname(tokenizer_path)
+            print(f"  Removing {tokenizer_lang_dir}", file=sys.stderr)
+            shutil.rmtree(tokenizer_lang_dir)
         if os.path.exists(output_dir):
             print(f"  Removing {output_dir}", file=sys.stderr)
             shutil.rmtree(output_dir)
@@ -256,6 +258,21 @@ def _handle_cache_cleanup(args: DictConfig):
         if tokenizer_path and os.path.exists(tokenizer_path):
             print(f"  Removing {tokenizer_path}", file=sys.stderr)
             shutil.rmtree(tokenizer_path)
+
+            # Also remove the seed tokenizer if using seed vocabulary
+            if args.focus.enabled and args.focus.use_seed_vocabulary:
+                parent_dir = os.path.dirname(tokenizer_path)
+                model_short = get_model_shortname(args.hf_model)
+                seed_suffix = get_seed_tokenizer_suffix(
+                    vocab_size=args.focus.vocab_size,
+                    num_samples=args.focus.num_samples,
+                    seed_vocab_multiplier=args.focus.seed_vocab_multiplier
+                )
+                seed_tokenizer_path = os.path.join(parent_dir, f"{model_short}_{seed_suffix}")
+                if os.path.exists(seed_tokenizer_path):
+                    print(f"  Removing {seed_tokenizer_path}", file=sys.stderr)
+                    shutil.rmtree(seed_tokenizer_path)
+
         if os.path.exists(tokenized_path):
             print(f"  Removing {tokenized_path}", file=sys.stderr)
             shutil.rmtree(tokenized_path)
