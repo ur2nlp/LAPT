@@ -183,6 +183,16 @@ def _load_huggingface_dataset(
             remove_columns=original_columns
         )
 
+        # If max_samples specified, downsample after line conversion
+        # (docs_to_lines can expand N documents into many more lines)
+        if max_samples and len(dataset) > max_samples:
+            print(
+                f"Downsampling from {len(dataset)} lines to {max_samples} lines",
+                file=sys.stderr
+            )
+            indices = random.sample(range(len(dataset)), max_samples)
+            dataset = dataset.select(sorted(indices))
+
         # Wrap in DatasetDict for consistency with other loaders
         dataset_dict = DatasetDict({'train': dataset})
         dataset_dict.save_to_disk(untokenized_path)
