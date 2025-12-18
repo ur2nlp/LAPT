@@ -67,7 +67,10 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         split = getattr(dataset_config, 'split', 'train')
         text_column = getattr(dataset_config, 'text_column', 'text')
         max_samples = getattr(dataset_config, 'max_samples', None)
-        return _load_huggingface_dataset(cache_dir, name, config, split, text_column, max_samples)
+        min_words_per_line = getattr(dataset_config, 'min_words_per_line', None)
+        return _load_huggingface_dataset(
+            cache_dir, name, config, split, text_column, max_samples, min_words_per_line
+        )
     elif dataset_type == 'plaintext':
         file_path = dataset_config.path
         return _load_plaintext_dataset(cache_dir, file_path)
@@ -125,7 +128,8 @@ def _load_huggingface_dataset(
     config: str = None,
     split: str = 'train',
     text_column: str = 'text',
-    max_samples: int = None
+    max_samples: int = None,
+    min_words_per_line: int = None
 ) -> str:
     """
     Load a generic HuggingFace dataset.
@@ -137,6 +141,7 @@ def _load_huggingface_dataset(
         split: Which split to load (default: 'train')
         text_column: Name of the column containing text (default: 'text')
         max_samples: Maximum number of samples to load, uses streaming if specified (optional)
+        min_words_per_line: Minimum number of space-separated words per line (filters out titles/headers)
 
     Returns:
         Path to the untokenized dataset
@@ -182,6 +187,27 @@ def _load_huggingface_dataset(
             batched=True,
             remove_columns=original_columns
         )
+
+        # Filter out short lines (e.g., section titles) if min_words_per_line specified
+        if min_words_per_line is not None:
+            original_size = len(dataset)
+            dataset = dataset.filter(
+                lambda x: len(x['text'].split()) >= min_words_per_line
+            )
+            filtered_size = len(dataset)
+            print(
+                f"Filtered {original_size - filtered_size} lines with < {min_words_per_line} words "
+                f"({filtered_size} lines remaining)",
+                file=sys.stderr
+            )
+
+            # Check if we have enough lines after filtering
+            if max_samples and filtered_size < max_samples:
+                raise ValueError(
+                    f"After filtering lines with < {min_words_per_line} words, only {filtered_size} lines "
+                    f"remain, but {max_samples} samples were requested. Either increase max_samples to "
+                    f"download more documents, or reduce min_words_per_line threshold."
+                )
 
         # If max_samples specified, downsample after line conversion
         # (docs_to_lines can expand N documents into many more lines)
