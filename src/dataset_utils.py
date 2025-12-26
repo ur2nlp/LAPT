@@ -68,8 +68,9 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         text_column = getattr(dataset_config, 'text_column', 'text')
         max_samples = getattr(dataset_config, 'max_samples', None)
         min_words_per_line = getattr(dataset_config, 'min_words_per_line', None)
+        oversampling_factor = getattr(dataset_config, 'oversampling_factor', 3)
         return _load_huggingface_dataset(
-            cache_dir, name, config, split, text_column, max_samples, min_words_per_line
+            cache_dir, name, config, split, text_column, max_samples, min_words_per_line, oversampling_factor
         )
     elif dataset_type == 'plaintext':
         file_path = dataset_config.path
@@ -129,7 +130,8 @@ def _load_huggingface_dataset(
     split: str = 'train',
     text_column: str = 'text',
     max_samples: int = None,
-    min_words_per_line: int = None
+    min_words_per_line: int = None,
+    oversampling_factor: int = 3
 ) -> str:
     """
     Load a generic HuggingFace dataset.
@@ -140,8 +142,10 @@ def _load_huggingface_dataset(
         config: Dataset configuration/subset (e.g., 'wikitext-103-v1'), optional
         split: Which split to load (default: 'train')
         text_column: Name of the column containing text (default: 'text')
-        max_samples: Maximum number of samples to load, uses streaming if specified (optional)
+        max_samples: Maximum number of LINES to load (after splitting docs), uses streaming if specified (optional)
         min_words_per_line: Minimum number of space-separated words per line (filters out titles/headers)
+        oversampling_factor: When max_samples specified, download this many times more documents than estimated
+            needed to maintain document diversity (default: 3). Higher values = better diversity but more memory.
 
     Returns:
         Path to the untokenized dataset
@@ -154,25 +158,91 @@ def _load_huggingface_dataset(
             print(f"  Config: {config}", file=sys.stderr)
         print(f"  Split: {split}", file=sys.stderr)
         if max_samples:
-            print(f"  Max samples: {max_samples}", file=sys.stderr)
+            print(f"  Max samples (lines): {max_samples}", file=sys.stderr)
+            print(f"  Oversampling factor: {oversampling_factor}x", file=sys.stderr)
 
         # Use streaming if max_samples specified to avoid downloading entire dataset
         if max_samples:
-            dataset = load_dataset(
+            stream = load_dataset(
                 name,
                 config,
                 split=split,
                 streaming=True
             )
-            # Take only max_samples and convert to regular dataset
-            samples = []
-            for i, example in enumerate(dataset):
-                if i >= max_samples:
-                    break
-                samples.append(example)
 
-            dataset = Dataset.from_list(samples)
-            print(f"Loaded {len(dataset)} samples", file=sys.stderr)
+            # Phase 1: Sample a small batch to estimate lines per document
+            # This helps us download the right number of documents
+            estimation_sample_size = min(1000, max_samples // 10)
+            print(f"  Phase 1: Sampling {estimation_sample_size} documents to estimate lines/doc", file=sys.stderr)
+
+            estimation_samples = []
+            for i, example in enumerate(stream):
+                if i >= estimation_sample_size:
+                    break
+                estimation_samples.append(example)
+
+            # Convert estimation batch to dataset and measure lines/doc
+            # Use same processing pipeline as main data for accurate estimation
+            estimation_dataset = Dataset.from_list(estimation_samples)
+            if text_column != 'text':
+                estimation_dataset = estimation_dataset.rename_column(text_column, 'text')
+
+            # Apply docs_to_lines transformation (same as main pipeline)
+            estimation_columns = estimation_dataset.column_names
+            estimation_dataset = estimation_dataset.map(
+                docs_to_lines,
+                batched=True,
+                remove_columns=estimation_columns
+            )
+
+            # Apply min_words_per_line filter if specified (same as main pipeline)
+            estimation_lines_count = len(estimation_dataset)
+            if min_words_per_line is not None:
+                estimation_dataset = estimation_dataset.filter(
+                    lambda x: len(x['text'].split()) >= min_words_per_line
+                )
+                filtered_estimation_lines = len(estimation_dataset)
+                print(
+                    f"  Estimation: {estimation_lines_count} lines → "
+                    f"{filtered_estimation_lines} after filtering",
+                    file=sys.stderr
+                )
+                estimation_lines_count = filtered_estimation_lines
+
+            lines_per_doc = estimation_lines_count / len(estimation_samples) if estimation_samples else 1
+            print(f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)", file=sys.stderr)
+
+            # Check if estimation found any valid lines
+            if lines_per_doc == 0:
+                raise ValueError(
+                    f"Estimation phase found 0 lines per document after filtering. "
+                    f"This suggests min_words_per_line={min_words_per_line} is too strict, "
+                    f"or the dataset has no suitable content."
+                )
+
+            # Phase 2: Calculate how many documents to download with oversampling
+            # We oversample to maintain document diversity, then randomly sample lines at the end
+            docs_needed = int((max_samples / lines_per_doc) * oversampling_factor)
+
+            print(f"  Phase 2: Downloading {docs_needed} documents total", file=sys.stderr)
+
+            # Download all documents from fresh stream
+            # (Restarting stream is simpler than trying to resume/combine with estimation samples)
+            stream = load_dataset(
+                name,
+                config,
+                split=split,
+                streaming=True
+            )
+
+            all_samples = []
+            for i, example in enumerate(stream):
+                if i >= docs_needed:
+                    break
+                all_samples.append(example)
+
+            dataset = Dataset.from_list(all_samples)
+            print(f"  Downloaded {len(dataset)} documents", file=sys.stderr)
         else:
             dataset = load_dataset(name, config, split=split)
 
@@ -188,6 +258,8 @@ def _load_huggingface_dataset(
             remove_columns=original_columns
         )
 
+        print(f"  Converted to {len(dataset)} lines from documents", file=sys.stderr)
+
         # Filter out short lines (e.g., section titles) if min_words_per_line specified
         if min_words_per_line is not None:
             original_size = len(dataset)
@@ -196,28 +268,33 @@ def _load_huggingface_dataset(
             )
             filtered_size = len(dataset)
             print(
-                f"Filtered {original_size - filtered_size} lines with < {min_words_per_line} words "
+                f"  Filtered {original_size - filtered_size} lines with < {min_words_per_line} words "
                 f"({filtered_size} lines remaining)",
                 file=sys.stderr
             )
 
             # Check if we have enough lines after filtering
             if max_samples and filtered_size < max_samples:
-                raise ValueError(
-                    f"After filtering lines with < {min_words_per_line} words, only {filtered_size} lines "
-                    f"remain, but {max_samples} samples were requested. Either increase max_samples to "
-                    f"download more documents, or reduce min_words_per_line threshold."
+                print(
+                    f"Warning: After filtering, only {filtered_size} lines remain, but {max_samples} requested. "
+                    f"Consider increasing oversampling_factor (current: {oversampling_factor}) or reducing min_words_per_line.",
+                    file=sys.stderr
                 )
 
-        # If max_samples specified, downsample after line conversion
-        # (docs_to_lines can expand N documents into many more lines)
+        # If max_samples specified, randomly sample to exactly that many lines
+        # This maintains document diversity from oversampling while controlling final size
         if max_samples and len(dataset) > max_samples:
             print(
-                f"Downsampling from {len(dataset)} lines to {max_samples} lines",
+                f"  Randomly sampling {max_samples} lines from {len(dataset)} available lines",
                 file=sys.stderr
             )
             indices = random.sample(range(len(dataset)), max_samples)
             dataset = dataset.select(sorted(indices))
+        elif max_samples and len(dataset) < max_samples:
+            print(
+                f"  Note: Got {len(dataset)} lines, which is less than requested {max_samples}",
+                file=sys.stderr
+            )
 
         # Wrap in DatasetDict for consistency with other loaders
         dataset_dict = DatasetDict({'train': dataset})
@@ -370,7 +447,8 @@ def _load_multinomial_dataset(
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
         total_samples: Total number of training examples to sample (dev set size is separate)
         dev_size: Global default fraction of each source to use for dev set (must be between 0 and 1).
-                 Individual sources can override this with their own dev_size field.
+                 Individual sources can override this with their own dev_size field, which can be
+                 fractional (0 < x < 1) or absolute (>= 1) for that specific source.
                  Use -1 to skip dev split (either globally or per-source).
 
     Returns:
@@ -450,10 +528,9 @@ def _load_multinomial_dataset(
                 raise ValueError(
                     f"Source {idx}: dev_size=0 is ambiguous. Use dev_size=-1 to explicitly skip dev split."
                 )
-            elif not skip_source_dev_split and not (0 < source_dev_size < 1):
+            elif not skip_source_dev_split and source_dev_size < 0:
                 raise ValueError(
-                    f"Source {idx}: Multinomial sampling requires fractional dev_size (0 < dev_size < 1), got {source_dev_size}. "
-                    f"Use dev_size=-1 to skip dev split for this source."
+                    f"Source {idx}: dev_size must be positive or -1 to skip, got {source_dev_size}."
                 )
 
             # Use same name for dev split
