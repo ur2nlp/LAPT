@@ -37,6 +37,14 @@ def extract_dataset_config(args: DictConfig) -> dict:
     # Type-specific parameters
     if args.dataset.type == 'oscar':
         config['language'] = args.dataset.language
+    elif args.dataset.type == 'huggingface':
+        config['name'] = args.dataset.name
+        config['config'] = getattr(args.dataset, 'config', None)
+        config['split'] = getattr(args.dataset, 'split', 'train')
+        config['text_column'] = getattr(args.dataset, 'text_column', 'text')
+        config['max_samples'] = getattr(args.dataset, 'max_samples', None)
+        config['min_words_per_line'] = getattr(args.dataset, 'min_words_per_line', None)
+        config['oversampling_factor'] = getattr(args.dataset, 'oversampling_factor', 3)
     elif args.dataset.type == 'plaintext':
         config['path'] = args.dataset.path
     elif args.dataset.type == 'plaintext_dir':
