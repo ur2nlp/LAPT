@@ -251,12 +251,17 @@ def _initialize_focus_model(args: DictConfig):
     model = AutoModelForCausalLM.from_pretrained(args.hf_model, config=config)
     source_tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
 
+    # Cache embeddings in tokenizer directory
+    # If using custom tokenizer path, cache there; otherwise use the trained tokenizer directory
+    embedding_cache_dir = args.focus.tokenizer_path if args.focus.tokenizer_path else tokenizer_output_dir
+
     new_input_embeddings, new_output_embeddings = apply_focus_initialization(
         source_model=model,
         source_tokenizer=source_tokenizer,
         target_tokenizer=tokenizer,
         training_data_path=jsonl_path,
-        fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4)
+        fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4),
+        cache_dir=embedding_cache_dir
     )
 
     # Resize model vocabulary and replace embeddings

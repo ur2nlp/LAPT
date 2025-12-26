@@ -812,10 +812,14 @@ def apply_focus_initialization(
     source_tokenizer: PreTrainedTokenizerBase,
     target_tokenizer: PreTrainedTokenizerBase,
     training_data_path: str,
-    fasttext_model_min_count: int = 4
+    fasttext_model_min_count: int = 4,
+    cache_dir: Optional[str] = None
 ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     """
     Apply FOCUS to generate new input embeddings and optionally output embeddings.
+
+    The embedding tensors are cached alongside the tokenizer to avoid recomputing
+    expensive FastText models on every run.
 
     Args:
         source_model: Source pretrained model
@@ -823,11 +827,44 @@ def apply_focus_initialization(
         target_tokenizer: Target language-specific tokenizer
         training_data_path: Path to JSONL training data for FOCUS
         fasttext_model_min_count: Minimum occurrences for FastText embeddings (default: 4)
+        cache_dir: Directory where embeddings should be cached (typically tokenizer directory)
 
     Returns:
         Tuple of (input_embeddings, output_embeddings)
         output_embeddings will be None if model ties word embeddings
     """
+    # Check for cached embeddings
+    if cache_dir is not None:
+        input_emb_path = os.path.join(cache_dir, 'focus_input_embeddings.pt')
+        output_emb_path = os.path.join(cache_dir, 'focus_output_embeddings.pt')
+
+        if os.path.exists(input_emb_path):
+            print(f"Loading cached FOCUS embeddings from {cache_dir}", file=sys.stderr)
+            new_input_embeddings = torch.load(input_emb_path, weights_only=True)
+
+            # Check if we need output embeddings
+            has_separate_output = (
+                hasattr(source_model.config, 'tie_word_embeddings')
+                and not source_model.config.tie_word_embeddings
+            )
+
+            if has_separate_output and os.path.exists(output_emb_path):
+                new_output_embeddings = torch.load(output_emb_path, weights_only=True)
+            elif has_separate_output:
+                # Cache exists for input but not output - this shouldn't happen
+                print(
+                    f"Warning: Found cached input embeddings but missing output embeddings. "
+                    f"Regenerating both.",
+                    file=sys.stderr
+                )
+            else:
+                new_output_embeddings = None
+                print(f"FOCUS embeddings loaded from cache. Vocab size: {len(target_tokenizer)}", file=sys.stderr)
+                return new_input_embeddings, new_output_embeddings
+
+            print(f"FOCUS embeddings loaded from cache. Vocab size: {len(target_tokenizer)}", file=sys.stderr)
+            return new_input_embeddings, new_output_embeddings
+
     print("Applying FOCUS to initialize embeddings", file=sys.stderr)
 
     try:
@@ -860,4 +897,19 @@ def apply_focus_initialization(
         )
 
     print(f"FOCUS initialization complete. New vocab size: {len(target_tokenizer)}", file=sys.stderr)
+
+    # Cache the embeddings if cache_dir provided
+    if cache_dir is not None:
+        os.makedirs(cache_dir, exist_ok=True)
+        input_emb_path = os.path.join(cache_dir, 'focus_input_embeddings.pt')
+        output_emb_path = os.path.join(cache_dir, 'focus_output_embeddings.pt')
+
+        print(f"Saving FOCUS embeddings to {cache_dir}", file=sys.stderr)
+        torch.save(new_input_embeddings, input_emb_path)
+
+        if new_output_embeddings is not None:
+            torch.save(new_output_embeddings, output_emb_path)
+
+        print("FOCUS embeddings cached", file=sys.stderr)
+
     return new_input_embeddings, new_output_embeddings
