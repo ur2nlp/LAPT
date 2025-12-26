@@ -82,6 +82,7 @@ def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
         'seed_round_mode': args.focus.get('seed_round_mode', 'ceil'),
         'seed_vocab_multiplier': args.focus.get('seed_vocab_multiplier', 5.0),
         'seed_target_mass': args.focus.get('seed_target_mass', 10_000_000),
+        'fasttext_model_min_count': args.focus.get('fasttext_model_min_count', 4),
         'seed': args.seed,
     }
 
