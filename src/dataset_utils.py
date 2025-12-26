@@ -447,7 +447,8 @@ def _load_multinomial_dataset(
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
         total_samples: Total number of training examples to sample (dev set size is separate)
         dev_size: Global default fraction of each source to use for dev set (must be between 0 and 1).
-                 Individual sources can override this with their own dev_size field.
+                 Individual sources can override this with their own dev_size field, which can be
+                 fractional (0 < x < 1) or absolute (>= 1) for that specific source.
                  Use -1 to skip dev split (either globally or per-source).
 
     Returns:
@@ -527,10 +528,9 @@ def _load_multinomial_dataset(
                 raise ValueError(
                     f"Source {idx}: dev_size=0 is ambiguous. Use dev_size=-1 to explicitly skip dev split."
                 )
-            elif not skip_source_dev_split and not (0 < source_dev_size < 1):
+            elif not skip_source_dev_split and source_dev_size < 0:
                 raise ValueError(
-                    f"Source {idx}: Multinomial sampling requires fractional dev_size (0 < dev_size < 1), got {source_dev_size}. "
-                    f"Use dev_size=-1 to skip dev split for this source."
+                    f"Source {idx}: dev_size must be positive or -1 to skip, got {source_dev_size}."
                 )
 
             # Use same name for dev split
