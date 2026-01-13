@@ -27,6 +27,10 @@ Usage:
 
     # Save to file instead of showing
     python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --output plot.png
+
+    # Set y-axis limits
+    python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --ylim 0 5
+    python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --ylim 0  # lower bound only
 """
 
 import argparse
@@ -49,6 +53,7 @@ from plotnine import (
     theme,
     theme_bw,
     theme_minimal,
+    ylim,
 )
 
 
@@ -131,8 +136,12 @@ def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=No
     return pd.concat(dataframes, ignore_index=True)
 
 
-def plot_metric(data, metric, x_axis='step', output=None, title=None):
-    """Create a plot for a single metric."""
+def plot_metric(data, metric, x_axis='step', output=None, title=None, y_limits=None):
+    """Create a plot for a single metric.
+
+    Args:
+        y_limits: Tuple of (lower, upper) for y-axis. Either can be None for auto.
+    """
     # Filter to rows where metric exists
     metric_data = data[data[metric].notna()].copy()
 
@@ -176,6 +185,9 @@ def plot_metric(data, metric, x_axis='step', output=None, title=None):
             panel_background=element_rect(fill='white')
         )
     )
+
+    if y_limits:
+        plot = plot + ylim(y_limits)
 
     if output:
         plot.save(output, dpi=300, verbose=False, transparent=False)
@@ -258,8 +270,12 @@ def print_metric_summary(data, metrics, x_axis='step'):
     print("\n" + "="*80 + "\n")
 
 
-def plot_multiple_metrics(data, metrics, x_axis='step', output=None):
-    """Create subplots for multiple metrics."""
+def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=None):
+    """Create subplots for multiple metrics.
+
+    Args:
+        y_limits: Tuple of (lower, upper) for y-axis. Either can be None for auto.
+    """
     # Reshape data for faceting
     plot_data = []
     extrema_data = []
@@ -303,6 +319,9 @@ def plot_multiple_metrics(data, metrics, x_axis='step', output=None):
         )
     )
 
+    if y_limits:
+        plot = plot + ylim(y_limits)
+
     if output:
         plot.save(output, dpi=300, verbose=False, transparent=False)
         print(f"Saved plot to {output}")
@@ -338,6 +357,8 @@ def main():
     parser.add_argument('--title', type=str, help='Custom plot title')
     parser.add_argument('--run-names', nargs='+', help='Custom names for runs (in order of matched files)')
     parser.add_argument('--list-metrics', action='store_true', help='List available metrics and exit')
+    parser.add_argument('--ylim', nargs='+', type=float, metavar='VALUE',
+                       help='Y-axis limits: one value for lower bound, two for (lower, upper). Use "none" for auto.')
 
     args = parser.parse_args()
 
@@ -347,6 +368,16 @@ def main():
 
     if not args.list_metrics and not args.metric and not args.metrics:
         parser.error("Must provide either --metric or --metrics (or use --list-metrics)")
+
+    # Parse y-axis limits
+    y_limits = None
+    if args.ylim:
+        if len(args.ylim) == 1:
+            y_limits = (args.ylim[0], None)  # Lower bound only
+        elif len(args.ylim) == 2:
+            y_limits = (args.ylim[0], args.ylim[1])
+        else:
+            parser.error("--ylim accepts 1 or 2 values")
 
     # Load data
     data = load_data(
@@ -378,7 +409,7 @@ def main():
             print(f"Available metrics: {sorted(available_metrics)}", file=sys.stderr)
             sys.exit(1)
         print(f"Plotting {len(metrics)} metric(s): {', '.join(metrics)}", file=sys.stderr)
-        plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output)
+        plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output, y_limits=y_limits)
         print_metric_summary(data, metrics, x_axis=args.x_axis)
     else:
         # Single metric - also support pattern matching
@@ -390,14 +421,14 @@ def main():
                 sys.exit(1)
             if len(metrics) > 1:
                 print(f"Pattern matched {len(metrics)} metrics, plotting all: {', '.join(metrics)}", file=sys.stderr)
-                plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output)
+                plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output, y_limits=y_limits)
                 print_metric_summary(data, metrics, x_axis=args.x_axis)
             else:
                 print(f"Plotting: {metrics[0]}", file=sys.stderr)
-                plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title)
+                plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title, y_limits=y_limits)
                 print_metric_summary(data, [metrics[0]], x_axis=args.x_axis)
         else:
-            plot_metric(data, args.metric, x_axis=args.x_axis, output=args.output, title=args.title)
+            plot_metric(data, args.metric, x_axis=args.x_axis, output=args.output, title=args.title, y_limits=y_limits)
             print_metric_summary(data, [args.metric], x_axis=args.x_axis)
 
 
