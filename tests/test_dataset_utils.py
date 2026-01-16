@@ -4,6 +4,8 @@ Tests for dataset_utils module.
 Current coverage:
 - _load_plaintext_dataset: Basic loading, empty line filtering, caching, error cases
 - _load_concat_dataset: Multi-source concatenation, caching, error cases
+- _tokenize_instruction_examples: Label masking, truncation, batching
+- DataCollatorForInstructionTuning: Padding, label preservation, tensor output
 
 Testing approach:
 - Use real temporary files (via pytest's tmp_path fixture) for I/O testing
@@ -44,6 +46,8 @@ from dataset_utils import (
     _load_concat_dataset,
     load_untokenized_dataset,
     load_and_tokenize_external_eval_set,
+    _tokenize_instruction_examples,
+    DataCollatorForInstructionTuning,
 )
 
 
@@ -751,3 +755,346 @@ class TestExternalEvalSetLoader:
 
         # Assert: Should only have 2 non-empty lines
         assert len(dataset) == 2
+
+
+class TestTokenizeInstructionExamples:
+    """
+    Tests for _tokenize_instruction_examples function.
+
+    This function tokenizes instruction-tuning data with label masking:
+    - Prompt tokens get label=-100 (ignored in loss)
+    - Response tokens get their actual token IDs as labels
+
+    Testing strategy:
+    - Use real tokenizer (base_tokenizer fixture) for accurate token counts
+    - Test various prompt/response combinations
+    - Verify label masking is correct
+    - Test truncation behavior
+    """
+
+    def test_basic_tokenization(self, base_tokenizer):
+        """
+        Test basic tokenization with simple prompt and response.
+
+        Verifies:
+        1. Output has correct keys (input_ids, attention_mask, labels)
+        2. Prompt tokens are masked (-100 in labels)
+        3. Response tokens have actual token IDs in labels
+        4. input_ids and labels have same length
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': ['Translate to Gothic: hello\nResponse:'],
+            'response': [' world']
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        # Check output structure
+        assert 'input_ids' in result
+        assert 'attention_mask' in result
+        assert 'labels' in result
+
+        input_ids = result['input_ids'][0]
+        labels = result['labels'][0]
+
+        # Same length
+        assert len(input_ids) == len(labels)
+
+        # Count masked vs unmasked labels
+        num_masked = sum(1 for l in labels if l == -100)
+        num_unmasked = sum(1 for l in labels if l != -100)
+
+        # Should have some masked (prompt) and some unmasked (response)
+        assert num_masked > 0, "Should have masked prompt tokens"
+        assert num_unmasked > 0, "Should have unmasked response tokens"
+
+        # Unmasked labels should match corresponding input_ids
+        for i, label in enumerate(labels):
+            if label != -100:
+                assert label == input_ids[i], f"Label at position {i} should match input_id"
+
+    def test_prompt_fully_masked(self, base_tokenizer):
+        """
+        Test that the entire prompt portion is masked.
+
+        Strategy: Tokenize prompt alone, count tokens, verify that many are masked.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        prompt = "This is a test prompt with several words\nResponse:"
+        response = " Yes"
+
+        examples = {
+            'prompt': [prompt],
+            'response': [response]
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+        labels = result['labels'][0]
+
+        # Tokenize prompt separately to count its tokens
+        prompt_tokens = base_tokenizer(prompt, add_special_tokens=True)
+        prompt_length = len(prompt_tokens['input_ids'])
+
+        # First prompt_length labels should all be -100
+        for i in range(prompt_length):
+            assert labels[i] == -100, f"Label at position {i} should be -100 (prompt portion)"
+
+    def test_multiple_examples(self, base_tokenizer):
+        """
+        Test batched tokenization with multiple examples.
+
+        Verifies each example is tokenized independently.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': [
+                'Question: What is 2+2?\nResponse:',
+                'Translate: hello\nResponse:'
+            ],
+            'response': [
+                ' 4',
+                ' hola'
+            ]
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        # Should have 2 examples
+        assert len(result['input_ids']) == 2
+        assert len(result['labels']) == 2
+        assert len(result['attention_mask']) == 2
+
+        # Each example should have different lengths (different prompts)
+        len1 = len(result['input_ids'][0])
+        len2 = len(result['input_ids'][1])
+        # They could be same length by chance, but labels should differ
+        assert result['labels'][0] != result['labels'][1]
+
+    def test_truncation(self, base_tokenizer):
+        """
+        Test that sequences are truncated to max_length.
+
+        Strategy: Use very short max_length, verify output is truncated.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        # Long prompt and response
+        examples = {
+            'prompt': ['This is a very long prompt ' * 20 + '\nResponse:'],
+            'response': [' This is a very long response ' * 20]
+        }
+
+        max_length = 50
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=max_length)
+
+        # Should be truncated to max_length
+        assert len(result['input_ids'][0]) <= max_length
+        assert len(result['labels'][0]) <= max_length
+        assert len(result['attention_mask'][0]) <= max_length
+
+    def test_empty_response(self, base_tokenizer):
+        """
+        Test handling of empty response (edge case).
+
+        With empty response, all labels should be -100.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': ['Prompt text\nResponse:'],
+            'response': ['']
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        labels = result['labels'][0]
+
+        # All labels should be -100 (no response tokens)
+        assert all(l == -100 for l in labels), "All labels should be -100 for empty response"
+
+    def test_response_starts_with_space(self, base_tokenizer):
+        """
+        Test that response with leading space is handled correctly.
+
+        Our JSONL format uses ' response' (with leading space) to ensure
+        proper tokenization as a continuation.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': ['Test\nResponse:'],
+            'response': [' answer']  # Note leading space
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        # Should tokenize without errors
+        assert len(result['input_ids'][0]) > 0
+        assert len(result['labels'][0]) > 0
+
+
+class TestDataCollatorForInstructionTuning:
+    """
+    Tests for DataCollatorForInstructionTuning.
+
+    This collator handles batching of instruction-tuning data:
+    - Pads input_ids with pad_token_id
+    - Pads attention_mask with 0
+    - Pads labels with -100 (so padded positions don't contribute to loss)
+
+    Testing strategy:
+    - Test with features of different lengths to verify padding
+    - Test single-example batch (no padding needed)
+    - Verify tensor shapes and dtypes
+    """
+
+    def test_basic_padding(self, base_tokenizer):
+        """
+        Test that features of different lengths are padded correctly.
+
+        Verifies:
+        1. All sequences padded to same length
+        2. input_ids padded with pad_token_id
+        3. attention_mask padded with 0
+        4. labels padded with -100
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+        import torch
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        # Features with different lengths
+        features = [
+            {
+                'input_ids': [1, 2, 3, 4, 5],
+                'attention_mask': [1, 1, 1, 1, 1],
+                'labels': [-100, -100, 3, 4, 5]
+            },
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, 2, 3]
+            }
+        ]
+
+        batch = collator(features)
+
+        # Check shapes - should be padded to longest (5)
+        assert batch['input_ids'].shape == (2, 5)
+        assert batch['attention_mask'].shape == (2, 5)
+        assert batch['labels'].shape == (2, 5)
+
+        # Check dtypes
+        assert batch['input_ids'].dtype == torch.long
+        assert batch['labels'].dtype == torch.long
+
+        # Check padding values for second (shorter) sequence
+        # Last 2 positions should be padded
+        pad_token_id = base_tokenizer.pad_token_id or base_tokenizer.eos_token_id
+        assert batch['input_ids'][1, 3].item() == pad_token_id
+        assert batch['input_ids'][1, 4].item() == pad_token_id
+        assert batch['attention_mask'][1, 3].item() == 0
+        assert batch['attention_mask'][1, 4].item() == 0
+        assert batch['labels'][1, 3].item() == -100
+        assert batch['labels'][1, 4].item() == -100
+
+    def test_single_example_batch(self, base_tokenizer):
+        """
+        Test batch with single example (no padding needed).
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, 2, 3]
+            }
+        ]
+
+        batch = collator(features)
+
+        # Should have batch size 1
+        assert batch['input_ids'].shape == (1, 3)
+        assert batch['labels'].shape == (1, 3)
+
+        # Values should be unchanged
+        assert batch['input_ids'][0].tolist() == [1, 2, 3]
+        assert batch['labels'][0].tolist() == [-100, 2, 3]
+
+    def test_preserves_masked_labels(self, base_tokenizer):
+        """
+        Test that -100 labels are preserved (not overwritten by padding logic).
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3, 4],
+                'attention_mask': [1, 1, 1, 1],
+                'labels': [-100, -100, 3, 4]  # First two are masked
+            }
+        ]
+
+        batch = collator(features)
+
+        # Original -100 values should be preserved
+        assert batch['labels'][0, 0].item() == -100
+        assert batch['labels'][0, 1].item() == -100
+        assert batch['labels'][0, 2].item() == 3
+        assert batch['labels'][0, 3].item() == 4
+
+    def test_handles_all_masked_labels(self, base_tokenizer):
+        """
+        Test handling of sequence where all labels are -100.
+
+        This can happen with empty responses or very long prompts.
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, -100, -100]  # All masked
+            }
+        ]
+
+        batch = collator(features)
+
+        # Should work without errors
+        assert batch['labels'].shape == (1, 3)
+        assert batch['labels'][0].tolist() == [-100, -100, -100]
+
+    def test_returns_pytorch_tensors(self, base_tokenizer):
+        """
+        Test that output is PyTorch tensors, not lists.
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+        import torch
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, 2, 3]
+            }
+        ]
+
+        batch = collator(features)
+
+        assert isinstance(batch['input_ids'], torch.Tensor)
+        assert isinstance(batch['attention_mask'], torch.Tensor)
+        assert isinstance(batch['labels'], torch.Tensor)
