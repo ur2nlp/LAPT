@@ -11,6 +11,7 @@ Splits at the verse level to prevent near-duplicate leakage across splits.
 """
 
 import argparse
+import json
 import random
 import re
 import sys
@@ -164,18 +165,20 @@ def construct_filename(
     monolingual_script: str = None,
     transliteration_direction: str = None,
     translation_script: str = None,
-    translation_direction: str = None
+    translation_direction: str = None,
+    extension: str = 'txt'
 ) -> str:
     """
     Construct output filename encoding all multiplier settings.
 
-    Format: {data_type}_{codex}_{type-specific-multipliers}[_{split}].txt
+    Format: {data_type}_{codex}_{type-specific-multipliers}[_{split}].{ext}
 
     Args:
         data_type: One of 'monolingual', 'transliteration', 'translation'
         sample_one_codex: Whether sampling one codex variant
         split_name: Optional split name ('train', 'dev', 'test')
         (other args): Type-specific multiplier settings
+        extension: File extension ('txt' or 'jsonl')
 
     Returns:
         Filename string
@@ -224,7 +227,7 @@ def construct_filename(
     if split_name:
         parts.append(split_name)
 
-    return '_'.join(parts) + '.txt'
+    return '_'.join(parts) + '.' + extension
 
 
 def split_verse_ids(
@@ -311,7 +314,8 @@ def generate_transliteration(
     output_path: str,
     direction: str,
     instruction_format: bool,
-    delimiter: str = None
+    delimiter: str = None,
+    output_format: str = 'plaintext'
 ):
     """Generate transliteration parallel data."""
     lines_written = 0
@@ -327,34 +331,46 @@ def generate_transliteration(
                 roman_text = variant
                 gothic_text = transliterate_latin_to_gothic(variant)
 
-                examples = []
-
                 # Roman → Gothic
                 if direction in ['roman_to_gothic', 'both']:
-                    if instruction_format:
-                        examples.append(f"Transliterate to Gothic script: {roman_text} Transliteration: {gothic_text}")
+                    if instruction_format and output_format == 'jsonl':
+                        prompt = f"Transliterate to Gothic script: {roman_text}\nResponse:"
+                        response = f" {gothic_text}"
+                        f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
+                    elif instruction_format:
+                        example = f"Transliterate to Gothic script: {roman_text} Response: {gothic_text}"
+                        f.write(' '.join(example.split()) + '\n')
                     else:
                         separator = delimiter if delimiter else ' '
-                        examples.append(f"{roman_text}{separator}{gothic_text}")
+                        example = f"{roman_text}{separator}{gothic_text}"
+                        if delimiter:
+                            parts = example.split(delimiter)
+                            parts = [' '.join(part.split()) for part in parts]
+                            collapsed = delimiter.join(parts)
+                        else:
+                            collapsed = ' '.join(example.split())
+                        f.write(collapsed + '\n')
+                    lines_written += 1
 
                 # Gothic → Roman
                 if direction in ['gothic_to_roman', 'both']:
-                    if instruction_format:
-                        examples.append(f"Transliterate to Latin script: {gothic_text} Transliteration: {roman_text}")
+                    if instruction_format and output_format == 'jsonl':
+                        prompt = f"Transliterate to Latin script: {gothic_text}\nResponse:"
+                        response = f" {roman_text}"
+                        f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
+                    elif instruction_format:
+                        example = f"Transliterate to Latin script: {gothic_text} Response: {roman_text}"
+                        f.write(' '.join(example.split()) + '\n')
                     else:
                         separator = delimiter if delimiter else ' '
-                        examples.append(f"{gothic_text}{separator}{roman_text}")
-
-                for example in examples:
-                    # Collapse whitespace (but preserve delimiter if present)
-                    if delimiter:
-                        # Split by delimiter, collapse whitespace within each part, rejoin with delimiter
-                        parts = example.split(delimiter)
-                        parts = [' '.join(part.split()) for part in parts]
-                        collapsed = delimiter.join(parts)
-                    else:
-                        collapsed = ' '.join(example.split())
-                    f.write(collapsed + '\n')
+                        example = f"{gothic_text}{separator}{roman_text}"
+                        if delimiter:
+                            parts = example.split(delimiter)
+                            parts = [' '.join(part.split()) for part in parts]
+                            collapsed = delimiter.join(parts)
+                        else:
+                            collapsed = ' '.join(example.split())
+                        f.write(collapsed + '\n')
                     lines_written += 1
 
     return lines_written, verse_instances
@@ -368,7 +384,8 @@ def generate_translation(
     script: str,
     direction: str,
     instruction_format: bool,
-    delimiter: str = None
+    delimiter: str = None,
+    output_format: str = 'plaintext'
 ):
     """Generate translation parallel data."""
     lines_written = 0
@@ -394,38 +411,50 @@ def generate_translation(
                 if script in ['roman', 'both']:
                     scripts_to_generate.append(('roman', variant))
                 if script in ['gothic', 'both']:
-                    gothic_text = transliterate_latin_to_gothic(variant)
-                    scripts_to_generate.append(('gothic', gothic_text))
+                    gothic_script_text = transliterate_latin_to_gothic(variant)
+                    scripts_to_generate.append(('gothic', gothic_script_text))
 
                 for script_name, gothic_text in scripts_to_generate:
-                    examples = []
-
                     # English → Gothic
                     if direction in ['eng_to_gothic', 'both']:
-                        if instruction_format:
-                            examples.append(f"Translate to Gothic: {english_text} Translation: {gothic_text}")
+                        if instruction_format and output_format == 'jsonl':
+                            prompt = f"Translate to Gothic: {english_text}\nResponse:"
+                            response = f" {gothic_text}"
+                            f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
+                        elif instruction_format:
+                            example = f"Translate to Gothic: {english_text} Response: {gothic_text}"
+                            f.write(' '.join(example.split()) + '\n')
                         else:
                             separator = delimiter if delimiter else ' '
-                            examples.append(f"{english_text}{separator}{gothic_text}")
+                            example = f"{english_text}{separator}{gothic_text}"
+                            if delimiter:
+                                parts = example.split(delimiter)
+                                parts = [' '.join(part.split()) for part in parts]
+                                collapsed = delimiter.join(parts)
+                            else:
+                                collapsed = ' '.join(example.split())
+                            f.write(collapsed + '\n')
+                        lines_written += 1
 
                     # Gothic → English
                     if direction in ['gothic_to_eng', 'both']:
-                        if instruction_format:
-                            examples.append(f"Translate to English: {gothic_text} Translation: {english_text}")
+                        if instruction_format and output_format == 'jsonl':
+                            prompt = f"Translate to English: {gothic_text}\nResponse:"
+                            response = f" {english_text}"
+                            f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
+                        elif instruction_format:
+                            example = f"Translate to English: {gothic_text} Response: {english_text}"
+                            f.write(' '.join(example.split()) + '\n')
                         else:
                             separator = delimiter if delimiter else ' '
-                            examples.append(f"{gothic_text}{separator}{english_text}")
-
-                    for example in examples:
-                        # Collapse whitespace (but preserve delimiter if present)
-                        if delimiter:
-                            # Split by delimiter, collapse whitespace within each part, rejoin with delimiter
-                            parts = example.split(delimiter)
-                            parts = [' '.join(part.split()) for part in parts]
-                            collapsed = delimiter.join(parts)
-                        else:
-                            collapsed = ' '.join(example.split())
-                        f.write(collapsed + '\n')
+                            example = f"{gothic_text}{separator}{english_text}"
+                            if delimiter:
+                                parts = example.split(delimiter)
+                                parts = [' '.join(part.split()) for part in parts]
+                                collapsed = delimiter.join(parts)
+                            else:
+                                collapsed = ' '.join(example.split())
+                            f.write(collapsed + '\n')
                         lines_written += 1
 
     return lines_written, verse_instances, skipped
@@ -453,9 +482,15 @@ Examples:
   python prepare_gothic_data.py --data-types monolingual --monolingual-script roman --sample-one-codex
   # Output: monolingual_one-codex_roman.txt
 
-  # Generate transliteration data with instruction format
+  # Generate transliteration data with instruction format (plaintext)
   python prepare_gothic_data.py --data-types transliteration --instruction-format
   # Output: transliteration_all-codices_both-directions.txt
+  # Format: Transliterate to Gothic script: {roman} Response: {gothic}
+
+  # Generate translation data with JSONL format for instruction tuning with loss masking
+  python prepare_gothic_data.py --data-types translation --instruction-format --output-format jsonl
+  # Output: translation_all-codices_both-scripts_both-directions.jsonl
+  # Format: {"prompt": "Translate to Gothic: {english}\\nResponse:", "response": " {gothic}"}
         """
     )
 
@@ -530,6 +565,12 @@ Examples:
         help='Use instruction tuning format (default: simple concatenation)'
     )
     parser.add_argument(
+        '--output-format',
+        choices=['plaintext', 'jsonl'],
+        default='plaintext',
+        help='Output format: "plaintext" (one example per line) or "jsonl" (separate prompt/response fields for loss masking). JSONL only applies when --instruction-format is set. (default: plaintext)'
+    )
+    parser.add_argument(
         '--delimiter',
         type=str,
         default=None,
@@ -567,6 +608,14 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    # Warn if jsonl format specified without instruction format
+    if args.output_format == 'jsonl' and not args.instruction_format:
+        print(
+            "Warning: --output-format jsonl has no effect without --instruction-format. "
+            "Using plaintext output.",
+            file=sys.stderr
+        )
 
     # Create output directory
     output_dir = Path(args.output_dir)
@@ -620,6 +669,15 @@ Examples:
             # Omit split suffix if only generating train
             split_suffix = split_name if len(args.splits) > 1 else None
 
+            # Determine file extension based on output format
+            # JSONL only applies to instruction format for transliteration/translation
+            use_jsonl = (
+                args.output_format == 'jsonl'
+                and args.instruction_format
+                and data_type in ['transliteration', 'translation']
+            )
+            extension = 'jsonl' if use_jsonl else 'txt'
+
             filename = construct_filename(
                 data_type=data_type,
                 sample_one_codex=args.sample_one_codex,
@@ -627,7 +685,8 @@ Examples:
                 monolingual_script=args.monolingual_script,
                 transliteration_direction=args.transliteration_direction,
                 translation_script=args.translation_script,
-                translation_direction=args.translation_direction
+                translation_direction=args.translation_direction,
+                extension=extension
             )
             output_path = output_dir / filename
 
@@ -647,7 +706,8 @@ Examples:
                 lines, verse_instances = generate_transliteration(
                     verse_ids_for_split, gothic_verses,
                     str(output_path), args.transliteration_direction,
-                    args.instruction_format, args.delimiter
+                    args.instruction_format, args.delimiter,
+                    args.output_format
                 )
                 stats[str(output_path)] = {
                     'unique_verses': len(verse_ids_for_split),
@@ -660,7 +720,7 @@ Examples:
                     verse_ids_for_split, gothic_verses, english_verses,
                     str(output_path), args.translation_script,
                     args.translation_direction, args.instruction_format,
-                    args.delimiter
+                    args.delimiter, args.output_format
                 )
                 stats[str(output_path)] = {
                     'unique_verses': len(verse_ids_for_split),
