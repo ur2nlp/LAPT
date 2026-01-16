@@ -698,8 +698,12 @@ def _tokenize_instruction_examples(
     Creates labels where prompt tokens are masked (-100) and only response tokens
     contribute to the loss.
 
+    Also handles mixed datasets where some examples have prompt/response (instruction)
+    and others have only text (plaintext). Plaintext examples get labels = input_ids
+    (standard causal LM loss on all tokens).
+
     Args:
-        examples: Batch with 'prompt' and 'response' fields
+        examples: Batch with 'prompt' and 'response' fields, optionally 'text'
         tokenizer: Tokenizer to use
         max_length: Maximum sequence length (prompt + response combined)
 
@@ -710,30 +714,54 @@ def _tokenize_instruction_examples(
     all_attention_masks = []
     all_labels = []
 
-    for prompt, response in zip(examples['prompt'], examples['response']):
-        # Tokenize prompt (without special tokens on the right side)
-        prompt_tokens = tokenizer(
-            prompt,
-            add_special_tokens=True,
-            truncation=False
-        )
+    # Get text column if it exists (for mixed datasets)
+    texts = examples.get('text', [None] * len(examples['prompt']))
 
-        # Tokenize response (no special tokens - it continues from prompt)
-        response_tokens = tokenizer(
-            response,
-            add_special_tokens=False,
-            truncation=False
-        )
+    for prompt, response, text in zip(examples['prompt'], examples['response'], texts):
+        # Check if this is an instruction example or plaintext
+        is_instruction = prompt is not None and response is not None
 
-        # Concatenate
-        input_ids = prompt_tokens['input_ids'] + response_tokens['input_ids']
-        attention_mask = prompt_tokens['attention_mask'] + response_tokens['attention_mask']
+        if is_instruction:
+            # Instruction example: tokenize prompt and response separately
+            prompt_tokens = tokenizer(
+                prompt,
+                add_special_tokens=True,
+                truncation=False
+            )
 
-        # Create labels: -100 for prompt (masked), actual tokens for response
-        prompt_length = len(prompt_tokens['input_ids'])
-        labels = [-100] * prompt_length + response_tokens['input_ids']
+            response_tokens = tokenizer(
+                response,
+                add_special_tokens=False,
+                truncation=False
+            )
 
-        # Truncate if needed (from the right, keeping prompt intact if possible)
+            # Concatenate
+            input_ids = prompt_tokens['input_ids'] + response_tokens['input_ids']
+            attention_mask = prompt_tokens['attention_mask'] + response_tokens['attention_mask']
+
+            # Create labels: -100 for prompt (masked), actual tokens for response
+            prompt_length = len(prompt_tokens['input_ids'])
+            labels = [-100] * prompt_length + response_tokens['input_ids']
+        else:
+            # Plaintext example: standard tokenization, labels = input_ids
+            if text is None:
+                raise ValueError(
+                    "Example has neither valid prompt/response nor text. "
+                    "Mixed datasets must have 'text' for plaintext examples."
+                )
+
+            tokens = tokenizer(
+                text,
+                add_special_tokens=True,
+                truncation=False
+            )
+
+            input_ids = tokens['input_ids']
+            attention_mask = tokens['attention_mask']
+            # Standard causal LM: predict all tokens
+            labels = list(input_ids)
+
+        # Truncate if needed
         if len(input_ids) > max_length:
             input_ids = input_ids[:max_length]
             attention_mask = attention_mask[:max_length]
@@ -798,10 +826,14 @@ def load_or_tokenize_dataset(
 
         if is_instruction_dataset:
             print("Detected instruction dataset format, tokenizing with label masking", file=sys.stderr)
+            # Determine columns to remove (prompt, response, and text if present for mixed datasets)
+            columns_to_remove = ['prompt', 'response']
+            if 'text' in dataset[sample_split].column_names:
+                columns_to_remove.append('text')
             dataset = dataset.map(
                 lambda examples: _tokenize_instruction_examples(examples, tokenizer, max_length),
                 batched=True,
-                remove_columns=['prompt', 'response']
+                remove_columns=columns_to_remove
             )
         else:
             # Standard text dataset

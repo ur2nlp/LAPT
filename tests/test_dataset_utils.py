@@ -1098,3 +1098,234 @@ class TestDataCollatorForInstructionTuning:
         assert isinstance(batch['input_ids'], torch.Tensor)
         assert isinstance(batch['attention_mask'], torch.Tensor)
         assert isinstance(batch['labels'], torch.Tensor)
+
+
+class TestMixedInstructionPlaintextDatasets:
+    """
+    Tests for mixing instruction (prompt/response) and plaintext (text) datasets.
+
+    This is important for instruction tuning where you might want to:
+    - Include instruction data (translation, FLAN) with loss masking
+    - Include LM data (monolingual text) with standard causal LM loss
+
+    The challenge: these have different column structures that need to be
+    handled during concatenation and tokenization.
+    """
+
+    def test_concatenate_different_column_schemas_unions_columns(self, tmp_path):
+        """
+        Test that concatenating datasets with different columns creates union.
+
+        HuggingFace Datasets unions all columns and fills missing values with None.
+        This means we can mix instruction and plaintext data, but need to handle
+        the None values during tokenization.
+        """
+        from datasets import Dataset, concatenate_datasets
+
+        instruction_data = Dataset.from_dict({
+            'prompt': ['Translate: hello\nResponse:'],
+            'response': [' hola']
+        })
+
+        plaintext_data = Dataset.from_dict({
+            'text': ['This is plain text.']
+        })
+
+        # Concatenation works - creates union of columns
+        combined = concatenate_datasets([instruction_data, plaintext_data])
+
+        # Should have all three columns
+        assert set(combined.column_names) == {'prompt', 'response', 'text'}
+
+        # Instruction row: has prompt/response, text is None
+        assert combined[0]['prompt'] == 'Translate: hello\nResponse:'
+        assert combined[0]['response'] == ' hola'
+        assert combined[0]['text'] is None
+
+        # Plaintext row: has text, prompt/response are None
+        assert combined[1]['text'] == 'This is plain text.'
+        assert combined[1]['prompt'] is None
+        assert combined[1]['response'] is None
+
+    def test_mixed_tokenization_with_normalized_columns(self, tmp_path, base_tokenizer):
+        """
+        Test that mixed datasets work when columns are normalized.
+
+        Strategy: Instruction data can include a 'text' column (full sequence)
+        alongside 'prompt'/'response' for label masking during tokenization.
+        """
+        from datasets import Dataset, DatasetDict, concatenate_datasets
+        from dataset_utils import load_or_tokenize_dataset
+
+        # Create instruction data with all three columns
+        instruction_data = Dataset.from_dict({
+            'text': ['Translate: hello\nResponse: hola'],
+            'prompt': ['Translate: hello\nResponse:'],
+            'response': [' hola']
+        })
+
+        plaintext_data = Dataset.from_dict({
+            'text': ['This is plain text for language modeling.']
+        })
+
+        # To concatenate, plaintext needs matching columns (even if empty/None)
+        # This simulates what a unified loader might do
+        plaintext_with_instruction_cols = Dataset.from_dict({
+            'text': plaintext_data['text'],
+            'prompt': [None] * len(plaintext_data),
+            'response': [None] * len(plaintext_data)
+        })
+
+        # Now concatenation works
+        combined = concatenate_datasets([instruction_data, plaintext_with_instruction_cols])
+        assert len(combined) == 2
+
+        # Create DatasetDict structure expected by load_or_tokenize_dataset
+        dataset_dict = DatasetDict({'train': combined})
+
+        # Save to disk
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        # This should work but instruction examples with None prompt/response
+        # will need special handling
+        # For now, test that we detect the instruction format
+        from datasets import load_from_disk
+        loaded = load_from_disk(str(untokenized_path))
+
+        sample_split = list(loaded.keys())[0]
+        has_prompt = 'prompt' in loaded[sample_split].column_names
+        has_response = 'response' in loaded[sample_split].column_names
+
+        assert has_prompt and has_response, "Dataset should have instruction columns"
+
+    def test_plaintext_only_detection(self, tmp_path, base_tokenizer):
+        """
+        Test that pure plaintext datasets are correctly detected as non-instruction.
+        """
+        from datasets import Dataset, DatasetDict, load_from_disk
+        from dataset_utils import load_or_tokenize_dataset
+
+        plaintext_data = Dataset.from_dict({
+            'text': ['Line 1', 'Line 2', 'Line 3']
+        })
+
+        dataset_dict = DatasetDict({'train': plaintext_data})
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        # Tokenize
+        result = load_or_tokenize_dataset(
+            str(untokenized_path),
+            str(tokenized_path),
+            base_tokenizer,
+            max_length=128,
+            dev_size=0.5
+        )
+
+        # Should NOT have labels column (standard causal LM)
+        assert 'labels' not in result['train'].column_names
+
+    def test_instruction_only_detection(self, tmp_path, base_tokenizer):
+        """
+        Test that pure instruction datasets are correctly detected and get labels.
+        """
+        from datasets import Dataset, DatasetDict
+        from dataset_utils import load_or_tokenize_dataset
+
+        instruction_data = Dataset.from_dict({
+            'prompt': [
+                'Translate: hello\nResponse:',
+                'Translate: world\nResponse:'
+            ],
+            'response': [' hola', ' mundo']
+        })
+
+        dataset_dict = DatasetDict({'train': instruction_data})
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        result = load_or_tokenize_dataset(
+            str(untokenized_path),
+            str(tokenized_path),
+            base_tokenizer,
+            max_length=128,
+            dev_size=0.5
+        )
+
+        # Should have labels column with masking
+        assert 'labels' in result['train'].column_names
+
+        # Check that some labels are -100 (masked prompt tokens)
+        labels = result['train']['labels'][0]
+        assert -100 in labels, "Instruction data should have masked prompt tokens"
+
+    def test_mixed_instruction_and_plaintext_tokenization(self, tmp_path, base_tokenizer):
+        """
+        Test tokenizing a dataset that mixes instruction and plaintext examples.
+
+        This is the key test for supporting mixed training data.
+        Instruction examples should get label masking, plaintext should not.
+        """
+        from datasets import Dataset, DatasetDict, concatenate_datasets
+        from dataset_utils import load_or_tokenize_dataset
+
+        # Create instruction data (multiple examples to ensure some end up in train)
+        instruction_data = Dataset.from_dict({
+            'prompt': [
+                'Question: What is 2+2?\nResponse:',
+                'Translate: hello\nResponse:'
+            ],
+            'response': [' 4', ' hola']
+        })
+
+        # Create plaintext data
+        plaintext_data = Dataset.from_dict({
+            'text': [
+                'This is regular language modeling text.',
+                'Another plain text example for LM training.'
+            ]
+        })
+
+        # Concatenate (creates union of columns with None for missing)
+        combined = concatenate_datasets([instruction_data, plaintext_data])
+
+        dataset_dict = DatasetDict({'train': combined})
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        result = load_or_tokenize_dataset(
+            str(untokenized_path),
+            str(tokenized_path),
+            base_tokenizer,
+            max_length=128,
+            dev_size=0.5
+        )
+
+        # Both splits should have examples
+        assert len(result['train']) >= 1
+        assert len(result['test']) >= 1
+
+        # Check the tokenized data has proper structure
+        assert 'input_ids' in result['train'].column_names
+        assert 'attention_mask' in result['train'].column_names
+        assert 'labels' in result['train'].column_names
+
+        # Gather all labels from both splits
+        all_labels = list(result['train']['labels']) + list(result['test']['labels'])
+
+        # Instruction examples should have -100 masking (at least some labels are -100)
+        has_masking = any(-100 in labels for labels in all_labels)
+        assert has_masking, "Instruction examples should have masked labels"
+
+        # Plaintext examples should have no -100 (all labels are actual tokens)
+        has_unmasked = any(-100 not in labels for labels in all_labels)
+        assert has_unmasked, "Plaintext examples should have unmasked labels"
