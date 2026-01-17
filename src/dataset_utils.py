@@ -38,6 +38,25 @@ def docs_to_lines(examples):
     }
 
 
+def collect_from_stream(stream, limit: int) -> Dataset:
+    """
+    Collect examples from a streaming dataset up to a limit.
+
+    Args:
+        stream: An iterable of examples (typically from load_dataset with streaming=True)
+        limit: Maximum number of examples to collect
+
+    Returns:
+        Dataset containing the collected examples
+    """
+    samples = []
+    for i, example in enumerate(stream):
+        if i >= limit:
+            break
+        samples.append(example)
+    return Dataset.from_list(samples)
+
+
 def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = None) -> str:
     """
     Load untokenized dataset based on configuration.
@@ -186,15 +205,9 @@ def _load_huggingface_dataset(
                 file=sys.stderr
             )
 
-            estimation_samples = []
-            for i, example in enumerate(stream):
-                if i >= estimation_sample_size:
-                    break
-                estimation_samples.append(example)
-
             # Convert estimation batch to dataset and measure lines/doc
             # Use same processing pipeline as main data for accurate estimation
-            estimation_dataset = Dataset.from_list(estimation_samples)
+            estimation_dataset = collect_from_stream(stream, estimation_sample_size)
             if text_column != 'text':
                 estimation_dataset = estimation_dataset.rename_column(text_column, 'text')
 
@@ -249,13 +262,7 @@ def _load_huggingface_dataset(
                 streaming=True
             )
 
-            all_samples = []
-            for i, example in enumerate(stream):
-                if i >= docs_needed:
-                    break
-                all_samples.append(example)
-
-            dataset = Dataset.from_list(all_samples)
+            dataset = collect_from_stream(stream, docs_needed)
             print(f"  Downloaded {len(dataset)} documents", file=sys.stderr)
         else:
             dataset = load_dataset(name, config, split=split)
