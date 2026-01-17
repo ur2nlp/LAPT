@@ -592,74 +592,15 @@ def _load_multinomial_dataset(
 
         # Load all sources, split into train/dev, and record train sizes
         for idx, source_config in enumerate(sources):
-            source_dict_config = DictConfig(source_config)
-
-            # Determine source name from name field or default to source_{idx}
-            source_name = getattr(source_dict_config, 'name', None)
-            if not source_name:
-                source_name = f"source_{idx}"
-
-            source_cache = os.path.join(cache_dir, source_name)
-
-            source_path = load_untokenized_dataset(
-                dataset_config=source_dict_config,
-                cache_dir=source_cache
+            source_name, train_data, dev_data = _load_and_split_source(
+                source_config, cache_dir, dev_size, idx
             )
-
-            source_dataset = load_from_disk(source_path)
-            full_data = source_dataset['train']
-
-            # Check for per-source dev_size override (fallback to global dev_size)
-            source_dev_size = getattr(source_dict_config, 'dev_size', dev_size)
-            skip_source_dev_split = (source_dev_size == -1)
-
-            # Validate per-source dev_size
-            if source_dev_size == 0:
-                raise ValueError(
-                    f"Source {idx}: dev_size=0 is ambiguous. "
-                    "Use dev_size=-1 to explicitly skip dev split."
-                )
-            elif not skip_source_dev_split and source_dev_size < 0:
-                raise ValueError(
-                    f"Source {idx}: dev_size must be positive or -1 to skip, got {source_dev_size}."
-                )
-
-            # Use same name for dev split
-            dev_name = source_name
-
-            # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
-            if not skip_source_dev_split:
-                split_dataset = full_data.train_test_split(test_size=source_dev_size, seed=1)
-                train_data = split_dataset['train']
-                dev_data = split_dataset['test']
-            else:
-                # No dev split - use all data for training
-                train_data = full_data
-                dev_data = None
 
             train_datasets.append(train_data)
-            if not skip_source_dev_split:
+            if dev_data is not None:
                 dev_datasets.append(dev_data)
-                dev_names.append(dev_name)
+                dev_names.append(source_name)
             train_sizes.append(len(train_data))
-
-            # Log with indication if using per-source override
-            dev_size_label = (
-                f"dev_size={source_dev_size}" if hasattr(source_dict_config, 'dev_size')
-                else f"global dev_size={source_dev_size}"
-            )
-            if not skip_source_dev_split:
-                print(
-                    f"  Source {idx} ({dev_name}): "
-                    f"{len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})",
-                    file=sys.stderr
-                )
-            else:
-                print(
-                    f"  Source {idx} ({dev_name}): "
-                    f"{len(train_data)} examples (no dev split, {dev_size_label})",
-                    file=sys.stderr
-                )
 
         # Check for empty datasets
         if all(size == 0 for size in train_sizes):
@@ -685,22 +626,8 @@ def _load_multinomial_dataset(
 
         # Sample and upsample TRAIN data only
         selected_train_datasets = []
-        for idx, (dataset, num_samples) in enumerate(zip(train_datasets, samples_per_source)):
-            # Use "exhaust-first" sampling to maximize coverage of unique examples
-            if num_samples <= len(dataset):
-                # Sample without replacement
-                indices = random.sample(range(len(dataset)), num_samples)
-            else:
-                # Include ALL examples once, then sample remainder with replacement
-                # This ensures we always see all unique examples before any duplication
-                all_indices = list(range(len(dataset)))
-                num_additional = num_samples - len(dataset)
-                additional_indices = random.choices(range(len(dataset)), k=num_additional)
-                indices = all_indices + additional_indices
-                random.shuffle(indices)  # Shuffle to mix exhaustive + repeated samples
-
-            # .select() keeps data memory-mapped, handles duplicate indices for sampling with
-            # replacement
+        for dataset, num_samples in zip(train_datasets, samples_per_source):
+            indices = _exhaust_first_sample(len(dataset), num_samples)
             selected = dataset.select(indices)
             selected_train_datasets.append(selected)
 
@@ -727,6 +654,118 @@ def _load_multinomial_dataset(
             )
 
     return untokenized_path
+
+
+def _load_and_split_source(
+    source_config,
+    cache_dir: str,
+    global_dev_size: float,
+    idx: int
+) -> tuple:
+    """
+    Load a single source dataset and split into train/dev.
+
+    Helper for _load_multinomial_dataset. Handles per-source dev_size overrides
+    and validation. Logs progress for this source.
+
+    Args:
+        source_config: Source configuration dict
+        cache_dir: Parent cache directory for this multinomial dataset
+        global_dev_size: Default dev_size (can be overridden per-source)
+        idx: Source index (for default naming and error messages)
+
+    Returns:
+        Tuple of (source_name, train_data, dev_data) where dev_data is None
+        if dev split was skipped for this source.
+    """
+    source_dict_config = DictConfig(source_config)
+
+    # Determine source name from name field or default to source_{idx}
+    source_name = getattr(source_dict_config, 'name', None)
+    if not source_name:
+        source_name = f"source_{idx}"
+
+    source_cache = os.path.join(cache_dir, source_name)
+
+    source_path = load_untokenized_dataset(
+        dataset_config=source_dict_config,
+        cache_dir=source_cache
+    )
+
+    source_dataset = load_from_disk(source_path)
+    full_data = source_dataset['train']
+
+    # Check for per-source dev_size override (fallback to global dev_size)
+    source_dev_size = getattr(source_dict_config, 'dev_size', global_dev_size)
+    skip_source_dev_split = (source_dev_size == -1)
+
+    # Validate per-source dev_size
+    if source_dev_size == 0:
+        raise ValueError(
+            f"Source {idx}: dev_size=0 is ambiguous. "
+            "Use dev_size=-1 to explicitly skip dev split."
+        )
+    elif not skip_source_dev_split and source_dev_size < 0:
+        raise ValueError(
+            f"Source {idx}: dev_size must be positive or -1 to skip, got {source_dev_size}."
+        )
+
+    # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
+    if not skip_source_dev_split:
+        split_dataset = full_data.train_test_split(test_size=source_dev_size, seed=1)
+        train_data = split_dataset['train']
+        dev_data = split_dataset['test']
+    else:
+        train_data = full_data
+        dev_data = None
+
+    # Log with indication if using per-source override
+    dev_size_label = (
+        f"dev_size={source_dev_size}" if hasattr(source_dict_config, 'dev_size')
+        else f"global dev_size={source_dev_size}"
+    )
+    if dev_data is not None:
+        print(
+            f"  Source {idx} ({source_name}): "
+            f"{len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})",
+            file=sys.stderr
+        )
+    else:
+        print(
+            f"  Source {idx} ({source_name}): "
+            f"{len(train_data)} examples (no dev split, {dev_size_label})",
+            file=sys.stderr
+        )
+
+    return source_name, train_data, dev_data
+
+
+def _exhaust_first_sample(dataset_size: int, num_samples: int) -> list[int]:
+    """
+    Generate sample indices using exhaust-first strategy.
+
+    Helper for _load_multinomial_dataset. When num_samples > dataset_size,
+    includes ALL examples once before any duplication. This maximizes coverage
+    of unique examples, which is critical for low-resource datasets.
+
+    Args:
+        dataset_size: Number of examples in the dataset
+        num_samples: Number of samples to draw
+
+    Returns:
+        List of indices (may contain duplicates if num_samples > dataset_size)
+    """
+    if num_samples <= dataset_size:
+        # Sample without replacement
+        return random.sample(range(dataset_size), num_samples)
+    else:
+        # Include ALL examples once, then sample remainder with replacement
+        all_indices = list(range(dataset_size))
+        num_additional = num_samples - dataset_size
+        additional_indices = random.choices(range(dataset_size), k=num_additional)
+        indices = all_indices + additional_indices
+        random.shuffle(indices)  # Shuffle to mix exhaustive + repeated samples
+        return indices
 
 
 def _tokenize_instruction_examples(
