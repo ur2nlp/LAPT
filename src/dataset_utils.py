@@ -102,8 +102,8 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         return _load_plaintext_dir_dataset(cache_dir, directory, pattern)
     elif dataset_type == 'concat':
         sources = dataset_config.sources
-        parent_language = getattr(dataset_config, 'language', None)
-        return _load_concat_dataset(cache_dir, sources, parent_language)
+        parent_name = getattr(dataset_config, 'name', None)
+        return _load_concat_dataset(cache_dir, sources, parent_name)
     elif dataset_type == 'multinomial':
         sources = dataset_config.sources
         alpha = dataset_config.alpha
@@ -455,14 +455,14 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     return untokenized_path
 
 
-def _load_concat_dataset(cache_dir: str, sources: list, parent_language: str = None) -> str:
+def _load_concat_dataset(cache_dir: str, sources: list, parent_name: str = None) -> str:
     """
     Concatenate multiple dataset sources into a single dataset.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (may include 'language' field for naming)
-        parent_language: Optional language code from parent concat config (used for fallback naming)
+        sources: List of dataset source configurations (may include 'name' field for naming)
+        parent_name: Optional name from parent concat config (used for fallback naming)
 
     Returns:
         Path to the untokenized concatenated dataset
@@ -481,16 +481,15 @@ def _load_concat_dataset(cache_dir: str, sources: list, parent_language: str = N
             source_dict_config = DictConfig(source_config)
 
             # Determine source cache name:
-            # 1. Use source's language field if present
-            # 2. Use parent_language_{idx} if parent has language
+            # 1. Use source's name field if present
+            # 2. Use parent_name_{idx} if parent has name
             # 3. Fall back to source_{idx}
-            source_language = getattr(source_dict_config, 'language', None)
-            if source_language:
-                source_name = source_language
-            elif parent_language:
-                source_name = f"{parent_language}_{idx}"
-            else:
-                source_name = f"source_{idx}"
+            source_name = getattr(source_dict_config, 'name', None)
+            if not source_name:
+                if parent_name:
+                    source_name = f"{parent_name}_{idx}"
+                else:
+                    source_name = f"source_{idx}"
 
             source_cache = os.path.join(cache_dir, source_name)
 
@@ -529,7 +528,7 @@ def _load_multinomial_dataset(
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (should have 'language' field for naming).
+        sources: List of dataset source configurations (should have 'name' field for naming).
             Each source can optionally include a 'dev_size' field to override the global dev_size.
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
         total_samples: Total number of training examples to sample (dev set size is separate)
@@ -539,7 +538,7 @@ def _load_multinomial_dataset(
             split (either globally or per-source).
 
     Returns:
-        Path to the untokenized sampled dataset (DatasetDict with train and per-language dev splits)
+        Path to the untokenized sampled dataset (DatasetDict with train and per-source dev splits)
     """
     if not sources:
         raise ValueError("Cannot sample from datasets: sources list is empty")
@@ -595,11 +594,9 @@ def _load_multinomial_dataset(
         for idx, source_config in enumerate(sources):
             source_dict_config = DictConfig(source_config)
 
-            # Determine source name from language field or default to source_{idx}
-            source_language = getattr(source_dict_config, 'language', None)
-            if source_language:
-                source_name = source_language
-            else:
+            # Determine source name from name field or default to source_{idx}
+            source_name = getattr(source_dict_config, 'name', None)
+            if not source_name:
                 source_name = f"source_{idx}"
 
             source_cache = os.path.join(cache_dir, source_name)
