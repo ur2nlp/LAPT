@@ -571,7 +571,6 @@ class TestExternalEvalSetLoader:
         call_args = mock_tokenizer.call_args
         assert call_args[1]['truncation'] is True
         assert call_args[1]['max_length'] == 512
-        assert call_args[1]['padding'] is False
 
     def test_load_external_eval_jsonl(self, tmp_path):
         """

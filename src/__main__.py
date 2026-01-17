@@ -11,7 +11,7 @@ from transformers import (
 
 from dataset_utils import (
     load_untokenized_dataset, load_tokenized_dataset,
-    load_external_eval_set,
+    prepare_eval_datasets,
     DataCollatorForInstructionTuning, is_instruction_dataset
 )
 from model_utils import (
@@ -373,48 +373,18 @@ def lapt(args: DictConfig):
     if not tokenized_cache_exists:
         save_tokenized_config(args, tokenized_path)
 
-    # Prepare eval datasets - either single 'test' split or dict of per-language dev splits
-    # Dev splits are any non-train splits except 'test'
-    dev_splits = [key for key in dataset.keys() if key != 'train' and key != 'test']
-    if dev_splits:
-        # Multinomial sampling case: multiple per-language dev sets
-        eval_dataset = {key: dataset[key] for key in dev_splits}
-        print(f"Using {len(eval_dataset)} per-language eval sets for evaluation: {', '.join(dev_splits)}", file=sys.stderr)
-    else:
-        # Standard case: single dev/test split
-        eval_dataset = dataset['test']
-
-    # Load external evaluation sets if configured
-    # Check both direct override (args.external_eval_sets) and config group (args.external_eval.external_eval_sets)
+    # Prepare eval datasets (handles per-language dev splits and external eval sets)
+    # Check both direct override and config group for external eval sets
     external_eval_sets = args.get('external_eval_sets', None)
     if external_eval_sets is None and hasattr(args, 'external_eval'):
         external_eval_sets = args.external_eval.get('external_eval_sets', None)
 
-    if external_eval_sets:
-        # If eval_dataset is not already a dict, convert it
-        if not isinstance(eval_dataset, dict):
-            # Keep the original dev/test set as 'dev'
-            eval_dataset = {'dev': eval_dataset}
-            print("Converted single eval dataset to dict for external eval sets", file=sys.stderr)
-
-        # Load and add each external eval set
-        for eval_config in external_eval_sets:
-            name = eval_config['name']
-
-            # Check for name conflicts
-            if name in eval_dataset:
-                raise ValueError(
-                    f"External eval set name '{name}' conflicts with existing eval set. "
-                    f"Existing eval sets: {list(eval_dataset.keys())}"
-                )
-
-            external_dataset = load_external_eval_set(
-                eval_config=eval_config,
-                tokenizer=tokenizer,
-                max_length=args.training.max_length
-            )
-            eval_dataset[name] = external_dataset
-            print(f"Added external eval set '{name}' with {len(external_dataset)} examples", file=sys.stderr)
+    eval_dataset = prepare_eval_datasets(
+        dataset=dataset,
+        tokenizer=tokenizer,
+        max_length=args.training.max_length,
+        external_eval_sets=external_eval_sets
+    )
 
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as

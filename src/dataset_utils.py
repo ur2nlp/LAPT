@@ -208,32 +208,12 @@ def _load_huggingface_dataset(
             # Convert estimation batch to dataset and measure lines/doc
             # Use same processing pipeline as main data for accurate estimation
             estimation_dataset = collect_from_stream(stream, estimation_sample_size)
-            if text_column != 'text':
-                estimation_dataset = estimation_dataset.rename_column(text_column, 'text')
-
-            # Apply docs_to_lines transformation (same as main pipeline)
-            estimation_columns = estimation_dataset.column_names
-            estimation_dataset = estimation_dataset.map(
-                docs_to_lines,
-                batched=True,
-                remove_columns=estimation_columns
+            num_estimation_docs = len(estimation_dataset)
+            estimation_dataset = _docs_to_filtered_lines(
+                estimation_dataset, text_column, min_words_per_line
             )
 
-            # Apply min_words_per_line filter if specified (same as main pipeline)
-            estimation_lines_count = len(estimation_dataset)
-            if min_words_per_line is not None:
-                estimation_dataset = estimation_dataset.filter(
-                    lambda x: len(x['text'].split()) >= min_words_per_line
-                )
-                filtered_estimation_lines = len(estimation_dataset)
-                print(
-                    f"  Estimation: {estimation_lines_count} lines → "
-                    f"{filtered_estimation_lines} after filtering",
-                    file=sys.stderr
-                )
-                estimation_lines_count = filtered_estimation_lines
-
-            lines_per_doc = estimation_lines_count / len(estimation_samples) if estimation_samples else 1
+            lines_per_doc = len(estimation_dataset) / num_estimation_docs if num_estimation_docs else 1
             print(
                 f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)",
                 file=sys.stderr
@@ -267,18 +247,9 @@ def _load_huggingface_dataset(
         else:
             dataset = load_dataset(name, config, split=split)
 
-        # Standardize column name to 'text' if needed
-        if text_column != 'text':
-            dataset = dataset.rename_column(text_column, 'text')
-
-        # Convert to line-based format (split documents on newlines)
-        original_columns = dataset.column_names
-        dataset = dataset.map(
-            docs_to_lines,
-            batched=True,
-            remove_columns=original_columns
-        )
-
+        # Convert to line-based format (rename column if needed, split docs on newlines)
+        # Note: Could also pass min_words_per_line here if detailed filtering logs aren't needed
+        dataset = _docs_to_filtered_lines(dataset, text_column, min_words_per_line=None)
         print(f"  Converted to {len(dataset)} lines from documents", file=sys.stderr)
 
         # Filter out short lines (e.g., section titles) if min_words_per_line specified
@@ -324,6 +295,45 @@ def _load_huggingface_dataset(
         print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
 
     return untokenized_path
+
+
+def _docs_to_filtered_lines(
+    dataset: Dataset,
+    text_column: str = 'text',
+    min_words_per_line: int = None
+) -> Dataset:
+    """
+    Convert document-based dataset to line-based format with optional filtering.
+
+    This helper standardizes the transformation pipeline used by HuggingFace dataset loaders.
+
+    Args:
+        dataset: Dataset with document text
+        text_column: Name of the text column (will be renamed to 'text' if different)
+        min_words_per_line: Minimum words per line to keep (None to skip filtering)
+
+    Returns:
+        Dataset with one line per example
+    """
+    # Standardize column name to 'text' if needed
+    if text_column != 'text':
+        dataset = dataset.rename_column(text_column, 'text')
+
+    # Convert to line-based format (split documents on newlines)
+    original_columns = dataset.column_names
+    dataset = dataset.map(
+        docs_to_lines,
+        batched=True,
+        remove_columns=original_columns
+    )
+
+    # Filter short lines if specified
+    if min_words_per_line is not None:
+        dataset = dataset.filter(
+            lambda x: len(x['text'].split()) >= min_words_per_line
+        )
+
+    return dataset
 
 
 def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
@@ -1029,6 +1039,76 @@ def load_external_eval_set(
     )
 
     return dataset
+
+
+def prepare_eval_datasets(
+    dataset: DatasetDict,
+    tokenizer: PreTrainedTokenizer,
+    max_length: int,
+    external_eval_sets: list = None
+):
+    """
+    Prepare evaluation datasets from loaded data and optional external sources.
+
+    Handles both:
+    - Extracting dev splits from tokenized dataset (single or per-language)
+    - Loading and merging external evaluation sets
+
+    Args:
+        dataset: Tokenized DatasetDict with train and dev/test splits
+        tokenizer: Tokenizer for tokenizing external eval sets
+        max_length: Max sequence length for tokenization
+        external_eval_sets: Optional list of external eval configs, each with
+            'name', 'path', and optional 'format' keys
+
+    Returns:
+        Either a single Dataset (standard case) or dict of Datasets (multinomial
+        or when external eval sets are added)
+    """
+    # Dev splits are any non-train splits except 'test'
+    dev_splits = [key for key in dataset.keys() if key != 'train' and key != 'test']
+
+    if dev_splits:
+        # Multinomial sampling case: multiple per-language dev sets
+        eval_dataset = {key: dataset[key] for key in dev_splits}
+        print(
+            f"Using {len(eval_dataset)} per-language eval sets: {', '.join(dev_splits)}",
+            file=sys.stderr
+        )
+    else:
+        # Standard case: single dev/test split
+        eval_dataset = dataset['test']
+
+    # Load external evaluation sets if configured
+    if external_eval_sets:
+        # If eval_dataset is not already a dict, convert it
+        if not isinstance(eval_dataset, dict):
+            eval_dataset = {'dev': eval_dataset}
+            print("Converted single eval dataset to dict for external eval sets", file=sys.stderr)
+
+        # Load and add each external eval set
+        for eval_config in external_eval_sets:
+            name = eval_config['name']
+
+            # Check for name conflicts
+            if name in eval_dataset:
+                raise ValueError(
+                    f"External eval set name '{name}' conflicts with existing eval set. "
+                    f"Existing eval sets: {list(eval_dataset.keys())}"
+                )
+
+            external_dataset = load_external_eval_set(
+                eval_config=eval_config,
+                tokenizer=tokenizer,
+                max_length=max_length
+            )
+            eval_dataset[name] = external_dataset
+            print(
+                f"Added external eval set '{name}' with {len(external_dataset)} examples",
+                file=sys.stderr
+            )
+
+    return eval_dataset
 
 
 class DataCollatorForInstructionTuning:
