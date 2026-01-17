@@ -1019,16 +1019,10 @@ def load_external_eval_set(
     print(f"  Loaded {len(dataset)} examples", file=sys.stderr)
 
     # Tokenize the dataset
-    def tokenize_function(examples):
-        return tokenizer(
-            examples['text'],
-            truncation=True,
-            max_length=max_length,
-            padding=False
-        )
-
     dataset = dataset.map(
-        tokenize_function,
+        lambda examples: tokenizer(
+            examples['text'], max_length=max_length, truncation=True
+        ),
         batched=True,
         remove_columns=['text'],
         desc=f"Tokenizing external eval set '{name}'"
