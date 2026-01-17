@@ -361,7 +361,7 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
     return untokenized_path
 
 
-def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str) -> str:
+def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '*.txt') -> str:
     """
     Load all plaintext files from a directory and concatenate them.
 
