@@ -12,13 +12,13 @@ from omegaconf import OmegaConf
 
 from src.config_utils import (
     extract_dataset_config,
-    extract_tokenizer_config,
     extract_tokenized_config,
     save_config,
     load_config,
     check_config_match,
     _dict_diff
 )
+from src.artifact_configs import TokenizerConfig
 
 
 class TestDictDiff:
@@ -178,18 +178,18 @@ class TestExtractDatasetConfig:
         assert config['seed'] == 42
 
 
-class TestExtractTokenizerConfig:
-    """Test extraction of tokenizer-relevant config parameters."""
+class TestTokenizerConfig:
+    """Test TokenizerConfig extraction and dict conversion."""
 
-    def test_extract_with_focus_disabled(self):
+    def test_from_args_with_focus_disabled(self):
         args = OmegaConf.create({
             'focus': {'enabled': False}
         })
 
-        config = extract_tokenizer_config(args)
-        assert config is None
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config is None
 
-    def test_extract_basic_focus_config(self):
+    def test_from_args_basic_focus_config(self):
         args = OmegaConf.create({
             'hf_model': 'facebook/xglm-564M',
             'dataset': {'cache_dir': 'data/test'},
@@ -201,15 +201,15 @@ class TestExtractTokenizerConfig:
             'seed': 42
         })
 
-        config = extract_tokenizer_config(args)
-        assert config is not None
-        assert config['vocab_size'] == 16384
-        assert config['num_samples'] == 100000
-        assert config['hf_model'] == 'facebook/xglm-564M'
-        assert config['seed'] == 42
-        assert 'train_dataset_cache' in config
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config is not None
+        assert tok_config.vocab_size == 16384
+        assert tok_config.num_samples == 100000
+        assert tok_config.hf_model == 'facebook/xglm-564M'
+        assert tok_config.seed == 42
+        assert tok_config.train_dataset_cache == 'data/test'
 
-    def test_extract_focus_with_separate_dataset(self):
+    def test_from_args_focus_with_separate_dataset(self):
         args = OmegaConf.create({
             'hf_model': 'facebook/xglm-564M',
             'dataset': {'cache_dir': 'data/test'},
@@ -225,11 +225,187 @@ class TestExtractTokenizerConfig:
             'seed': 42
         })
 
-        config = extract_tokenizer_config(args)
-        assert config is not None
-        assert 'focus_dataset' in config
-        assert 'train_dataset_cache' not in config
-        assert config['focus_dataset']['type'] == 'plaintext'
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config is not None
+        assert tok_config.focus_dataset is not None
+        assert tok_config.train_dataset_cache is None
+        assert tok_config.focus_dataset['type'] == 'plaintext'
+
+    def test_to_dict_roundtrip(self):
+        """Test that to_dict produces expected keys for config tracking."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 16384,
+                'num_samples': 100000
+            },
+            'seed': 42
+        })
+
+        tok_config = TokenizerConfig.from_args(args)
+        config_dict = tok_config.to_dict()
+        assert config_dict['vocab_size'] == 16384
+        assert config_dict['hf_model'] == 'facebook/xglm-564M'
+        assert config_dict['seed'] == 42
+
+
+class TestTokenizerConfigFocusSuffix:
+    """
+    Test suite for TokenizerConfig.focus_suffix() method.
+
+    This method builds the path suffix that encodes FOCUS tokenizer parameters
+    to avoid cache collisions when changing vocabulary settings.
+    """
+
+    def test_basic_suffix_no_optional_flags(self):
+        """Test basic suffix with just model, vocab, and samples."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 50000,
+                'num_samples': 100000,
+                'inherit_additional_special_tokens': True,
+                'use_seed_vocabulary': False
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "xglm564m_focus-v50k-s100k"
+
+    def test_suffix_with_no_additional_flag(self):
+        """Test suffix when not inheriting additional special tokens."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 32768,
+                'num_samples': 1000000,
+                'inherit_additional_special_tokens': False,
+                'use_seed_vocabulary': False
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "xglm564m_focus-v32k-s1m_no-additional"
+
+    def test_suffix_with_seed_vocabulary_default_params(self):
+        """Test suffix with seed vocabulary using default parameters."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 16384,
+                'num_samples': 50000,
+                'inherit_additional_special_tokens': True,
+                'use_seed_vocabulary': True,
+                'seed_min_frequency': 1,
+                'seed_lambda': 0.5,
+                'seed_vocab_multiplier': 5.0
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5"
+
+    def test_suffix_with_seed_vocabulary_custom_min_frequency(self):
+        """Test suffix with non-default seed min frequency."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 16384,
+                'num_samples': 50000,
+                'inherit_additional_special_tokens': True,
+                'use_seed_vocabulary': True,
+                'seed_min_frequency': 5,
+                'seed_lambda': 0.5,
+                'seed_vocab_multiplier': 5.0
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5-min5"
+
+    def test_suffix_with_seed_lambda(self):
+        """Test suffix with non-default seed lambda."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 16384,
+                'num_samples': 50000,
+                'inherit_additional_special_tokens': True,
+                'use_seed_vocabulary': True,
+                'seed_min_frequency': 1,
+                'seed_lambda': 0.7,
+                'seed_vocab_multiplier': 5.0
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.7"
+
+    def test_suffix_with_all_flags(self):
+        """Test suffix with all optional flags enabled."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 32768,
+                'num_samples': 1000000,
+                'inherit_additional_special_tokens': False,
+                'use_seed_vocabulary': True,
+                'seed_min_frequency': 10,
+                'seed_lambda': 0.7,
+                'seed_vocab_multiplier': 5.0
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "xglm564m_focus-v32k-s1m_no-additional_seeded-5.0x-lambda0.7-min10"
+
+    def test_suffix_respects_number_formatting(self):
+        """Test that vocab and sample sizes use format_number() correctly."""
+        args = OmegaConf.create({
+            'hf_model': 'gpt2',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 128000,
+                'num_samples': 5000000,
+                'inherit_additional_special_tokens': True,
+                'use_seed_vocabulary': False
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "gpt2_focus-v128k-s5m"
+
+    def test_suffix_with_different_model(self):
+        """Test suffix generation with different base model."""
+        args = OmegaConf.create({
+            'hf_model': 'meta-llama/Llama-2-7b',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 50000,
+                'num_samples': 100000,
+                'inherit_additional_special_tokens': True,
+                'use_seed_vocabulary': False
+            },
+            'seed': 42
+        })
+        tok_config = TokenizerConfig.from_args(args)
+        assert tok_config.focus_suffix() == "llama27b_focus-v50k-s100k"
 
 
 class TestExtractTokenizedConfig:

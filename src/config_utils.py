@@ -15,6 +15,8 @@ from typing import Optional
 from omegaconf import DictConfig, OmegaConf
 import yaml
 
+from artifact_configs import TokenizerConfig
+
 
 def extract_dataset_config(args: DictConfig) -> dict:
     """
@@ -61,51 +63,6 @@ def extract_dataset_config(args: DictConfig) -> dict:
     return config
 
 
-def extract_tokenizer_config(args: DictConfig) -> Optional[dict]:
-    """
-    Extract the configuration subset that affects tokenizer training (FOCUS only).
-
-    This should mirror all parameters used by train_new_tokenizer() in tokenizer_utils.py
-    that affect the tokenizer artifact (not just input/output paths).
-
-    Args:
-        args: Full Hydra configuration
-
-    Returns:
-        Dictionary containing only parameters that affect tokenizer training,
-        or None if FOCUS is not enabled
-    """
-    if not args.focus.enabled:
-        return None
-
-    config = {
-        'hf_model': args.hf_model,
-        'vocab_size': args.focus.vocab_size,
-        'num_samples': args.focus.num_samples,
-        'inherit_additional_special_tokens': args.focus.get('inherit_additional_special_tokens', True),
-        'character_coverage': args.focus.get('character_coverage', 1.0),
-        'use_seed_vocabulary': args.focus.get('use_seed_vocabulary', False),
-        'seed_min_frequency': args.focus.get('seed_min_frequency', 1),
-        'seed_lambda': args.focus.get('seed_lambda', 0.5),
-        'seed_round_mode': args.focus.get('seed_round_mode', 'ceil'),
-        'seed_vocab_multiplier': args.focus.get('seed_vocab_multiplier', 5.0),
-        'seed_target_mass': args.focus.get('seed_target_mass', 10_000_000),
-        'fasttext_model_min_count': args.focus.get('fasttext_model_min_count', 4),
-        'seed': args.seed,
-    }
-
-    # Include either training dataset or separate FOCUS dataset config
-    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
-        # Use separate FOCUS dataset
-        focus_dataset_config = OmegaConf.to_container(args.focus.dataset, resolve=True)
-        config['focus_dataset'] = focus_dataset_config
-    else:
-        # Use training dataset - just reference the cache_dir
-        config['train_dataset_cache'] = args.dataset.cache_dir
-
-    return config
-
-
 def extract_tokenized_config(args: DictConfig) -> dict:
     """
     Extract the configuration subset that affects tokenized dataset caching.
@@ -128,9 +85,9 @@ def extract_tokenized_config(args: DictConfig) -> dict:
     config['dataset'] = extract_dataset_config(args)
 
     # Include tokenizer config if FOCUS
-    tokenizer_config = extract_tokenizer_config(args)
+    tokenizer_config = TokenizerConfig.from_args(args)
     if tokenizer_config is not None:
-        config['tokenizer'] = tokenizer_config
+        config['tokenizer'] = tokenizer_config.to_dict()
 
     return config
 
@@ -281,17 +238,6 @@ def save_dataset_config(args: DictConfig, cache_dir: str):
     print(f"Saved dataset config to {config_path}", file=sys.stderr)
 
 
-def save_tokenizer_config(args: DictConfig, tokenizer_dir: str):
-    """Save tokenizer config alongside trained tokenizer (FOCUS only)."""
-    config = extract_tokenizer_config(args)
-    if config is None:
-        return
-
-    config_path = os.path.join(tokenizer_dir, "training_config.yaml")
-    save_config(config, config_path)
-    print(f"Saved tokenizer config to {config_path}", file=sys.stderr)
-
-
 def save_tokenized_config(args: DictConfig, tokenized_dir: str):
     """Save tokenized dataset config."""
     config = extract_tokenized_config(args)
@@ -314,17 +260,6 @@ def check_dataset_config(args: DictConfig, cache_dir: str) -> bool:
     cached_config = load_config(config_path)
     current_config = extract_dataset_config(args)
     return check_config_match(cached_config, current_config, "Untokenized Dataset")
-
-
-def check_tokenizer_config(args: DictConfig, tokenizer_dir: str) -> bool:
-    """Check if cached tokenizer config matches current config (FOCUS only)."""
-    if not args.focus.enabled:
-        return True
-
-    config_path = os.path.join(tokenizer_dir, "training_config.yaml")
-    cached_config = load_config(config_path)
-    current_config = extract_tokenizer_config(args)
-    return check_config_match(cached_config, current_config, "Tokenizer")
 
 
 def check_tokenized_config(args: DictConfig, tokenized_dir: str) -> bool:

@@ -19,7 +19,8 @@ from tokenizer_utils import (
     prepare_focus_training_data,
     train_new_tokenizer
 )
-from config_utils import check_tokenizer_config, save_tokenizer_config
+from config_utils import save_config, load_config, check_config_match
+from artifact_configs import TokenizerConfig
 
 
 def format_number(n: int) -> str:
@@ -82,45 +83,6 @@ def get_seed_tokenizer_suffix(
     return f"focus-v{vocab_str}-s{samples_str}_seed-{seed_vocab_multiplier}x"
 
 
-def get_tokenizer_suffix(args: DictConfig) -> str:
-    """
-    Build tokenizer suffix encoding vocab size, num samples, and other tokenizer parameters.
-
-    Args:
-        args: Hydra configuration object
-
-    Returns:
-        Suffix string like "focus-v16k-s200k", "focus-v16k-s200k_seeded-5.0x-lambda0.5",
-        "focus-v16k-s200k_customdata", or "focus-v16k-s200k_no-additional_seeded-5.0x-lambda0.7-min2"
-    """
-    vocab_str = format_number(args.focus.vocab_size)
-    samples_str = format_number(args.focus.num_samples)
-    suffix = f"focus-v{vocab_str}-s{samples_str}"
-
-    if not args.focus.get('inherit_additional_special_tokens', True):
-        suffix += "_no-additional"
-
-    # Indicate if using separate FOCUS dataset (not training dataset)
-    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
-        suffix += "_customdata"
-
-    # Include seed vocabulary status in path to avoid cache collision
-    if args.focus.get('use_seed_vocabulary', False):
-        suffix += "_seeded"
-        # Add multiplier (modifies seeded approach)
-        vocab_multiplier = args.focus.get('seed_vocab_multiplier', 5.0)
-        suffix += f"-{vocab_multiplier}x"
-        # Add lambda (the varying parameter in sweeps)
-        seed_lambda = args.focus.get('seed_lambda', 0.5)
-        suffix += f"-lambda{seed_lambda}"
-        # Add other non-default parameters
-        min_freq = args.focus.get('seed_min_frequency', 1)
-        if min_freq > 1:
-            suffix += f"-min{min_freq}"
-
-    return suffix
-
-
 def set_random_seeds(seed: int):
     """
     Set all random seeds for reproducibility.
@@ -166,10 +128,9 @@ def _initialize_focus_model(args: DictConfig):
     print("FOCUS MODE ENABLED", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
-    # Build directory paths with formatted vocab size and sample count
-    model_short = get_model_shortname(args.hf_model)
-    tokenizer_suffix = get_tokenizer_suffix(args)
-    focus_suffix = f"{model_short}_{tokenizer_suffix}"
+    # Extract tokenizer config (handles path generation and validation)
+    tokenizer_config = TokenizerConfig.from_args(args)
+    focus_suffix = tokenizer_config.focus_suffix()
 
     # Prepare JSONL training data for FOCUS
     # Store FOCUS training data alongside the dataset it's sampled from
@@ -196,19 +157,19 @@ def _initialize_focus_model(args: DictConfig):
         print(f"Loading tokenizer from {args.focus.tokenizer_path}", file=sys.stderr)
         tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
     else:
-        tokenizer_output_dir = f"tokenizers/{args.dataset.language}/{focus_suffix}"
+        tokenizer_output_dir = tokenizer_config.cache_dir(args.dataset.language)
 
         # Check if tokenizer cache and config exist
         tokenizer_cache_exists = os.path.exists(
             os.path.join(tokenizer_output_dir, "tokenizer.json")
         )
-        tokenizer_config_exists = os.path.exists(
-            os.path.join(tokenizer_output_dir, "training_config.yaml")
-        )
+        config_path = os.path.join(tokenizer_output_dir, "training_config.yaml")
+        tokenizer_config_exists = os.path.exists(config_path)
 
         # Verify config matches if both cache and config exist
         if tokenizer_cache_exists and tokenizer_config_exists:
-            check_tokenizer_config(args, tokenizer_output_dir)
+            cached_config = load_config(config_path)
+            check_config_match(cached_config, tokenizer_config.to_dict(), "Tokenizer")
         elif tokenizer_cache_exists and not tokenizer_config_exists:
             print(
                 f"Note: Using cached tokenizer at {tokenizer_output_dir} without config tracking\n"
@@ -217,24 +178,15 @@ def _initialize_focus_model(args: DictConfig):
             )
 
         tokenizer = train_new_tokenizer(
+            config=tokenizer_config,
             jsonl_path=jsonl_path,
-            base_tokenizer_name=args.hf_model,
-            vocab_size=args.focus.vocab_size,
-            output_path=tokenizer_output_dir,
-            num_samples=args.focus.num_samples,
-            inherit_additional_special_tokens=args.focus.get('inherit_additional_special_tokens', True),
-            character_coverage=args.focus.get('character_coverage', 1.0),
-            use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
-            seed_min_frequency=args.focus.get('seed_min_frequency', 1),
-            seed_lambda=args.focus.get('seed_lambda', 0.5),
-            seed_round_mode=args.focus.get('seed_round_mode', 'ceil'),
-            seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
-            seed_target_mass=args.focus.get('seed_target_mass', 10_000_000)
+            output_path=tokenizer_output_dir
         )
 
         # Save config if we just created the tokenizer
         if not tokenizer_cache_exists:
-            save_tokenizer_config(args, tokenizer_output_dir)
+            save_config(tokenizer_config.to_dict(), config_path)
+            print(f"Saved tokenizer config to {config_path}", file=sys.stderr)
 
     # Load model and apply FOCUS
     print(f"Loading model: {args.hf_model}", file=sys.stderr)
@@ -263,7 +215,7 @@ def _initialize_focus_model(args: DictConfig):
         source_tokenizer=source_tokenizer,
         target_tokenizer=tokenizer,
         training_data_path=jsonl_path,
-        fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4),
+        fasttext_model_min_count=tokenizer_config.fasttext_model_min_count,
         cache_dir=embedding_cache_dir
     )
 
@@ -289,8 +241,8 @@ def _initialize_focus_model(args: DictConfig):
     print("FOCUS initialization complete", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
-    # Determine tokenized dataset path for FOCUS (separate from standard tokenized data)
-    tokenized_path = f"{args.dataset.cache_dir}/tokenized_focus_{focus_suffix}"
+    # Suffix indicates which tokenizer was used
+    tokenized_path = f"{args.dataset.cache_dir}/tokenized_{focus_suffix}"
 
     return model, tokenizer, tokenized_path
 

@@ -15,9 +15,10 @@ from dataset_utils import (
     DataCollatorForInstructionTuning, is_instruction_dataset
 )
 from model_utils import (
-    initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname,
-    get_seed_tokenizer_suffix
+    initialize_model_and_tokenizer, set_random_seeds,
+    get_model_shortname, get_seed_tokenizer_suffix
 )
+from artifact_configs import TokenizerConfig
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 from config_utils import (
     check_dataset_config, save_dataset_config, check_tokenized_config, save_tokenized_config,
@@ -151,12 +152,10 @@ def _get_tokenizer_path(args: DictConfig) -> str:
     Returns:
         Path to tokenizer directory, or None if FOCUS is disabled
     """
-    if not args.focus.enabled:
+    tokenizer_config = TokenizerConfig.from_args(args)
+    if tokenizer_config is None:
         return None
-
-    model_short = get_model_shortname(args.hf_model)
-    tokenizer_suffix = get_tokenizer_suffix(args)
-    return f"tokenizers/{args.dataset.language}/{model_short}_{tokenizer_suffix}"
+    return tokenizer_config.cache_dir(args.dataset.language)
 
 
 def _get_tokenized_path(args: DictConfig) -> str:
@@ -169,10 +168,9 @@ def _get_tokenized_path(args: DictConfig) -> str:
     Returns:
         Path to tokenized dataset directory
     """
-    if args.focus.enabled:
-        model_short = get_model_shortname(args.hf_model)
-        tokenizer_suffix = get_tokenizer_suffix(args)
-        return f"{args.dataset.cache_dir}/tokenized_{model_short}_{tokenizer_suffix}"
+    tokenizer_config = TokenizerConfig.from_args(args)
+    if tokenizer_config is not None:
+        return f"{args.dataset.cache_dir}/tokenized_{tokenizer_config.focus_suffix()}"
     else:
         return f"{args.dataset.cache_dir}/tokenized"
 
@@ -193,10 +191,9 @@ def _get_output_dir(args: DictConfig) -> str:
     training_config = args.training.name.replace('_', '-')
 
     # Build base path
-    if args.focus.enabled:
-        model_short = get_model_shortname(args.hf_model)
-        tokenizer_suffix = get_tokenizer_suffix(args)
-        base_path = f"{args.output_dir}/{args.dataset.language}/{model_short}_{tokenizer_suffix}_{training_config}"
+    tokenizer_config = TokenizerConfig.from_args(args)
+    if tokenizer_config is not None:
+        base_path = f"{args.output_dir}/{args.dataset.language}/{tokenizer_config.focus_suffix()}_{training_config}"
     else:
         base_path = f"{args.output_dir}/{args.dataset.language}/{training_config}"
 
@@ -282,10 +279,9 @@ def _handle_cache_cleanup(args: DictConfig):
             shutil.rmtree(output_dir)
 
         # Also clear FOCUS training data if applicable
-        if args.focus.enabled:
-            model_short = get_model_shortname(args.hf_model)
-            tokenizer_suffix = get_tokenizer_suffix(args)
-            focus_suffix = f"{model_short}_{tokenizer_suffix}"
+        tokenizer_config = TokenizerConfig.from_args(args)
+        if tokenizer_config is not None:
+            focus_suffix = tokenizer_config.focus_suffix()
             # FOCUS data is stored in the cache_dir of the dataset it was sampled from
             if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
                 # Using separate FOCUS dataset
