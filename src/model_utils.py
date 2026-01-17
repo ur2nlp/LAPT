@@ -12,7 +12,7 @@ import sys
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from tokenizer_utils import (
     apply_focus_initialization,
@@ -199,8 +199,12 @@ def _initialize_focus_model(args: DictConfig):
         tokenizer_output_dir = f"tokenizers/{args.dataset.language}/{focus_suffix}"
 
         # Check if tokenizer cache and config exist
-        tokenizer_cache_exists = os.path.exists(os.path.join(tokenizer_output_dir, "tokenizer.json"))
-        tokenizer_config_exists = os.path.exists(os.path.join(tokenizer_output_dir, "training_config.yaml"))
+        tokenizer_cache_exists = os.path.exists(
+            os.path.join(tokenizer_output_dir, "tokenizer.json")
+        )
+        tokenizer_config_exists = os.path.exists(
+            os.path.join(tokenizer_output_dir, "training_config.yaml")
+        )
 
         # Verify config matches if both cache and config exist
         if tokenizer_cache_exists and tokenizer_config_exists:
@@ -236,7 +240,6 @@ def _initialize_focus_model(args: DictConfig):
     print(f"Loading model: {args.hf_model}", file=sys.stderr)
 
     # Load config and override dropout if specified
-    from transformers import AutoConfig
     config = AutoConfig.from_pretrained(args.hf_model)
     if hasattr(args.training, 'dropout'):
         config.dropout = args.training.dropout
@@ -305,7 +308,6 @@ def _initialize_standard_model(args: DictConfig):
     tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
 
     # Load config and override dropout if specified
-    from transformers import AutoConfig
     config = AutoConfig.from_pretrained(args.hf_model)
     if hasattr(args.training, 'dropout'):
         config.dropout = args.training.dropout

@@ -4,23 +4,23 @@ import sys
 
 from omegaconf import DictConfig, OmegaConf
 
-import torch
 from transformers import (
     DataCollatorForLanguageModeling, EarlyStoppingCallback,
     Trainer, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 )
 
 from dataset_utils import (
-    load_untokenized_dataset, load_or_tokenize_dataset,
-    load_and_tokenize_external_eval_set,
+    load_untokenized_dataset, load_tokenized_dataset,
+    load_external_eval_set,
     DataCollatorForInstructionTuning, is_instruction_dataset
 )
-from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname, get_seed_tokenizer_suffix
+from model_utils import (
+    initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname,
+    get_seed_tokenizer_suffix
+)
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 from config_utils import (
-    check_dataset_config, save_dataset_config,
-    check_tokenizer_config, save_tokenizer_config,
-    check_tokenized_config, save_tokenized_config,
+    check_dataset_config, save_dataset_config, check_tokenized_config, save_tokenized_config,
     save_model_config
 )
 
@@ -361,7 +361,7 @@ def lapt(args: DictConfig):
         )
 
     # Tokenize dataset with appropriate tokenizer
-    dataset = load_or_tokenize_dataset(
+    dataset = load_tokenized_dataset(
         untokenized_path=untokenized_path,
         tokenized_path=tokenized_path,
         tokenizer=tokenizer,
@@ -408,7 +408,7 @@ def lapt(args: DictConfig):
                     f"Existing eval sets: {list(eval_dataset.keys())}"
                 )
 
-            external_dataset = load_and_tokenize_external_eval_set(
+            external_dataset = load_external_eval_set(
                 eval_config=eval_config,
                 tokenizer=tokenizer,
                 max_length=args.training.max_length

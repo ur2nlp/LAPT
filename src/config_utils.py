@@ -110,7 +110,7 @@ def extract_tokenized_config(args: DictConfig) -> dict:
     """
     Extract the configuration subset that affects tokenized dataset caching.
 
-    This should mirror all parameters used by load_or_tokenize_dataset() in dataset_utils.py
+    This should mirror all parameters used by load_tokenized_dataset() in dataset_utils.py
     that affect the tokenized dataset artifact, plus all upstream dependencies.
 
     Args:

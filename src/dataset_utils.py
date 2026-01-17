@@ -6,6 +6,7 @@ tokenizing with provided tokenizers, and caching results.
 """
 
 import glob
+import json
 import os
 import random
 import sys
@@ -70,7 +71,8 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         min_words_per_line = getattr(dataset_config, 'min_words_per_line', None)
         oversampling_factor = getattr(dataset_config, 'oversampling_factor', 3)
         return _load_huggingface_dataset(
-            cache_dir, name, config, split, text_column, max_samples, min_words_per_line, oversampling_factor
+            cache_dir, name, config, split, text_column, max_samples, min_words_per_line,
+            oversampling_factor
         )
     elif dataset_type == 'plaintext':
         file_path = dataset_config.path
@@ -145,10 +147,13 @@ def _load_huggingface_dataset(
         config: Dataset configuration/subset (e.g., 'wikitext-103-v1'), optional
         split: Which split to load (default: 'train')
         text_column: Name of the column containing text (default: 'text')
-        max_samples: Maximum number of LINES to load (after splitting docs), uses streaming if specified (optional)
-        min_words_per_line: Minimum number of space-separated words per line (filters out titles/headers)
-        oversampling_factor: When max_samples specified, download this many times more documents than estimated
-            needed to maintain document diversity (default: 3). Higher values = better diversity but more memory.
+        max_samples: Maximum number of LINES to load (after splitting docs), uses streaming
+            if specified (optional)
+        min_words_per_line: Minimum number of space-separated words per line
+            (filters out titles/headers)
+        oversampling_factor: When max_samples specified, download this many times more documents
+            than estimated needed to maintain document diversity (default: 3). Higher values =
+            better diversity but more memory.
 
     Returns:
         Path to the untokenized dataset
@@ -176,7 +181,10 @@ def _load_huggingface_dataset(
             # Phase 1: Sample a small batch to estimate lines per document
             # This helps us download the right number of documents
             estimation_sample_size = min(1000, max_samples // 10)
-            print(f"  Phase 1: Sampling {estimation_sample_size} documents to estimate lines/doc", file=sys.stderr)
+            print(
+                f"  Phase 1: Sampling {estimation_sample_size} documents to estimate lines/doc",
+                file=sys.stderr
+            )
 
             estimation_samples = []
             for i, example in enumerate(stream):
@@ -213,7 +221,10 @@ def _load_huggingface_dataset(
                 estimation_lines_count = filtered_estimation_lines
 
             lines_per_doc = estimation_lines_count / len(estimation_samples) if estimation_samples else 1
-            print(f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)", file=sys.stderr)
+            print(
+                f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)",
+                file=sys.stderr
+            )
 
             # Check if estimation found any valid lines
             if lines_per_doc == 0:
@@ -279,8 +290,9 @@ def _load_huggingface_dataset(
             # Check if we have enough lines after filtering
             if max_samples and filtered_size < max_samples:
                 print(
-                    f"Warning: After filtering, only {filtered_size} lines remain, but {max_samples} requested. "
-                    f"Consider increasing oversampling_factor (current: {oversampling_factor}) or reducing min_words_per_line.",
+                    f"Warning: After filtering, only {filtered_size} lines remain, but "
+                    f"{max_samples} requested. Consider increasing oversampling_factor "
+                    f"(current: {oversampling_factor}) or reducing min_words_per_line.",
                     file=sys.stderr
                 )
 
@@ -395,8 +407,6 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     Returns:
         Path to the untokenized dataset (with 'prompt' and 'response' columns)
     """
-    import json
-
     untokenized_path = os.path.join(cache_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
@@ -485,12 +495,18 @@ def _load_concat_dataset(cache_dir: str, sources: list, parent_language: str = N
 
             source_dataset = load_from_disk(source_path)
             datasets_to_concat.append(source_dataset['train'])
-            print(f"  Source {idx} ({source_name}): {len(source_dataset['train'])} examples", file=sys.stderr)
+            print(
+                f"  Source {idx} ({source_name}): {len(source_dataset['train'])} examples",
+                file=sys.stderr
+            )
 
         concatenated = concatenate_datasets(datasets_to_concat)
         dataset_dict = DatasetDict({'train': concatenated})
         dataset_dict.save_to_disk(untokenized_path)
-        print(f"Concatenated dataset saved to {untokenized_path} ({len(concatenated)} total examples)", file=sys.stderr)
+        print(
+            f"Concatenated dataset saved to {untokenized_path} ({len(concatenated)} total examples)",
+            file=sys.stderr
+        )
 
     return untokenized_path
 
@@ -507,13 +523,13 @@ def _load_multinomial_dataset(
     Args:
         cache_dir: Base directory for caching dataset artifacts
         sources: List of dataset source configurations (should have 'language' field for naming).
-                Each source can optionally include a 'dev_size' field to override the global dev_size.
+            Each source can optionally include a 'dev_size' field to override the global dev_size.
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
         total_samples: Total number of training examples to sample (dev set size is separate)
-        dev_size: Global default fraction of each source to use for dev set (must be between 0 and 1).
-                 Individual sources can override this with their own dev_size field, which can be
-                 fractional (0 < x < 1) or absolute (>= 1) for that specific source.
-                 Use -1 to skip dev split (either globally or per-source).
+        dev_size: Global default fraction of each source to use for dev set (must be between 0 and
+            1). Individual sources can override this with their own dev_size field, which can be
+            fractional (0 < x < 1) or absolute (>= 1) for that specific source. Use -1 to skip dev
+            split (either globally or per-source).
 
     Returns:
         Path to the untokenized sampled dataset (DatasetDict with train and per-language dev splits)
@@ -538,20 +554,26 @@ def _load_multinomial_dataset(
     elif not skip_dev_split and not (0 < dev_size < 1):
         raise ValueError(
             f"Multinomial sampling requires fractional dev_size (0 < dev_size < 1), got {dev_size}. "
-            "Use dev_size=-1 to skip dev split (e.g., for FOCUS training). "
+            "Use dev_size=-1 to skip dev split (e.g., when using external dev sets). "
             "Fixed-size dev sets are not supported for multinomial sampling."
         )
 
     if skip_dev_split:
         print("WARNING: dev_size=-1 skips dev split creation.", file=sys.stderr)
-        print("  If using this dataset for model training (not FOCUS), this will cause", file=sys.stderr)
-        print("  dev-set contamination as upsampled training data won't have a held-out dev set.", file=sys.stderr)
-        print("  Only use dev_size=-1 for datasets that don't need evaluation (e.g., FOCUS).", file=sys.stderr)
+        print(
+            "If using this dataset for model training (not FOCUS), this will cause dev-set "
+            "contamination as upsampled training data won't have a held-out dev set. Only use " 
+            "dev_size=-1 for datasets that don't need evaluation (e.g., FOCUS training), or ones "
+            "that have an external dev set.",
+            file=sys.stderr
+        )
 
     untokenized_path = os.path.join(cache_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
-        print(f"Multinomial sampling from {len(sources)} sources with alpha={alpha}", file=sys.stderr)
+        print(
+            f"Multinomial sampling from {len(sources)} sources with alpha={alpha}", file=sys.stderr
+        )
         if not skip_dev_split:
             print(f"Dev split: {dev_size:.1%} of each source (before upsampling)", file=sys.stderr)
         else:
@@ -590,7 +612,8 @@ def _load_multinomial_dataset(
             # Validate per-source dev_size
             if source_dev_size == 0:
                 raise ValueError(
-                    f"Source {idx}: dev_size=0 is ambiguous. Use dev_size=-1 to explicitly skip dev split."
+                    f"Source {idx}: dev_size=0 is ambiguous. "
+                    "Use dev_size=-1 to explicitly skip dev split."
                 )
             elif not skip_source_dev_split and source_dev_size < 0:
                 raise ValueError(
@@ -617,11 +640,22 @@ def _load_multinomial_dataset(
             train_sizes.append(len(train_data))
 
             # Log with indication if using per-source override
-            dev_size_label = f"dev_size={source_dev_size}" if hasattr(source_dict_config, 'dev_size') else f"global dev_size={source_dev_size}"
+            dev_size_label = (
+                f"dev_size={source_dev_size}" if hasattr(source_dict_config, 'dev_size')
+                else f"global dev_size={source_dev_size}"
+            )
             if not skip_source_dev_split:
-                print(f"  Source {idx} ({dev_name}): {len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})", file=sys.stderr)
+                print(
+                    f"  Source {idx} ({dev_name}): "
+                    f"{len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})",
+                    file=sys.stderr
+                )
             else:
-                print(f"  Source {idx} ({dev_name}): {len(train_data)} examples (no dev split, {dev_size_label})", file=sys.stderr)
+                print(
+                    f"  Source {idx} ({dev_name}): "
+                    f"{len(train_data)} examples (no dev split, {dev_size_label})",
+                    file=sys.stderr
+                )
 
         # Check for empty datasets
         if all(size == 0 for size in train_sizes):
@@ -661,7 +695,8 @@ def _load_multinomial_dataset(
                 indices = all_indices + additional_indices
                 random.shuffle(indices)  # Shuffle to mix exhaustive + repeated samples
 
-            # .select() keeps data memory-mapped, handles duplicate indices for sampling with replacement
+            # .select() keeps data memory-mapped, handles duplicate indices for sampling with
+            # replacement
             selected = dataset.select(indices)
             selected_train_datasets.append(selected)
 
@@ -681,7 +716,11 @@ def _load_multinomial_dataset(
         print(f"Multinomial sampled dataset saved to {untokenized_path}", file=sys.stderr)
         print(f"  Train: {len(concatenated_train)} examples (upsampled)", file=sys.stderr)
         if not skip_dev_split:
-            print(f"  Dev splits: {', '.join(dev_names)} ({sum(len(d) for d in dev_datasets)} examples total, natural proportions)", file=sys.stderr)
+            print(
+                f"  Dev splits: {', '.join(dev_names)} "
+                f"({sum(len(d) for d in dev_datasets)} examples total, natural proportions)",
+                file=sys.stderr
+            )
 
     return untokenized_path
 
@@ -736,6 +775,7 @@ def _tokenize_instruction_examples(
             )
 
             # Concatenate
+            # TODO: fix linting issue here
             input_ids = prompt_tokens['input_ids'] + response_tokens['input_ids']
             attention_mask = prompt_tokens['attention_mask'] + response_tokens['attention_mask']
 
@@ -778,7 +818,7 @@ def _tokenize_instruction_examples(
     }
 
 
-def load_or_tokenize_dataset(
+def load_tokenized_dataset(
     untokenized_path: str,
     tokenized_path: str,
     tokenizer: PreTrainedTokenizer,
@@ -800,7 +840,7 @@ def load_or_tokenize_dataset(
         tokenizer: Tokenizer to use for tokenization
         max_length: Maximum sequence length for tokenization
         dev_size: Fraction (0 < dev_size < 1) or absolute count (dev_size >= 1)
-                  of data to use for development/test set (ignored if dataset already split)
+            of data to use for development/test set (ignored if dataset already split)
 
     Returns:
         Dataset dictionary with 'train' and dev splits
@@ -814,7 +854,10 @@ def load_or_tokenize_dataset(
     in config_utils.py.
     """
     if not os.path.exists(tokenized_path):
-        print(f"Tokenizing dataset with vocab size {len(tokenizer)}", file=sys.stderr)
+        print(
+            f"Tokenizing dataset with {tokenizer.name_or_path} (vocab size {len(tokenizer)})",
+            file=sys.stderr
+        )
         dataset = load_from_disk(untokenized_path)
 
         # Check if this is an instruction dataset (has 'prompt'/'response' instead of 'text')
@@ -825,7 +868,10 @@ def load_or_tokenize_dataset(
         )
 
         if is_instruction_dataset:
-            print("Detected instruction dataset format, tokenizing with label masking", file=sys.stderr)
+            print(
+                "Detected instruction dataset format, tokenizing with label masking",
+                file=sys.stderr
+            )
             # Determine columns to remove (prompt, response, and text if present for mixed datasets)
             columns_to_remove = ['prompt', 'response']
             if 'text' in dataset[sample_split].column_names:
@@ -869,7 +915,7 @@ def load_or_tokenize_dataset(
     return dataset
 
 
-def load_and_tokenize_external_eval_set(
+def load_external_eval_set(
     eval_config: dict,
     tokenizer: PreTrainedTokenizer,
     max_length: int
@@ -879,10 +925,10 @@ def load_and_tokenize_external_eval_set(
 
     Args:
         eval_config: Dictionary with 'name', 'path', and optional 'format' keys
-                    - name: Name for the eval set (used in metrics)
-                    - path: Path to the data file
-                    - format: 'plaintext' (default) or 'jsonl'
-                    - text_column: Column name for jsonl format (default: 'text')
+            - name: Name for the eval set (used in metrics)
+            - path: Path to the data file
+            - format: 'plaintext' (default) or 'jsonl'
+            - text_column: Column name for jsonl format (default: 'text')
         tokenizer: Tokenizer to use for tokenization
         max_length: Maximum sequence length for tokenization
 
@@ -908,7 +954,6 @@ def load_and_tokenize_external_eval_set(
 
     elif file_format == 'jsonl':
         # Load JSONL file
-        import json
         data = []
         with open(path, 'r', encoding='utf-8') as f:
             for line in f:
