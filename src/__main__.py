@@ -12,7 +12,8 @@ from transformers import (
 
 from dataset_utils import (
     load_untokenized_dataset, load_or_tokenize_dataset,
-    load_and_tokenize_external_eval_set
+    load_and_tokenize_external_eval_set,
+    DataCollatorForInstructionTuning, is_instruction_dataset
 )
 from model_utils import initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname, get_seed_tokenizer_suffix
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
@@ -457,9 +458,14 @@ def lapt(args: DictConfig):
         torch_compile_mode=args.training.get('torch_compile_mode', None)
     )
 
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm=False,
-    )
+    # Choose appropriate data collator based on dataset type
+    if is_instruction_dataset(dataset):
+        print("Using instruction tuning collator (loss masking enabled)", file=sys.stderr)
+        data_collator = DataCollatorForInstructionTuning(tokenizer=tokenizer)
+    else:
+        data_collator = DataCollatorForLanguageModeling(
+            tokenizer=tokenizer, mlm=False,
+        )
 
     trainer_kwargs = {
         'model': model,

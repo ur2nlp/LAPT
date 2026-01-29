@@ -9,6 +9,7 @@ Output format: One example per line with instruction and response.
 """
 
 import argparse
+import json
 import random
 import sys
 from pathlib import Path
@@ -157,6 +158,35 @@ def format_example(example: dict, format_template: str) -> str:
     return ' '.join(formatted.split())
 
 
+def format_example_jsonl(example: dict, response_prefix: str = "Response:") -> dict:
+    """
+    Format a FLAN example as a dict with separate prompt and response fields.
+
+    Used for instruction tuning with loss masking - the model is trained to
+    predict only the response portion.
+
+    Args:
+        example: Dict with 'inputs' and 'targets' fields
+        response_prefix: The delimiter before the response (default: "Response:")
+
+    Returns:
+        Dict with 'prompt' and 'response' fields
+    """
+    # Preprocess: replace HTML line breaks with spaces (case-insensitive)
+    inputs = example['inputs'].strip().replace('<br>', ' ').replace('<BR>', ' ')
+    targets = example['targets'].strip().replace('<br>', ' ').replace('<BR>', ' ')
+
+    # Collapse whitespace within inputs and targets
+    inputs = ' '.join(inputs.split())
+    targets = ' '.join(targets.split())
+
+    # Construct prompt with newline before response prefix
+    prompt = f"{inputs}\n{response_prefix}"
+    response = f" {targets}"
+
+    return {"prompt": prompt, "response": response}
+
+
 def download_flan_subset(
     source: str,
     template: str,
@@ -214,6 +244,8 @@ def filter_flan(
     max_length: int = None,
     length_metric: str = 'words',
     format_template: str = "{inputs} Response: {targets}",
+    output_format: str = 'plaintext',
+    response_prefix: str = "Response:",
     cache_dir: str = "data/flan_cache",
     seed: int = 1
 ):
@@ -229,7 +261,9 @@ def filter_flan(
         exclude_prefixes: List of instruction prefixes to exclude (optional)
         max_length: Maximum length in words or characters (optional)
         length_metric: 'words' or 'chars' for length measurement
-        format_template: Template for formatting examples
+        format_template: Template for formatting examples (plaintext only)
+        output_format: 'plaintext' or 'jsonl' for instruction tuning with loss masking
+        response_prefix: Delimiter before response in JSONL format (default: "Response:")
         cache_dir: Directory to cache downloads
         seed: Random seed for sampling
     """
@@ -287,8 +321,12 @@ def filter_flan(
     # Write formatted examples
     with open(output_file, 'w', encoding='utf-8') as f:
         for example in sampled_dataset:
-            formatted = format_example(example, format_template)
-            f.write(formatted + '\n')
+            if output_format == 'jsonl':
+                formatted = format_example_jsonl(example, response_prefix)
+                f.write(json.dumps(formatted, ensure_ascii=False) + '\n')
+            else:
+                formatted = format_example(example, format_template)
+                f.write(formatted + '\n')
 
     print(f"Done! Wrote {len(sampled_dataset):,} examples.", file=sys.stderr)
 
@@ -323,6 +361,11 @@ Examples:
   # Get NIv2 examples with character limit
   python filter_flan.py --source niv2 --template zsopt --num-samples 30000 \\
       --max-length 2000 --length-metric chars
+
+  # Get FLAN examples in JSONL format for instruction tuning with loss masking
+  python filter_flan.py --source flan --template zsnoopt --num-samples 50000 \\
+      --output-format jsonl --output-file data/flan_filtered/flan_nli.jsonl
+  # Output: {"prompt": "{inputs}\\nResponse:", "response": " {targets}"}
 
 Available sources: flan (FLAN 2021), t0 (T0), niv2 (NIv2), cot (Chain-of-Thought), dialog (Dialog)
 Available templates: zsnoopt (zero-shot no option), zsopt (zero-shot with options),
@@ -387,7 +430,19 @@ Note: Task names include version numbers (e.g., 'anli/r1:0.1.0', 'bool_q:1.0.0')
         '--format-template',
         type=str,
         default='{inputs} Response: {targets}',
-        help='Format template with {inputs} and {targets} placeholders. Use \\n for newlines.'
+        help='Format template with {inputs} and {targets} placeholders. Use \\n for newlines. Only used for plaintext output.'
+    )
+    parser.add_argument(
+        '--output-format',
+        choices=['plaintext', 'jsonl'],
+        default='plaintext',
+        help='Output format: "plaintext" (one example per line) or "jsonl" (separate prompt/response fields for loss masking). (default: plaintext)'
+    )
+    parser.add_argument(
+        '--response-prefix',
+        type=str,
+        default='Response:',
+        help='Delimiter before response in JSONL output (default: "Response:"). Only used with --output-format jsonl.'
     )
     parser.add_argument(
         '--cache-dir',
@@ -408,6 +463,7 @@ Note: Task names include version numbers (e.g., 'anli/r1:0.1.0', 'bool_q:1.0.0')
     print(f"  Source: {SOURCE_DISPLAY_NAMES[args.source]} ({args.source})", file=sys.stderr)
     print(f"  Template: {args.template}", file=sys.stderr)
     print(f"  Output: {args.output_file}", file=sys.stderr)
+    print(f"  Output format: {args.output_format}", file=sys.stderr)
     print(f"  Samples: {args.num_samples:,}", file=sys.stderr)
     if args.task_names:
         print(f"  Task names: {args.task_names}", file=sys.stderr)
@@ -415,7 +471,10 @@ Note: Task names include version numbers (e.g., 'anli/r1:0.1.0', 'bool_q:1.0.0')
         print(f"  Exclude prefixes: {args.exclude_prefixes}", file=sys.stderr)
     if args.max_length:
         print(f"  Max length: {args.max_length} {args.length_metric}", file=sys.stderr)
-    print(f"  Format: {args.format_template}", file=sys.stderr)
+    if args.output_format == 'plaintext':
+        print(f"  Format template: {args.format_template}", file=sys.stderr)
+    else:
+        print(f"  Response prefix: {args.response_prefix}", file=sys.stderr)
     print(f"  Seed: {args.seed}", file=sys.stderr)
     print()
 
@@ -429,6 +488,8 @@ Note: Task names include version numbers (e.g., 'anli/r1:0.1.0', 'bool_q:1.0.0')
         max_length=args.max_length,
         length_metric=args.length_metric,
         format_template=args.format_template,
+        output_format=args.output_format,
+        response_prefix=args.response_prefix,
         cache_dir=args.cache_dir,
         seed=args.seed
     )

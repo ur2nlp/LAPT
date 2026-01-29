@@ -88,6 +88,9 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         alpha = dataset_config.alpha
         total_samples = dataset_config.total_samples
         return _load_multinomial_dataset(cache_dir, sources, alpha, total_samples, dev_size)
+    elif dataset_type == 'instruction_jsonl':
+        file_path = dataset_config.path
+        return _load_instruction_jsonl_dataset(cache_dir, file_path)
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
@@ -374,6 +377,67 @@ def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str) ->
     return _load_concat_dataset(cache_dir, sources)
 
 
+def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
+    """
+    Load instruction-tuning data from JSONL file(s).
+
+    Each line should be a JSON object with 'prompt' and 'response' fields:
+    {"prompt": "Translate to Gothic: hello\\nResponse:", "response": " hails"}
+
+    Unlike plaintext datasets (which have 'text' column), instruction datasets
+    have separate 'prompt' and 'response' columns. This allows for loss masking
+    during training where only the response tokens contribute to the loss.
+
+    Args:
+        cache_dir: Base directory for caching dataset artifacts
+        file_path: Path to JSONL file
+
+    Returns:
+        Path to the untokenized dataset (with 'prompt' and 'response' columns)
+    """
+    import json
+
+    untokenized_path = os.path.join(cache_dir, "untokenized")
+
+    if not os.path.exists(untokenized_path):
+        print(f"Loading instruction data from {file_path}", file=sys.stderr)
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Instruction JSONL file not found: {file_path}")
+
+        prompts = []
+        responses = []
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON on line {line_num}: {e}")
+
+                if 'prompt' not in obj or 'response' not in obj:
+                    raise ValueError(
+                        f"Line {line_num} missing 'prompt' or 'response' field. "
+                        f"Got keys: {list(obj.keys())}"
+                    )
+                prompts.append(obj['prompt'])
+                responses.append(obj['response'])
+
+        if not prompts:
+            raise ValueError(f"JSONL file {file_path} contains no valid examples")
+
+        print(f"Loaded {len(prompts)} instruction examples from JSONL file", file=sys.stderr)
+
+        dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
+        dataset_dict = DatasetDict({'train': dataset})
+        dataset_dict.save_to_disk(untokenized_path)
+        print(f"Untokenized instruction dataset saved to {untokenized_path}", file=sys.stderr)
+
+    return untokenized_path
+
+
 def _load_concat_dataset(cache_dir: str, sources: list, parent_language: str = None) -> str:
     """
     Concatenate multiple dataset sources into a single dataset.
@@ -622,6 +686,98 @@ def _load_multinomial_dataset(
     return untokenized_path
 
 
+def _tokenize_instruction_examples(
+    examples: dict,
+    tokenizer: PreTrainedTokenizer,
+    max_length: int
+) -> dict:
+    """
+    Tokenize instruction examples with label masking.
+
+    For each example, tokenizes prompt and response separately, then concatenates.
+    Creates labels where prompt tokens are masked (-100) and only response tokens
+    contribute to the loss.
+
+    Also handles mixed datasets where some examples have prompt/response (instruction)
+    and others have only text (plaintext). Plaintext examples get labels = input_ids
+    (standard causal LM loss on all tokens).
+
+    Args:
+        examples: Batch with 'prompt' and 'response' fields, optionally 'text'
+        tokenizer: Tokenizer to use
+        max_length: Maximum sequence length (prompt + response combined)
+
+    Returns:
+        Dict with 'input_ids', 'attention_mask', and 'labels' fields
+    """
+    all_input_ids = []
+    all_attention_masks = []
+    all_labels = []
+
+    # Get text column if it exists (for mixed datasets)
+    texts = examples.get('text', [None] * len(examples['prompt']))
+
+    for prompt, response, text in zip(examples['prompt'], examples['response'], texts):
+        # Check if this is an instruction example or plaintext
+        is_instruction = prompt is not None and response is not None
+
+        if is_instruction:
+            # Instruction example: tokenize prompt and response separately
+            prompt_tokens = tokenizer(
+                prompt,
+                add_special_tokens=True,
+                truncation=False
+            )
+
+            response_tokens = tokenizer(
+                response,
+                add_special_tokens=False,
+                truncation=False
+            )
+
+            # Concatenate
+            input_ids = prompt_tokens['input_ids'] + response_tokens['input_ids']
+            attention_mask = prompt_tokens['attention_mask'] + response_tokens['attention_mask']
+
+            # Create labels: -100 for prompt (masked), actual tokens for response
+            prompt_length = len(prompt_tokens['input_ids'])
+            labels = [-100] * prompt_length + response_tokens['input_ids']
+        else:
+            # Plaintext example: standard tokenization, labels = input_ids
+            if text is None:
+                raise ValueError(
+                    "Example has neither valid prompt/response nor text. "
+                    "Mixed datasets must have 'text' for plaintext examples."
+                )
+
+            tokens = tokenizer(
+                text,
+                add_special_tokens=True,
+                truncation=False
+            )
+
+            input_ids = tokens['input_ids']
+            attention_mask = tokens['attention_mask']
+            # Standard causal LM: predict all tokens
+            labels = list(input_ids)
+
+        # Truncate if needed
+        if len(input_ids) > max_length:
+            input_ids = input_ids[:max_length]
+            attention_mask = attention_mask[:max_length]
+            labels = labels[:max_length]
+
+        all_input_ids.append(input_ids)
+        all_attention_masks.append(attention_mask)
+        all_labels.append(labels)
+
+    return {
+        'input_ids': all_input_ids,
+        'attention_mask': all_attention_masks,
+        'labels': all_labels
+    }
+
+
 def load_or_tokenize_dataset(
     untokenized_path: str,
     tokenized_path: str,
@@ -634,6 +790,9 @@ def load_or_tokenize_dataset(
 
     Handles both simple datasets (creates train/test split) and pre-split datasets
     from multinomial sampling (already has train and per-language dev splits).
+
+    Also handles instruction datasets (with 'prompt'/'response' columns) by creating
+    labels with prompt tokens masked (-100).
 
     Args:
         untokenized_path: Path to untokenized dataset
@@ -648,6 +807,7 @@ def load_or_tokenize_dataset(
         - Simple datasets: {'train': ..., 'test': ...}
         - Multinomial datasets: {'train': ..., '{language}': ..., '{language}': ..., ...}
           (e.g., {'train': ..., 'got': ..., 'ang': ..., 'non': ...})
+        - Instruction datasets: same structure but with 'labels' field for loss masking
 
     NOTE: Parameters affecting the tokenized dataset artifact (max_length, dev_size, plus all
     upstream dataset and tokenizer parameters) should be tracked in extract_tokenized_config()
@@ -657,14 +817,33 @@ def load_or_tokenize_dataset(
         print(f"Tokenizing dataset with vocab size {len(tokenizer)}", file=sys.stderr)
         dataset = load_from_disk(untokenized_path)
 
-        # Tokenize all splits
-        dataset = dataset.map(
-            lambda examples: tokenizer(
-                examples['text'], max_length=max_length, truncation=True
-            ),
-            batched=True,
-            remove_columns='text'
+        # Check if this is an instruction dataset (has 'prompt'/'response' instead of 'text')
+        sample_split = list(dataset.keys())[0]
+        is_instruction_dataset = (
+            'prompt' in dataset[sample_split].column_names
+            and 'response' in dataset[sample_split].column_names
         )
+
+        if is_instruction_dataset:
+            print("Detected instruction dataset format, tokenizing with label masking", file=sys.stderr)
+            # Determine columns to remove (prompt, response, and text if present for mixed datasets)
+            columns_to_remove = ['prompt', 'response']
+            if 'text' in dataset[sample_split].column_names:
+                columns_to_remove.append('text')
+            dataset = dataset.map(
+                lambda examples: _tokenize_instruction_examples(examples, tokenizer, max_length),
+                batched=True,
+                remove_columns=columns_to_remove
+            )
+        else:
+            # Standard text dataset
+            dataset = dataset.map(
+                lambda examples: tokenizer(
+                    examples['text'], max_length=max_length, truncation=True
+                ),
+                batched=True,
+                remove_columns='text'
+            )
 
         # Check if dataset already has dev splits (from multinomial sampling)
         # Dev splits are any non-train splits (e.g., 'got', 'ang', 'non')
@@ -768,3 +947,95 @@ def load_and_tokenize_external_eval_set(
     )
 
     return dataset
+
+
+class DataCollatorForInstructionTuning:
+    """
+    Data collator for instruction tuning with pre-computed labels.
+
+    This collator expects examples that already have 'labels' field with
+    prompt tokens masked as -100. It handles padding for:
+    - input_ids: padded with tokenizer.pad_token_id
+    - attention_mask: padded with 0
+    - labels: padded with -100 (ignored by CrossEntropyLoss)
+
+    Unlike DataCollatorForLanguageModeling, this collator does NOT create labels
+    from input_ids - it uses the pre-computed labels from the dataset.
+
+    Args:
+        tokenizer: Tokenizer used for padding
+        padding: Padding strategy ('longest', 'max_length', or False)
+        max_length: Maximum length when padding='max_length'
+    """
+
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        padding: str = 'longest',
+        max_length: int = None
+    ):
+        self.tokenizer = tokenizer
+        self.padding = padding
+        self.max_length = max_length
+
+        # Ensure tokenizer has a pad token
+        if self.tokenizer.pad_token_id is None:
+            # Use EOS token as pad token if not set
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
+    def __call__(self, features: list) -> dict:
+        """
+        Collate a batch of features.
+
+        Args:
+            features: List of dicts with 'input_ids', 'attention_mask', and 'labels'
+
+        Returns:
+            Batch dict with padded tensors
+        """
+        import torch
+
+        # Separate labels from other features for custom padding
+        labels = [f['labels'] for f in features]
+        # Remove labels temporarily for tokenizer padding
+        features_without_labels = [{k: v for k, v in f.items() if k != 'labels'} for f in features]
+
+        # Use tokenizer's padding for input_ids and attention_mask
+        batch = self.tokenizer.pad(
+            features_without_labels,
+            padding=self.padding,
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
+
+        # Pad labels with -100 (ignored by loss function)
+        max_label_length = max(len(l) for l in labels)
+        padded_labels = []
+        for label in labels:
+            padding_length = max_label_length - len(label)
+            # Pad on the right with -100
+            padded_label = label + [-100] * padding_length
+            padded_labels.append(padded_label)
+
+        batch['labels'] = torch.tensor(padded_labels, dtype=torch.long)
+
+        return batch
+
+
+def is_instruction_dataset(dataset) -> bool:
+    """
+    Check if a dataset is an instruction-tuning dataset (has pre-computed labels).
+
+    Args:
+        dataset: A Dataset or DatasetDict
+
+    Returns:
+        True if the dataset has 'labels' column, indicating instruction format
+    """
+    if hasattr(dataset, 'keys'):
+        # DatasetDict - check the first split
+        sample_split = list(dataset.keys())[0]
+        return 'labels' in dataset[sample_split].column_names
+    else:
+        # Single Dataset
+        return 'labels' in dataset.column_names

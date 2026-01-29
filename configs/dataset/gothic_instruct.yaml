@@ -1,0 +1,37 @@
+type: multinomial
+language: gothic_instruct
+sources:
+  # === Instruction data (loss masking on response only) ===
+  # Gothic translation (English ↔ Gothic, both scripts)
+  - type: instruction_jsonl
+    language: got-translation
+    dev_size: -1  # Using external holdout (test split)
+    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train.jsonl
+  # Gothic transliteration (Roman ↔ Gothic script)
+  - type: instruction_jsonl
+    language: got-transliteration
+    dev_size: -1  # Using external holdout (test split)
+    path: data/gothic_instruct/transliteration_all-codices_both-directions_train.jsonl
+  # English FLAN (NLI/QA tasks)
+  - type: instruction_jsonl
+    language: eng-flan
+    path: data/flan_filtered/flan_nli_qa.jsonl
+  # === LM data (standard causal LM loss on all tokens) ===
+  # Gothic monolingual
+  - type: plaintext
+    language: got
+    dev_size: -1  # Using external holdout
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
+  # English Wikipedia
+  - type: huggingface
+    language: eng
+    name: wikimedia/wikipedia
+    config: 20231101.en
+    split: train
+    max_samples: 5100000
+    min_words_per_line: 8
+    oversampling_factor: 32
+    dev_size: 100000
+alpha: 0.5
+total_samples: 9000000
+cache_dir: "data/${dataset.language}"

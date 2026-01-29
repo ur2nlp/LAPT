@@ -4,6 +4,8 @@ Tests for dataset_utils module.
 Current coverage:
 - _load_plaintext_dataset: Basic loading, empty line filtering, caching, error cases
 - _load_concat_dataset: Multi-source concatenation, caching, error cases
+- _tokenize_instruction_examples: Label masking, truncation, batching
+- DataCollatorForInstructionTuning: Padding, label preservation, tensor output
 
 Testing approach:
 - Use real temporary files (via pytest's tmp_path fixture) for I/O testing
@@ -44,6 +46,8 @@ from dataset_utils import (
     _load_concat_dataset,
     load_untokenized_dataset,
     load_and_tokenize_external_eval_set,
+    _tokenize_instruction_examples,
+    DataCollatorForInstructionTuning,
 )
 
 
@@ -751,3 +755,577 @@ class TestExternalEvalSetLoader:
 
         # Assert: Should only have 2 non-empty lines
         assert len(dataset) == 2
+
+
+class TestTokenizeInstructionExamples:
+    """
+    Tests for _tokenize_instruction_examples function.
+
+    This function tokenizes instruction-tuning data with label masking:
+    - Prompt tokens get label=-100 (ignored in loss)
+    - Response tokens get their actual token IDs as labels
+
+    Testing strategy:
+    - Use real tokenizer (base_tokenizer fixture) for accurate token counts
+    - Test various prompt/response combinations
+    - Verify label masking is correct
+    - Test truncation behavior
+    """
+
+    def test_basic_tokenization(self, base_tokenizer):
+        """
+        Test basic tokenization with simple prompt and response.
+
+        Verifies:
+        1. Output has correct keys (input_ids, attention_mask, labels)
+        2. Prompt tokens are masked (-100 in labels)
+        3. Response tokens have actual token IDs in labels
+        4. input_ids and labels have same length
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': ['Translate to Gothic: hello\nResponse:'],
+            'response': [' world']
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        # Check output structure
+        assert 'input_ids' in result
+        assert 'attention_mask' in result
+        assert 'labels' in result
+
+        input_ids = result['input_ids'][0]
+        labels = result['labels'][0]
+
+        # Same length
+        assert len(input_ids) == len(labels)
+
+        # Count masked vs unmasked labels
+        num_masked = sum(1 for l in labels if l == -100)
+        num_unmasked = sum(1 for l in labels if l != -100)
+
+        # Should have some masked (prompt) and some unmasked (response)
+        assert num_masked > 0, "Should have masked prompt tokens"
+        assert num_unmasked > 0, "Should have unmasked response tokens"
+
+        # Unmasked labels should match corresponding input_ids
+        for i, label in enumerate(labels):
+            if label != -100:
+                assert label == input_ids[i], f"Label at position {i} should match input_id"
+
+    def test_prompt_fully_masked(self, base_tokenizer):
+        """
+        Test that the entire prompt portion is masked.
+
+        Strategy: Tokenize prompt alone, count tokens, verify that many are masked.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        prompt = "This is a test prompt with several words\nResponse:"
+        response = " Yes"
+
+        examples = {
+            'prompt': [prompt],
+            'response': [response]
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+        labels = result['labels'][0]
+
+        # Tokenize prompt separately to count its tokens
+        prompt_tokens = base_tokenizer(prompt, add_special_tokens=True)
+        prompt_length = len(prompt_tokens['input_ids'])
+
+        # First prompt_length labels should all be -100
+        for i in range(prompt_length):
+            assert labels[i] == -100, f"Label at position {i} should be -100 (prompt portion)"
+
+    def test_multiple_examples(self, base_tokenizer):
+        """
+        Test batched tokenization with multiple examples.
+
+        Verifies each example is tokenized independently.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': [
+                'Question: What is 2+2?\nResponse:',
+                'Translate: hello\nResponse:'
+            ],
+            'response': [
+                ' 4',
+                ' hola'
+            ]
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        # Should have 2 examples
+        assert len(result['input_ids']) == 2
+        assert len(result['labels']) == 2
+        assert len(result['attention_mask']) == 2
+
+        # Each example should have different lengths (different prompts)
+        len1 = len(result['input_ids'][0])
+        len2 = len(result['input_ids'][1])
+        # They could be same length by chance, but labels should differ
+        assert result['labels'][0] != result['labels'][1]
+
+    def test_truncation(self, base_tokenizer):
+        """
+        Test that sequences are truncated to max_length.
+
+        Strategy: Use very short max_length, verify output is truncated.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        # Long prompt and response
+        examples = {
+            'prompt': ['This is a very long prompt ' * 20 + '\nResponse:'],
+            'response': [' This is a very long response ' * 20]
+        }
+
+        max_length = 50
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=max_length)
+
+        # Should be truncated to max_length
+        assert len(result['input_ids'][0]) <= max_length
+        assert len(result['labels'][0]) <= max_length
+        assert len(result['attention_mask'][0]) <= max_length
+
+    def test_empty_response(self, base_tokenizer):
+        """
+        Test handling of empty response (edge case).
+
+        With empty response, all labels should be -100.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': ['Prompt text\nResponse:'],
+            'response': ['']
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        labels = result['labels'][0]
+
+        # All labels should be -100 (no response tokens)
+        assert all(l == -100 for l in labels), "All labels should be -100 for empty response"
+
+    def test_response_starts_with_space(self, base_tokenizer):
+        """
+        Test that response with leading space is handled correctly.
+
+        Our JSONL format uses ' response' (with leading space) to ensure
+        proper tokenization as a continuation.
+        """
+        from dataset_utils import _tokenize_instruction_examples
+
+        examples = {
+            'prompt': ['Test\nResponse:'],
+            'response': [' answer']  # Note leading space
+        }
+
+        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+
+        # Should tokenize without errors
+        assert len(result['input_ids'][0]) > 0
+        assert len(result['labels'][0]) > 0
+
+
+class TestDataCollatorForInstructionTuning:
+    """
+    Tests for DataCollatorForInstructionTuning.
+
+    This collator handles batching of instruction-tuning data:
+    - Pads input_ids with pad_token_id
+    - Pads attention_mask with 0
+    - Pads labels with -100 (so padded positions don't contribute to loss)
+
+    Testing strategy:
+    - Test with features of different lengths to verify padding
+    - Test single-example batch (no padding needed)
+    - Verify tensor shapes and dtypes
+    """
+
+    def test_basic_padding(self, base_tokenizer):
+        """
+        Test that features of different lengths are padded correctly.
+
+        Verifies:
+        1. All sequences padded to same length
+        2. input_ids padded with pad_token_id
+        3. attention_mask padded with 0
+        4. labels padded with -100
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+        import torch
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        # Features with different lengths
+        features = [
+            {
+                'input_ids': [1, 2, 3, 4, 5],
+                'attention_mask': [1, 1, 1, 1, 1],
+                'labels': [-100, -100, 3, 4, 5]
+            },
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, 2, 3]
+            }
+        ]
+
+        batch = collator(features)
+
+        # Check shapes - should be padded to longest (5)
+        assert batch['input_ids'].shape == (2, 5)
+        assert batch['attention_mask'].shape == (2, 5)
+        assert batch['labels'].shape == (2, 5)
+
+        # Check dtypes
+        assert batch['input_ids'].dtype == torch.long
+        assert batch['labels'].dtype == torch.long
+
+        # Check padding values for second (shorter) sequence
+        # Last 2 positions should be padded
+        pad_token_id = base_tokenizer.pad_token_id or base_tokenizer.eos_token_id
+        assert batch['input_ids'][1, 3].item() == pad_token_id
+        assert batch['input_ids'][1, 4].item() == pad_token_id
+        assert batch['attention_mask'][1, 3].item() == 0
+        assert batch['attention_mask'][1, 4].item() == 0
+        assert batch['labels'][1, 3].item() == -100
+        assert batch['labels'][1, 4].item() == -100
+
+    def test_single_example_batch(self, base_tokenizer):
+        """
+        Test batch with single example (no padding needed).
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, 2, 3]
+            }
+        ]
+
+        batch = collator(features)
+
+        # Should have batch size 1
+        assert batch['input_ids'].shape == (1, 3)
+        assert batch['labels'].shape == (1, 3)
+
+        # Values should be unchanged
+        assert batch['input_ids'][0].tolist() == [1, 2, 3]
+        assert batch['labels'][0].tolist() == [-100, 2, 3]
+
+    def test_preserves_masked_labels(self, base_tokenizer):
+        """
+        Test that -100 labels are preserved (not overwritten by padding logic).
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3, 4],
+                'attention_mask': [1, 1, 1, 1],
+                'labels': [-100, -100, 3, 4]  # First two are masked
+            }
+        ]
+
+        batch = collator(features)
+
+        # Original -100 values should be preserved
+        assert batch['labels'][0, 0].item() == -100
+        assert batch['labels'][0, 1].item() == -100
+        assert batch['labels'][0, 2].item() == 3
+        assert batch['labels'][0, 3].item() == 4
+
+    def test_handles_all_masked_labels(self, base_tokenizer):
+        """
+        Test handling of sequence where all labels are -100.
+
+        This can happen with empty responses or very long prompts.
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, -100, -100]  # All masked
+            }
+        ]
+
+        batch = collator(features)
+
+        # Should work without errors
+        assert batch['labels'].shape == (1, 3)
+        assert batch['labels'][0].tolist() == [-100, -100, -100]
+
+    def test_returns_pytorch_tensors(self, base_tokenizer):
+        """
+        Test that output is PyTorch tensors, not lists.
+        """
+        from dataset_utils import DataCollatorForInstructionTuning
+        import torch
+
+        collator = DataCollatorForInstructionTuning(base_tokenizer)
+
+        features = [
+            {
+                'input_ids': [1, 2, 3],
+                'attention_mask': [1, 1, 1],
+                'labels': [-100, 2, 3]
+            }
+        ]
+
+        batch = collator(features)
+
+        assert isinstance(batch['input_ids'], torch.Tensor)
+        assert isinstance(batch['attention_mask'], torch.Tensor)
+        assert isinstance(batch['labels'], torch.Tensor)
+
+
+class TestMixedInstructionPlaintextDatasets:
+    """
+    Tests for mixing instruction (prompt/response) and plaintext (text) datasets.
+
+    This is important for instruction tuning where you might want to:
+    - Include instruction data (translation, FLAN) with loss masking
+    - Include LM data (monolingual text) with standard causal LM loss
+
+    The challenge: these have different column structures that need to be
+    handled during concatenation and tokenization.
+    """
+
+    def test_concatenate_different_column_schemas_unions_columns(self, tmp_path):
+        """
+        Test that concatenating datasets with different columns creates union.
+
+        HuggingFace Datasets unions all columns and fills missing values with None.
+        This means we can mix instruction and plaintext data, but need to handle
+        the None values during tokenization.
+        """
+        from datasets import Dataset, concatenate_datasets
+
+        instruction_data = Dataset.from_dict({
+            'prompt': ['Translate: hello\nResponse:'],
+            'response': [' hola']
+        })
+
+        plaintext_data = Dataset.from_dict({
+            'text': ['This is plain text.']
+        })
+
+        # Concatenation works - creates union of columns
+        combined = concatenate_datasets([instruction_data, plaintext_data])
+
+        # Should have all three columns
+        assert set(combined.column_names) == {'prompt', 'response', 'text'}
+
+        # Instruction row: has prompt/response, text is None
+        assert combined[0]['prompt'] == 'Translate: hello\nResponse:'
+        assert combined[0]['response'] == ' hola'
+        assert combined[0]['text'] is None
+
+        # Plaintext row: has text, prompt/response are None
+        assert combined[1]['text'] == 'This is plain text.'
+        assert combined[1]['prompt'] is None
+        assert combined[1]['response'] is None
+
+    def test_mixed_tokenization_with_normalized_columns(self, tmp_path, base_tokenizer):
+        """
+        Test that mixed datasets work when columns are normalized.
+
+        Strategy: Instruction data can include a 'text' column (full sequence)
+        alongside 'prompt'/'response' for label masking during tokenization.
+        """
+        from datasets import Dataset, DatasetDict, concatenate_datasets
+        from dataset_utils import load_or_tokenize_dataset
+
+        # Create instruction data with all three columns
+        instruction_data = Dataset.from_dict({
+            'text': ['Translate: hello\nResponse: hola'],
+            'prompt': ['Translate: hello\nResponse:'],
+            'response': [' hola']
+        })
+
+        plaintext_data = Dataset.from_dict({
+            'text': ['This is plain text for language modeling.']
+        })
+
+        # To concatenate, plaintext needs matching columns (even if empty/None)
+        # This simulates what a unified loader might do
+        plaintext_with_instruction_cols = Dataset.from_dict({
+            'text': plaintext_data['text'],
+            'prompt': [None] * len(plaintext_data),
+            'response': [None] * len(plaintext_data)
+        })
+
+        # Now concatenation works
+        combined = concatenate_datasets([instruction_data, plaintext_with_instruction_cols])
+        assert len(combined) == 2
+
+        # Create DatasetDict structure expected by load_or_tokenize_dataset
+        dataset_dict = DatasetDict({'train': combined})
+
+        # Save to disk
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        # This should work but instruction examples with None prompt/response
+        # will need special handling
+        # For now, test that we detect the instruction format
+        from datasets import load_from_disk
+        loaded = load_from_disk(str(untokenized_path))
+
+        sample_split = list(loaded.keys())[0]
+        has_prompt = 'prompt' in loaded[sample_split].column_names
+        has_response = 'response' in loaded[sample_split].column_names
+
+        assert has_prompt and has_response, "Dataset should have instruction columns"
+
+    def test_plaintext_only_detection(self, tmp_path, base_tokenizer):
+        """
+        Test that pure plaintext datasets are correctly detected as non-instruction.
+        """
+        from datasets import Dataset, DatasetDict, load_from_disk
+        from dataset_utils import load_or_tokenize_dataset
+
+        plaintext_data = Dataset.from_dict({
+            'text': ['Line 1', 'Line 2', 'Line 3']
+        })
+
+        dataset_dict = DatasetDict({'train': plaintext_data})
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        # Tokenize
+        result = load_or_tokenize_dataset(
+            str(untokenized_path),
+            str(tokenized_path),
+            base_tokenizer,
+            max_length=128,
+            dev_size=0.5
+        )
+
+        # Should NOT have labels column (standard causal LM)
+        assert 'labels' not in result['train'].column_names
+
+    def test_instruction_only_detection(self, tmp_path, base_tokenizer):
+        """
+        Test that pure instruction datasets are correctly detected and get labels.
+        """
+        from datasets import Dataset, DatasetDict
+        from dataset_utils import load_or_tokenize_dataset
+
+        instruction_data = Dataset.from_dict({
+            'prompt': [
+                'Translate: hello\nResponse:',
+                'Translate: world\nResponse:'
+            ],
+            'response': [' hola', ' mundo']
+        })
+
+        dataset_dict = DatasetDict({'train': instruction_data})
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        result = load_or_tokenize_dataset(
+            str(untokenized_path),
+            str(tokenized_path),
+            base_tokenizer,
+            max_length=128,
+            dev_size=0.5
+        )
+
+        # Should have labels column with masking
+        assert 'labels' in result['train'].column_names
+
+        # Check that some labels are -100 (masked prompt tokens)
+        labels = result['train']['labels'][0]
+        assert -100 in labels, "Instruction data should have masked prompt tokens"
+
+    def test_mixed_instruction_and_plaintext_tokenization(self, tmp_path, base_tokenizer):
+        """
+        Test tokenizing a dataset that mixes instruction and plaintext examples.
+
+        This is the key test for supporting mixed training data.
+        Instruction examples should get label masking, plaintext should not.
+        """
+        from datasets import Dataset, DatasetDict, concatenate_datasets
+        from dataset_utils import load_or_tokenize_dataset
+
+        # Create instruction data (multiple examples to ensure some end up in train)
+        instruction_data = Dataset.from_dict({
+            'prompt': [
+                'Question: What is 2+2?\nResponse:',
+                'Translate: hello\nResponse:'
+            ],
+            'response': [' 4', ' hola']
+        })
+
+        # Create plaintext data
+        plaintext_data = Dataset.from_dict({
+            'text': [
+                'This is regular language modeling text.',
+                'Another plain text example for LM training.'
+            ]
+        })
+
+        # Concatenate (creates union of columns with None for missing)
+        combined = concatenate_datasets([instruction_data, plaintext_data])
+
+        dataset_dict = DatasetDict({'train': combined})
+        untokenized_path = tmp_path / "untokenized"
+        dataset_dict.save_to_disk(str(untokenized_path))
+
+        tokenized_path = tmp_path / "tokenized"
+
+        result = load_or_tokenize_dataset(
+            str(untokenized_path),
+            str(tokenized_path),
+            base_tokenizer,
+            max_length=128,
+            dev_size=0.5
+        )
+
+        # Both splits should have examples
+        assert len(result['train']) >= 1
+        assert len(result['test']) >= 1
+
+        # Check the tokenized data has proper structure
+        assert 'input_ids' in result['train'].column_names
+        assert 'attention_mask' in result['train'].column_names
+        assert 'labels' in result['train'].column_names
+
+        # Gather all labels from both splits
+        all_labels = list(result['train']['labels']) + list(result['test']['labels'])
+
+        # Instruction examples should have -100 masking (at least some labels are -100)
+        has_masking = any(-100 in labels for labels in all_labels)
+        assert has_masking, "Instruction examples should have masked labels"
+
+        # Plaintext examples should have no -100 (all labels are actual tokens)
+        has_unmasked = any(-100 not in labels for labels in all_labels)
+        assert has_unmasked, "Plaintext examples should have unmasked labels"
