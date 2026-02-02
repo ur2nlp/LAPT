@@ -2,10 +2,10 @@ type: multinomial
 language: old_germanic
 sources:
   - type: plaintext
-    language: ang
+    id: ang
     path: data/beowulf/beowulf_clean.txt
   - type: concat
-    language: got
+    id: got
     dev_size: -1  # No dev split - using external holdout instead
     sources:
       - type: plaintext
@@ -13,18 +13,18 @@ sources:
       - type: plaintext
         path: data/gothic_prepared/transliteration_all-codices_both-directions_train.txt
   - type: concat
-    language: non
+    id: non
     sources:
       - type: plaintext
         path: data/sagas/sagas_clean.txt
       - type: plaintext
         path: data/icecorpus-texts/icepahc_12th-18th_clean.txt
   - type: plaintext
-    language: got-eng
+    id: got-eng
     dev_size: -1  # No dev split - using external holdout instead
     path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_train.txt
   - type: huggingface
-    language: eng
+    id: eng
     name: wikimedia/wikipedia
     config: 20231101.en
     split: train
