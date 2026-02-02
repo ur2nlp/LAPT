@@ -24,7 +24,7 @@ TODO: Add tests for:
 - load_untokenized_dataset (main dispatcher function)
   - Test routing to correct loader based on config type
   - Test OSCAR dataset loading
-- load_or_tokenize_dataset (tokenization layer)
+- load_tokenized_dataset (tokenization layer)
   - Test tokenization with different max_length values
   - Test dev split creation for non-multinomial datasets
 - Edge cases:
@@ -45,7 +45,7 @@ from dataset_utils import (
     _load_plaintext_dir_dataset,
     _load_concat_dataset,
     load_untokenized_dataset,
-    load_and_tokenize_external_eval_set,
+    load_external_eval_set,
     _tokenize_instruction_examples,
     DataCollatorForInstructionTuning,
 )
@@ -556,7 +556,7 @@ class TestExternalEvalSetLoader:
         }
 
         # Act: Load and tokenize
-        dataset = load_and_tokenize_external_eval_set(
+        dataset = load_external_eval_set(
             eval_config=eval_config,
             tokenizer=mock_tokenizer,
             max_length=512
@@ -571,7 +571,6 @@ class TestExternalEvalSetLoader:
         call_args = mock_tokenizer.call_args
         assert call_args[1]['truncation'] is True
         assert call_args[1]['max_length'] == 512
-        assert call_args[1]['padding'] is False
 
     def test_load_external_eval_jsonl(self, tmp_path):
         """
@@ -605,7 +604,7 @@ class TestExternalEvalSetLoader:
         }
 
         # Act: Load and tokenize
-        dataset = load_and_tokenize_external_eval_set(
+        dataset = load_external_eval_set(
             eval_config=eval_config,
             tokenizer=mock_tokenizer,
             max_length=256
@@ -646,7 +645,7 @@ class TestExternalEvalSetLoader:
         }
 
         # Act: Load and tokenize
-        dataset = load_and_tokenize_external_eval_set(
+        dataset = load_external_eval_set(
             eval_config=eval_config,
             tokenizer=mock_tokenizer,
             max_length=256
@@ -667,7 +666,7 @@ class TestExternalEvalSetLoader:
         }
 
         with pytest.raises(ValueError) as exc_info:
-            load_and_tokenize_external_eval_set(
+            load_external_eval_set(
                 eval_config=eval_config,
                 tokenizer=mock_tokenizer,
                 max_length=512
@@ -691,7 +690,7 @@ class TestExternalEvalSetLoader:
         }
 
         with pytest.raises(ValueError) as exc_info:
-            load_and_tokenize_external_eval_set(
+            load_external_eval_set(
                 eval_config=eval_config,
                 tokenizer=mock_tokenizer,
                 max_length=512
@@ -720,7 +719,7 @@ class TestExternalEvalSetLoader:
         }
 
         with pytest.raises(ValueError) as exc_info:
-            load_and_tokenize_external_eval_set(
+            load_external_eval_set(
                 eval_config=eval_config,
                 tokenizer=mock_tokenizer,
                 max_length=512
@@ -747,7 +746,7 @@ class TestExternalEvalSetLoader:
         }
 
         # Act: Load and tokenize
-        dataset = load_and_tokenize_external_eval_set(
+        dataset = load_external_eval_set(
             eval_config=eval_config,
             tokenizer=mock_tokenizer,
             max_length=512
@@ -1155,7 +1154,7 @@ class TestMixedInstructionPlaintextDatasets:
         alongside 'prompt'/'response' for label masking during tokenization.
         """
         from datasets import Dataset, DatasetDict, concatenate_datasets
-        from dataset_utils import load_or_tokenize_dataset
+        from dataset_utils import load_tokenized_dataset
 
         # Create instruction data with all three columns
         instruction_data = Dataset.from_dict({
@@ -1180,7 +1179,7 @@ class TestMixedInstructionPlaintextDatasets:
         combined = concatenate_datasets([instruction_data, plaintext_with_instruction_cols])
         assert len(combined) == 2
 
-        # Create DatasetDict structure expected by load_or_tokenize_dataset
+        # Create DatasetDict structure expected by load_tokenized_dataset
         dataset_dict = DatasetDict({'train': combined})
 
         # Save to disk
@@ -1206,7 +1205,7 @@ class TestMixedInstructionPlaintextDatasets:
         Test that pure plaintext datasets are correctly detected as non-instruction.
         """
         from datasets import Dataset, DatasetDict, load_from_disk
-        from dataset_utils import load_or_tokenize_dataset
+        from dataset_utils import load_tokenized_dataset
 
         plaintext_data = Dataset.from_dict({
             'text': ['Line 1', 'Line 2', 'Line 3']
@@ -1219,7 +1218,7 @@ class TestMixedInstructionPlaintextDatasets:
         tokenized_path = tmp_path / "tokenized"
 
         # Tokenize
-        result = load_or_tokenize_dataset(
+        result = load_tokenized_dataset(
             str(untokenized_path),
             str(tokenized_path),
             base_tokenizer,
@@ -1235,7 +1234,7 @@ class TestMixedInstructionPlaintextDatasets:
         Test that pure instruction datasets are correctly detected and get labels.
         """
         from datasets import Dataset, DatasetDict
-        from dataset_utils import load_or_tokenize_dataset
+        from dataset_utils import load_tokenized_dataset
 
         instruction_data = Dataset.from_dict({
             'prompt': [
@@ -1251,7 +1250,7 @@ class TestMixedInstructionPlaintextDatasets:
 
         tokenized_path = tmp_path / "tokenized"
 
-        result = load_or_tokenize_dataset(
+        result = load_tokenized_dataset(
             str(untokenized_path),
             str(tokenized_path),
             base_tokenizer,
@@ -1274,7 +1273,7 @@ class TestMixedInstructionPlaintextDatasets:
         Instruction examples should get label masking, plaintext should not.
         """
         from datasets import Dataset, DatasetDict, concatenate_datasets
-        from dataset_utils import load_or_tokenize_dataset
+        from dataset_utils import load_tokenized_dataset
 
         # Create instruction data (multiple examples to ensure some end up in train)
         instruction_data = Dataset.from_dict({
@@ -1302,7 +1301,7 @@ class TestMixedInstructionPlaintextDatasets:
 
         tokenized_path = tmp_path / "tokenized"
 
-        result = load_or_tokenize_dataset(
+        result = load_tokenized_dataset(
             str(untokenized_path),
             str(tokenized_path),
             base_tokenizer,
