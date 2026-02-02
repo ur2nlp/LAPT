@@ -16,7 +16,7 @@ from dataset_utils import (
 )
 from model_utils import (
     initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname,
-    get_seed_tokenizer_suffix
+    get_seed_tokenizer_suffix, get_tokenized_path, is_local_model_path, get_init_model_identifier
 )
 from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
 from config_utils import (
@@ -154,27 +154,35 @@ def _get_tokenizer_path(args: DictConfig) -> str:
     if not args.focus.enabled:
         return None
 
-    model_short = get_model_shortname(args.hf_model)
+    model_identifier = get_init_model_identifier(args)
     tokenizer_suffix = get_tokenizer_suffix(args)
-    return f"tokenizers/{args.dataset.language}/{model_short}_{tokenizer_suffix}"
+    return f"tokenizers/{args.dataset.language}/{model_identifier}_{tokenizer_suffix}"
 
 
-def _get_tokenized_path(args: DictConfig) -> str:
+def _validate_init_model_id(args: DictConfig):
     """
-    Compute tokenized dataset path based on configuration.
+    Validate that init_model_id is provided when required.
+
+    When hf_model points to a local checkpoint path (rather than a HuggingFace Hub model),
+    init_model_id is required because we can't derive a meaningful short identifier from local paths.
 
     Args:
         args: Hydra configuration object
 
-    Returns:
-        Path to tokenized dataset directory
+    Raises:
+        ValueError: If init_model_id is required but not provided
     """
-    if args.focus.enabled:
-        model_short = get_model_shortname(args.hf_model)
-        tokenizer_suffix = get_tokenizer_suffix(args)
-        return f"{args.dataset.cache_dir}/tokenized_{model_short}_{tokenizer_suffix}"
-    else:
-        return f"{args.dataset.cache_dir}/tokenized"
+    init_model_id = getattr(args, 'init_model_id', None)
+    if init_model_id:
+        return  # init_model_id provided, all good
+
+    if is_local_model_path(args.hf_model):
+        raise ValueError(
+            f"init_model_id is required when hf_model is a local path.\n"
+            f"  hf_model: {args.hf_model}\n"
+            f"  Add init_model_id=<short_identifier> to your config to identify this starting checkpoint.\n"
+            f"  Example: init_model_id=v81 (for a Stage 1 checkpoint from experiment v81)"
+        )
 
 
 def _get_output_dir(args: DictConfig) -> str:
@@ -191,14 +199,14 @@ def _get_output_dir(args: DictConfig) -> str:
         return f"{args.output_dir}/{args.model_name}"
 
     training_config = args.training.name.replace('_', '-')
+    init_model_identifier = get_init_model_identifier(args)
 
     # Build base path
     if args.focus.enabled:
-        model_short = get_model_shortname(args.hf_model)
         tokenizer_suffix = get_tokenizer_suffix(args)
-        base_path = f"{args.output_dir}/{args.dataset.language}/{model_short}_{tokenizer_suffix}_{training_config}"
+        base_path = f"{args.output_dir}/{args.dataset.language}/{init_model_identifier}_{tokenizer_suffix}_{training_config}"
     else:
-        base_path = f"{args.output_dir}/{args.dataset.language}/{training_config}"
+        base_path = f"{args.output_dir}/{args.dataset.language}/{init_model_identifier}_{training_config}"
 
     # Append experiment_id if provided
     experiment_id = getattr(args, 'experiment_id', None)
@@ -235,7 +243,7 @@ def _handle_cache_cleanup(args: DictConfig):
 
     # Compute paths that might need cleaning
     tokenizer_path = _get_tokenizer_path(args)
-    tokenized_path = _get_tokenized_path(args)
+    tokenized_path = get_tokenized_path(args)
     output_dir = _get_output_dir(args)
 
     if fresh_dataset:
@@ -311,6 +319,9 @@ def _handle_cache_cleanup(args: DictConfig):
 @hydra.main(version_base=None, config_path="../configs", config_name="main")
 def lapt(args: DictConfig):
     set_random_seeds(args.seed)
+
+    # Validate init_model_id is provided when hf_model is a local path
+    _validate_init_model_id(args)
 
     # Handle cache cleanup if requested
     _handle_cache_cleanup(args)

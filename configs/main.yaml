@@ -19,4 +19,5 @@ dataset:
 # Model output configuration
 output_dir: "models"  # Base directory for all model outputs (can override for cluster scratch space, etc.)
 model_name: null  # Optional codename override (e.g., "yerevan" → models/yerevan)
+init_model_id: null  # Short identifier for starting checkpoint (required when hf_model is a local path)
 resume_from_checkpoint: null  # Optional path to checkpoint directory to resume training from
