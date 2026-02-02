@@ -435,6 +435,48 @@ def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '
     return _load_concat_dataset(cache_dir, sources)
 
 
+def _load_instruction_jsonl_file(file_path: str) -> tuple[list[str], list[str]]:
+    """
+    Load prompts and responses from an instruction JSONL file.
+
+    Each line should be a JSON object with 'prompt' and 'response' fields:
+    {"prompt": "Translate to Gothic: hello\\nResponse:", "response": " hails"}
+
+    Args:
+        file_path: Path to JSONL file
+
+    Returns:
+        Tuple of (prompts, responses) lists
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Instruction JSONL file not found: {file_path}")
+
+    prompts = []
+    responses = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON on line {line_num}: {e}")
+
+            if 'prompt' not in obj or 'response' not in obj:
+                raise ValueError(
+                    f"Line {line_num} missing 'prompt' or 'response' field. "
+                    f"Got keys: {list(obj.keys())}"
+                )
+            prompts.append(obj['prompt'])
+            responses.append(obj['response'])
+
+    if not prompts:
+        raise ValueError(f"JSONL file {file_path} contains no valid examples")
+
+    return prompts, responses
+
+
 def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     """
     Load instruction-tuning data from JSONL file(s).
@@ -458,31 +500,7 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     if not os.path.exists(untokenized_path):
         print(f"Loading instruction data from {file_path}", file=sys.stderr)
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Instruction JSONL file not found: {file_path}")
-
-        prompts = []
-        responses = []
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError as e:
-                    raise ValueError(f"Invalid JSON on line {line_num}: {e}")
-
-                if 'prompt' not in obj or 'response' not in obj:
-                    raise ValueError(
-                        f"Line {line_num} missing 'prompt' or 'response' field. "
-                        f"Got keys: {list(obj.keys())}"
-                    )
-                prompts.append(obj['prompt'])
-                responses.append(obj['response'])
-
-        if not prompts:
-            raise ValueError(f"JSONL file {file_path} contains no valid examples")
+        prompts, responses = _load_instruction_jsonl_file(file_path)
 
         print(f"Loaded {len(prompts)} instruction examples from JSONL file", file=sys.stderr)
 
@@ -1027,6 +1045,7 @@ def load_external_eval_set(
         with open(path, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f if line.strip()]
         dataset = Dataset.from_dict({'text': lines})
+        is_instruction = False
 
     elif file_format == 'jsonl':
         # Load JSONL file
@@ -1042,24 +1061,41 @@ def load_external_eval_set(
                             f"JSONL file missing '{text_column}' column: {path}"
                         )
         dataset = Dataset.from_dict({'text': data})
+        is_instruction = False
+
+    elif file_format == 'instruction_jsonl':
+        # Load instruction JSONL with prompt/response fields
+        prompts, responses = _load_instruction_jsonl_file(path)
+        dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
+        is_instruction = True
 
     else:
         raise ValueError(
             f"Unsupported format '{file_format}' for external eval set. "
-            f"Supported formats: 'plaintext', 'jsonl'"
+            f"Supported formats: 'plaintext', 'jsonl', 'instruction_jsonl'"
         )
 
     print(f"  Loaded {len(dataset)} examples", file=sys.stderr)
 
     # Tokenize the dataset
-    dataset = dataset.map(
-        lambda examples: tokenizer(
-            examples['text'], max_length=max_length, truncation=True
-        ),
-        batched=True,
-        remove_columns=['text'],
-        desc=f"Tokenizing external eval set '{name}'"
-    )
+    if is_instruction:
+        # Instruction format: use label masking (loss only on response)
+        dataset = dataset.map(
+            lambda examples: _tokenize_instruction_examples(examples, tokenizer, max_length),
+            batched=True,
+            remove_columns=['prompt', 'response'],
+            desc=f"Tokenizing external eval set '{name}'"
+        )
+    else:
+        # Plain text format: standard tokenization
+        dataset = dataset.map(
+            lambda examples: tokenizer(
+                examples['text'], max_length=max_length, truncation=True
+            ),
+            batched=True,
+            remove_columns=['text'],
+            desc=f"Tokenizing external eval set '{name}'"
+        )
 
     return dataset
 
