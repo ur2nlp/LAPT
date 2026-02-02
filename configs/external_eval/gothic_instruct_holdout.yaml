@@ -1,0 +1,9 @@
+# External evaluation sets for Gothic instruction tuning
+# These are held-out test sets with loss masking (loss only on response tokens)
+external_eval_sets:
+  - name: got-translation_holdout
+    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_test.jsonl
+    format: instruction_jsonl
+  - name: got-transliteration_holdout
+    path: data/gothic_instruct/transliteration_all-codices_both-directions_test.jsonl
+    format: instruction_jsonl
