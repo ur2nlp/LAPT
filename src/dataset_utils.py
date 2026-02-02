@@ -955,35 +955,59 @@ def load_tokenized_dataset(
         dataset = load_from_disk(untokenized_path)
 
         # Check if this is an instruction dataset (has 'prompt'/'response' instead of 'text')
-        sample_split = list(dataset.keys())[0]
-        is_instruction_dataset = (
+        # Always check 'train' split since multinomial datasets may have per-source dev splits
+        # with different column schemas (e.g., 'eng' dev has only 'text', 'train' has mixed)
+        sample_split = 'train' if 'train' in dataset else list(dataset.keys())[0]
+        has_instruction_data = (
             'prompt' in dataset[sample_split].column_names
             and 'response' in dataset[sample_split].column_names
         )
 
-        if is_instruction_dataset:
+        if has_instruction_data:
             print(
                 "Detected instruction dataset format, tokenizing with label masking",
                 file=sys.stderr
             )
-            # Determine columns to remove (prompt, response, and text if present for mixed datasets)
-            columns_to_remove = ['prompt', 'response']
-            if 'text' in dataset[sample_split].column_names:
-                columns_to_remove.append('text')
-            dataset = dataset.map(
-                lambda examples: _tokenize_instruction_examples(examples, tokenizer, max_length),
-                batched=True,
-                remove_columns=columns_to_remove
-            )
-        else:
-            # Standard text dataset
-            dataset = dataset.map(
-                lambda examples: tokenizer(
-                    examples['text'], max_length=max_length, truncation=True
-                ),
-                batched=True,
-                remove_columns='text'
-            )
+
+        # Process each split individually since they may have different column schemas
+        # (e.g., multinomial datasets with per-source dev splits)
+        tokenized_splits = {}
+        for split_name in dataset.keys():
+            split_data = dataset[split_name]
+            split_columns = split_data.column_names
+
+            # Check what type of data this split has
+            split_has_instruction = 'prompt' in split_columns and 'response' in split_columns
+            split_has_text = 'text' in split_columns
+
+            if split_has_instruction:
+                # Instruction data (possibly mixed with plaintext)
+                columns_to_remove = ['prompt', 'response']
+                if split_has_text:
+                    columns_to_remove.append('text')
+                tokenized_splits[split_name] = split_data.map(
+                    lambda examples: _tokenize_instruction_examples(
+                        examples, tokenizer, max_length
+                    ),
+                    batched=True,
+                    remove_columns=columns_to_remove
+                )
+            elif split_has_text:
+                # Standard plaintext data
+                tokenized_splits[split_name] = split_data.map(
+                    lambda examples: tokenizer(
+                        examples['text'], max_length=max_length, truncation=True
+                    ),
+                    batched=True,
+                    remove_columns='text'
+                )
+            else:
+                raise ValueError(
+                    f"Split '{split_name}' has neither instruction columns (prompt/response) "
+                    f"nor text column. Found columns: {split_columns}"
+                )
+
+        dataset = DatasetDict(tokenized_splits)
 
         # Check if dataset already has dev splits (from multinomial sampling)
         # Dev splits are any non-train splits (e.g., 'got', 'ang', 'non')
