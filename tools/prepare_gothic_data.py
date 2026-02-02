@@ -417,12 +417,14 @@ def generate_translation(
                 for script_name, gothic_text in scripts_to_generate:
                     # English → Gothic
                     if direction in ['eng_to_gothic', 'both']:
+                        # Use script-specific prompt for English → Gothic
+                        target_lang = "Romanized Gothic" if script_name == 'roman' else "Gothic"
                         if instruction_format and output_format == 'jsonl':
-                            prompt = f"Translate to Gothic: {english_text}\nResponse:"
+                            prompt = f"Translate to {target_lang}: {english_text}\nResponse:"
                             response = f" {gothic_text}"
                             f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
                         elif instruction_format:
-                            example = f"Translate to Gothic: {english_text} Response: {gothic_text}"
+                            example = f"Translate to {target_lang}: {english_text} Response: {gothic_text}"
                             f.write(' '.join(example.split()) + '\n')
                         else:
                             separator = delimiter if delimiter else ' '
@@ -490,7 +492,8 @@ Examples:
   # Generate translation data with JSONL format for instruction tuning with loss masking
   python prepare_gothic_data.py --data-types translation --instruction-format --output-format jsonl
   # Output: translation_all-codices_both-scripts_both-directions.jsonl
-  # Format: {"prompt": "Translate to Gothic: {english}\\nResponse:", "response": " {gothic}"}
+  # Format: {"prompt": "Translate to Gothic: {english}\\nResponse:", "response": " {gothic_script}"}
+  #     or: {"prompt": "Translate to Romanized Gothic: {english}\\nResponse:", "response": " {roman}"}
         """
     )
 
