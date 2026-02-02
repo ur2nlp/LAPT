@@ -56,6 +56,65 @@ def get_model_shortname(hf_model: str) -> str:
     return shortname
 
 
+def is_local_model_path(hf_model: str) -> bool:
+    """
+    Check if hf_model refers to a local path rather than a HuggingFace model.
+
+    Args:
+        hf_model: Model identifier (HF name or local path)
+
+    Returns:
+        True if this appears to be a local path, False if HuggingFace model name
+    """
+    # Check for path-like patterns
+    if hf_model.startswith(('.', '/', '~')):
+        return True
+    # Check if it exists as a local directory
+    if os.path.isdir(hf_model):
+        return True
+    return False
+
+
+def get_init_model_identifier(args: DictConfig) -> str:
+    """
+    Get the short identifier for the base model.
+
+    Uses init_model_id if provided, otherwise derives from hf_model name.
+    Validation in __main__ ensures init_model_id is present when hf_model is a local path.
+
+    Args:
+        args: Hydra configuration object
+
+    Returns:
+        Short identifier for the model (e.g., "v81" or "xglm564m")
+    """
+    init_model_id = getattr(args, 'init_model_id', None)
+    if init_model_id:
+        return init_model_id
+    return get_model_shortname(args.hf_model)
+
+
+def get_tokenized_path(args: DictConfig) -> str:
+    """
+    Compute the canonical tokenized dataset path based on configuration.
+
+    This is the single source of truth for tokenized dataset paths.
+
+    Args:
+        args: Hydra configuration object
+
+    Returns:
+        Path to tokenized dataset directory
+    """
+    init_model_identifier = get_init_model_identifier(args)
+
+    if args.focus.enabled:
+        tokenizer_suffix = get_tokenizer_suffix(args)
+        return f"{args.dataset.cache_dir}/tokenized_focus_{init_model_identifier}_{tokenizer_suffix}"
+    else:
+        return f"{args.dataset.cache_dir}/tokenized_{init_model_identifier}"
+
+
 def get_seed_tokenizer_suffix(
     vocab_size: int,
     num_samples: int,
@@ -167,9 +226,9 @@ def _initialize_focus_model(args: DictConfig):
     print("=" * 60, file=sys.stderr)
 
     # Build directory paths with formatted vocab size and sample count
-    model_short = get_model_shortname(args.hf_model)
+    init_model_identifier = get_init_model_identifier(args)
     tokenizer_suffix = get_tokenizer_suffix(args)
-    focus_suffix = f"{model_short}_{tokenizer_suffix}"
+    focus_suffix = f"{init_model_identifier}_{tokenizer_suffix}"
 
     # Prepare JSONL training data for FOCUS
     # Store FOCUS training data alongside the dataset it's sampled from
@@ -289,8 +348,8 @@ def _initialize_focus_model(args: DictConfig):
     print("FOCUS initialization complete", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
-    # Determine tokenized dataset path for FOCUS (separate from standard tokenized data)
-    tokenized_path = f"{args.dataset.cache_dir}/tokenized_focus_{focus_suffix}"
+    # Use canonical path function for consistency
+    tokenized_path = get_tokenized_path(args)
 
     return model, tokenizer, tokenized_path
 
@@ -320,6 +379,6 @@ def _initialize_standard_model(args: DictConfig):
         print(f"  Overriding activation_dropout: {config.activation_dropout}", file=sys.stderr)
 
     model = AutoModelForCausalLM.from_pretrained(args.hf_model, config=config)
-    tokenized_path = args.dataset.cache_dir + "/tokenized"
+    tokenized_path = get_tokenized_path(args)
 
     return model, tokenizer, tokenized_path
