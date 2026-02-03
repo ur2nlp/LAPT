@@ -819,6 +819,34 @@ def _exhaust_first_sample(dataset_size: int, num_samples: int) -> list[int]:
         return indices
 
 
+def _tokenize_plaintext_with_labels(
+    examples: dict,
+    tokenizer: PreTrainedTokenizer,
+    max_length: int
+) -> dict:
+    """
+    Tokenize plaintext examples and add labels for causal LM loss.
+
+    Used for plaintext splits in mixed instruction/plaintext datasets, where the
+    DataCollatorForInstructionTuning expects all examples to have 'labels'.
+    For plaintext, labels = input_ids (loss on all tokens).
+
+    Args:
+        examples: Batch with 'text' field
+        tokenizer: Tokenizer to use
+        max_length: Maximum sequence length
+
+    Returns:
+        Dict with 'input_ids', 'attention_mask', and 'labels' fields
+    """
+    tokenized = tokenizer(
+        examples['text'], max_length=max_length, truncation=True
+    )
+    # For plaintext, labels = input_ids (standard causal LM loss on all tokens)
+    tokenized['labels'] = [ids.copy() for ids in tokenized['input_ids']]
+    return tokenized
+
+
 def _tokenize_instruction_examples(
     examples: dict,
     tokenizer: PreTrainedTokenizer,
@@ -994,13 +1022,23 @@ def load_tokenized_dataset(
                 )
             elif split_has_text:
                 # Standard plaintext data
-                tokenized_splits[split_name] = split_data.map(
-                    lambda examples: tokenizer(
-                        examples['text'], max_length=max_length, truncation=True
-                    ),
-                    batched=True,
-                    remove_columns='text'
-                )
+                # If the overall dataset has instruction data, add labels for collator compatibility
+                if has_instruction_data:
+                    tokenized_splits[split_name] = split_data.map(
+                        lambda examples: _tokenize_plaintext_with_labels(
+                            examples, tokenizer, max_length
+                        ),
+                        batched=True,
+                        remove_columns='text'
+                    )
+                else:
+                    tokenized_splits[split_name] = split_data.map(
+                        lambda examples: tokenizer(
+                            examples['text'], max_length=max_length, truncation=True
+                        ),
+                        batched=True,
+                        remove_columns='text'
+                    )
             else:
                 raise ValueError(
                     f"Split '{split_name}' has neither instruction columns (prompt/response) "
