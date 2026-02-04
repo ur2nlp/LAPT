@@ -28,10 +28,13 @@ def get_latin_gothic_mappings():
         dict: Mapping from Latin characters/digraphs to Gothic Unicode characters
     """
     return {
-        # Digraph - must be processed before single characters
+        # Digraphs - must be processed before single characters
         "hw": "𐍈",  # hwair
+        "hv": "𐍈",  # hwair (alternative transcription)
         "Hw": "𐍈",
+        "Hv": "𐍈",
         "HW": "𐍈",
+        "HV": "𐍈",
 
         # Special character for thorn
         "þ": "𐌸",
@@ -58,6 +61,7 @@ def get_latin_gothic_mappings():
         "s": "𐍃",
         "t": "𐍄",
         "u": "𐌿",
+        "v": "𐍅",  # v and w represent the same sound (wynn/uuinne)
         "w": "𐍅",
         "x": "𐍇",
         "z": "𐌶",
@@ -83,6 +87,7 @@ def get_latin_gothic_mappings():
         "S": "𐍃",
         "T": "𐍄",
         "U": "𐌿",
+        "V": "𐍅",  # v and w represent the same sound (wynn/uuinne)
         "W": "𐍅",
         "X": "𐍇",
         "Z": "𐌶",
