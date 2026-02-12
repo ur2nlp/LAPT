@@ -472,8 +472,9 @@ def train_new_tokenizer(
         print(f"  Target vocab size: {len(target_vocab)} tokens", file=sys.stderr)
 
         # Step 3: Extract normalized base vocabulary from corpus
+        # Cache in seed tokenizer dir (shared across lambda values, not per-lambda output)
         print(f"Extracting base tokenizer vocabulary", file=sys.stderr)
-        base_vocab_file = os.path.join(output_path, 'base_vocab_counts.txt')
+        base_vocab_file = os.path.join(seed_output_path, 'base_vocab_counts.txt')
         base_vocab = extract_base_vocabulary_frequencies(
             text_file_path=text_file_path,
             base_tokenizer_name=base_tokenizer_name,
