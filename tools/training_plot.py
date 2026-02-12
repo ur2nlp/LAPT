@@ -9,8 +9,8 @@ Usage:
     # Single run
     python tools/training_plot.py --metric loss --state-file models/run1/checkpoint-1000/trainer_state.json
 
-    # Compare multiple runs
-    python tools/training_plot.py --metric eval_loss --state-pattern "models/*/checkpoint-*/trainer_state.json"
+    # Compare multiple runs (regex matched against file paths under current directory)
+    python tools/training_plot.py --metric eval_loss --state-pattern "models/.*/trainer_state\\.json"
 
     # Use raw logs (legacy)
     python tools/training_plot.py --metric loss --log-file training.log --skip-lines 5
@@ -18,12 +18,12 @@ Usage:
     # Multiple metrics
     python tools/training_plot.py --metrics loss eval_loss learning_rate --state-file path/to/trainer_state.json
 
-    # Glob patterns for metrics
-    python tools/training_plot.py --metrics "eval_*" --state-file path/to/trainer_state.json
-    python tools/training_plot.py --metric "eval_distinct_*" --state-file path/to/trainer_state.json
+    # Regex patterns for metrics (matched with re.fullmatch)
+    python tools/training_plot.py --metrics "eval_.*" --state-file path/to/trainer_state.json
+    python tools/training_plot.py --metric "eval_.*loss" --state-file path/to/trainer_state.json
 
     # Mix literal names and patterns
-    python tools/training_plot.py --metrics loss "eval_*" learning_rate --state-file path/to/trainer_state.json
+    python tools/training_plot.py --metrics loss "eval_.*" learning_rate --state-file path/to/trainer_state.json
 
     # Save to file instead of showing
     python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --output plot.png
@@ -34,9 +34,8 @@ Usage:
 """
 
 import argparse
-import fnmatch
-import glob
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -72,24 +71,32 @@ def load_from_raw_log(filepath, skip_lines=0):
     return pd.read_json(jsonl_text, lines=True)
 
 
+def find_files_by_regex(pattern, root='.'):
+    """Walk directory tree and return files whose paths match the regex."""
+    compiled = re.compile(pattern)
+    matches = []
+    for filepath in Path(root).rglob('*'):
+        if filepath.is_file() and compiled.search(str(filepath)):
+            matches.append(str(filepath))
+    return sorted(matches)
+
+
 def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=None, skip_lines=0, run_names=None, exclude_pattern=None):
     """Load training data from various sources."""
     dataframes = []
-    files = []
+
+    exclude_re = re.compile(exclude_pattern) if exclude_pattern else None
 
     if state_pattern:
-        # Multiple trainer_state.json files
-        files = sorted(glob.glob(state_pattern))
+        files = find_files_by_regex(state_pattern)
 
-        # Filter out excluded files
-        if exclude_pattern:
-            files = [f for f in files if not fnmatch.fnmatch(f, exclude_pattern)]
+        if exclude_re:
+            files = [f for f in files if not exclude_re.search(f)]
 
         if not files:
             print(f"Warning: No files found matching pattern: {state_pattern}", file=sys.stderr)
         for idx, filepath in enumerate(files):
             df = load_from_trainer_state(filepath)
-            # Use custom name if provided, otherwise use full filepath
             if run_names and idx < len(run_names):
                 df['run'] = run_names[idx]
             else:
@@ -97,24 +104,20 @@ def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=No
             dataframes.append(df)
 
     elif state_file:
-        # Single trainer_state.json file
         df = load_from_trainer_state(state_file)
         df['run'] = run_names[0] if run_names else state_file
         dataframes.append(df)
 
     elif log_pattern:
-        # Multiple raw log files
-        files = sorted(glob.glob(log_pattern))
+        files = find_files_by_regex(log_pattern)
 
-        # Filter out excluded files
-        if exclude_pattern:
-            files = [f for f in files if not fnmatch.fnmatch(f, exclude_pattern)]
+        if exclude_re:
+            files = [f for f in files if not exclude_re.search(f)]
 
         if not files:
             print(f"Warning: No files found matching pattern: {log_pattern}", file=sys.stderr)
         for idx, filepath in enumerate(files):
             df = load_from_raw_log(filepath, skip_lines)
-            # Use custom name if provided, otherwise use full filepath
             if run_names and idx < len(run_names):
                 df['run'] = run_names[idx]
             else:
@@ -122,7 +125,6 @@ def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=No
             dataframes.append(df)
 
     elif log_file:
-        # Single raw log file
         df = load_from_raw_log(log_file, skip_lines)
         df['run'] = run_names[0] if run_names else log_file
         dataframes.append(df)
@@ -200,40 +202,38 @@ def plot_metric(data, metric, x_axis='step', output=None, title=None, y_limits=N
 
 def expand_metric_patterns(patterns, available_metrics):
     """
-    Expand glob patterns to matching metric names.
+    Expand regex patterns to matching metric names.
 
-    Supports literal metric names, glob patterns (*, ?, []), and mixed usage.
+    Each pattern is matched with re.fullmatch against available metrics.
+    Literal metric names work as-is (they're valid regexes that match themselves).
 
     Args:
-        patterns: List of metric names or glob patterns
+        patterns: List of metric names or regex patterns
         available_metrics: List of all available metric names
 
     Returns:
         List of matched metric names (preserving order, no duplicates)
 
     Examples:
-        expand_metric_patterns(['eval_*'], ['eval_loss', 'loss', 'eval_acc'])
+        expand_metric_patterns(['eval_.*'], ['eval_loss', 'loss', 'eval_acc'])
         # Returns: ['eval_acc', 'eval_loss']
 
-        expand_metric_patterns(['loss', 'eval_*'], ['eval_loss', 'loss'])
+        expand_metric_patterns(['loss', 'eval_.*'], ['eval_loss', 'loss'])
         # Returns: ['loss', 'eval_loss']
     """
     expanded = []
     seen = set()
 
     for pattern in patterns:
-        if any(char in pattern for char in ['*', '?', '[', ']']):
-            # It's a glob pattern - find matches
-            matches = fnmatch.filter(available_metrics, pattern)
-            for match in sorted(matches):
-                if match not in seen:
-                    expanded.append(match)
-                    seen.add(match)
-        else:
-            # It's a literal metric name
-            if pattern not in seen:
-                expanded.append(pattern)
-                seen.add(pattern)
+        try:
+            compiled = re.compile(pattern)
+        except re.error as e:
+            print(f"Invalid regex pattern '{pattern}': {e}", file=sys.stderr)
+            sys.exit(1)
+        for metric in sorted(available_metrics):
+            if compiled.fullmatch(metric) and metric not in seen:
+                expanded.append(metric)
+                seen.add(metric)
 
     return expanded
 
@@ -340,15 +340,15 @@ def main():
 
     # Input sources (mutually exclusive groups would be nice, but keeping it simple)
     parser.add_argument('--state-file', type=str, help='Path to trainer_state.json (recommended)')
-    parser.add_argument('--state-pattern', type=str, help='Glob pattern for multiple trainer_state.json files')
+    parser.add_argument('--state-pattern', type=str, help='Regex pattern for multiple trainer_state.json files (searched from cwd)')
     parser.add_argument('--log-file', type=str, help='Path to raw log file (legacy)')
-    parser.add_argument('--log-pattern', type=str, help='Glob pattern for multiple raw log files (legacy)')
+    parser.add_argument('--log-pattern', type=str, help='Regex pattern for multiple raw log files (legacy, searched from cwd)')
     parser.add_argument('--skip-lines', type=int, default=0, help='Skip N lines from raw logs (default: 0)')
-    parser.add_argument('--exclude-pattern', type=str, help='Glob pattern to exclude files (e.g., "*v14*")')
+    parser.add_argument('--exclude-pattern', type=str, help='Regex pattern to exclude files (e.g., "v14")')
 
     # Metrics to plot
-    parser.add_argument('--metric', type=str, help='Single metric to plot (e.g., loss, eval_loss)')
-    parser.add_argument('--metrics', nargs='+', help='Multiple metrics to plot as subplots')
+    parser.add_argument('--metric', type=str, help='Single metric or regex pattern (e.g., loss, eval_.*loss)')
+    parser.add_argument('--metrics', nargs='+', help='Multiple metrics or regex patterns to plot as subplots')
 
     # Plot options
     parser.add_argument('--x-axis', type=str, default='step', choices=['step', 'epoch'],
@@ -402,34 +402,22 @@ def main():
         return
 
     # Expand metric patterns
-    if args.metrics:
-        metrics = expand_metric_patterns(args.metrics, available_metrics)
-        if not metrics:
-            print(f"Error: No metrics matched the patterns: {args.metrics}", file=sys.stderr)
-            print(f"Available metrics: {sorted(available_metrics)}", file=sys.stderr)
-            sys.exit(1)
-        print(f"Plotting {len(metrics)} metric(s): {', '.join(metrics)}", file=sys.stderr)
-        plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output, y_limits=y_limits)
-        print_metric_summary(data, metrics, x_axis=args.x_axis)
+    patterns = args.metrics if args.metrics else [args.metric]
+    metrics = expand_metric_patterns(patterns, available_metrics)
+
+    if not metrics:
+        print(f"Error: No metrics matched the pattern(s): {patterns}", file=sys.stderr)
+        print(f"Available metrics: {sorted(available_metrics)}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Plotting {len(metrics)} metric(s): {', '.join(metrics)}", file=sys.stderr)
+
+    if len(metrics) == 1:
+        plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title, y_limits=y_limits)
     else:
-        # Single metric - also support pattern matching
-        if any(char in args.metric for char in ['*', '?', '[', ']']):
-            metrics = expand_metric_patterns([args.metric], available_metrics)
-            if not metrics:
-                print(f"Error: No metrics matched the pattern: {args.metric}", file=sys.stderr)
-                print(f"Available metrics: {sorted(available_metrics)}", file=sys.stderr)
-                sys.exit(1)
-            if len(metrics) > 1:
-                print(f"Pattern matched {len(metrics)} metrics, plotting all: {', '.join(metrics)}", file=sys.stderr)
-                plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output, y_limits=y_limits)
-                print_metric_summary(data, metrics, x_axis=args.x_axis)
-            else:
-                print(f"Plotting: {metrics[0]}", file=sys.stderr)
-                plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title, y_limits=y_limits)
-                print_metric_summary(data, [metrics[0]], x_axis=args.x_axis)
-        else:
-            plot_metric(data, args.metric, x_axis=args.x_axis, output=args.output, title=args.title, y_limits=y_limits)
-            print_metric_summary(data, [args.metric], x_axis=args.x_axis)
+        plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output, y_limits=y_limits)
+
+    print_metric_summary(data, metrics, x_axis=args.x_axis)
 
 
 if __name__ == '__main__':
