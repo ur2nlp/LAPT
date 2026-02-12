@@ -10,6 +10,8 @@ Commands (during generation):
     /temp <value>     - Set temperature
     /topp <value>     - Set top-p nucleus sampling threshold
     /max <tokens>     - Set maximum number of tokens to generate
+    /rep <value>      - Set repetition penalty (1.0 = off)
+    /nogram <size>    - Set no-repeat n-gram size (0 = off)
     /sample           - Enable sampling
     /nosample         - Disable sampling (greedy decoding)
     /settings         - Show current generation settings
@@ -50,6 +52,18 @@ def main():
         help='Nucleus sampling probability (default: 0.9)'
     )
     parser.add_argument(
+        '--repetition-penalty',
+        type=float,
+        default=1.0,
+        help='Repetition penalty (1.0 = no penalty, >1.0 penalizes repetition, default: 1.0)'
+    )
+    parser.add_argument(
+        '--no-repeat-ngram-size',
+        type=int,
+        default=0,
+        help='Prevent repeating any n-gram of this size (0 = off, default: 0)'
+    )
+    parser.add_argument(
         '--no-sample',
         action='store_true',
         help='Use greedy decoding instead of sampling'
@@ -88,6 +102,8 @@ def main():
         print(f"  Temperature: {args.temperature}")
         print(f"  Max new tokens: {args.max_tokens}")
         print(f"  Top-p: {args.top_p}")
+        print(f"  Repetition penalty: {args.repetition_penalty}")
+        print(f"  No-repeat n-gram size: {args.no_repeat_ngram_size}")
         print(f"  Sampling: {'disabled (greedy)' if args.no_sample else 'enabled'}")
         print()
 
@@ -138,6 +154,26 @@ def main():
                         except ValueError:
                             print(f"Invalid token count: {parts[1]}")
 
+                elif cmd == 'rep' or cmd == 'repetition-penalty':
+                    if len(parts) < 2:
+                        print("Usage: /rep <value>  (1.0 = off, try 1.1-1.3)")
+                    else:
+                        try:
+                            args.repetition_penalty = float(parts[1])
+                            print(f"Repetition penalty set to {args.repetition_penalty}")
+                        except ValueError:
+                            print(f"Invalid repetition penalty value: {parts[1]}")
+
+                elif cmd == 'nogram' or cmd == 'no-repeat-ngram':
+                    if len(parts) < 2:
+                        print("Usage: /nogram <size>  (0 = off, try 3-4)")
+                    else:
+                        try:
+                            args.no_repeat_ngram_size = int(parts[1])
+                            print(f"No-repeat n-gram size set to {args.no_repeat_ngram_size}")
+                        except ValueError:
+                            print(f"Invalid n-gram size: {parts[1]}")
+
                 elif cmd == 'sample':
                     args.no_sample = False
                     print("Sampling enabled")
@@ -154,6 +190,8 @@ def main():
                     print("  /temp <value>     - Set temperature")
                     print("  /topp <value>     - Set top-p nucleus sampling threshold")
                     print("  /max <tokens>     - Set maximum number of tokens to generate")
+                    print("  /rep <value>      - Set repetition penalty (1.0 = off, try 1.1-1.3)")
+                    print("  /nogram <size>    - Set no-repeat n-gram size (0 = off, try 3-4)")
                     print("  /sample           - Enable sampling")
                     print("  /nosample         - Disable sampling (greedy decoding)")
                     print("  /settings         - Show current generation settings")
@@ -166,14 +204,19 @@ def main():
                 continue
 
             # Generate text
-            output = generator(
-                prompt,
+            generate_kwargs = dict(
                 max_new_tokens=args.max_tokens,
                 do_sample=not args.no_sample,
                 temperature=args.temperature,
                 top_p=args.top_p,
-                pad_token_id=generator.tokenizer.eos_token_id
+                pad_token_id=generator.tokenizer.eos_token_id,
             )
+            if args.repetition_penalty != 1.0:
+                generate_kwargs['repetition_penalty'] = args.repetition_penalty
+            if args.no_repeat_ngram_size > 0:
+                generate_kwargs['no_repeat_ngram_size'] = args.no_repeat_ngram_size
+
+            output = generator(prompt, **generate_kwargs)
 
             print(f"\n{output[0]['generated_text']}\n")
 
