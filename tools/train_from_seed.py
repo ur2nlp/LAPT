@@ -45,6 +45,7 @@ def train_from_seed(
     character_coverage: float = 1.0,
     inherit_additional_special_tokens: bool = True,
     scale_counts: float = None,
+    seed_sentencepiece_size: int = None,
 ):
     import os
     from transformers import AutoTokenizer, PreTrainedTokenizerFast
@@ -93,6 +94,7 @@ def train_from_seed(
         output_path=output_path,
         character_coverage=character_coverage,
         seed_sentencepieces_file=actual_seed_path,
+        seed_sentencepiece_size=seed_sentencepiece_size,
     )
 
     # Convert to HuggingFace tokenizer
@@ -181,6 +183,10 @@ def main():
         "--scale-counts", type=float, default=None,
         help="Multiply all seed vocab counts by this factor (for testing absolute vs relative)"
     )
+    parser.add_argument(
+        "--seed-sentencepiece-size", type=int, default=None,
+        help="Max seed pieces to keep (top-k by count). Default: SentencePiece's 1M"
+    )
 
     args = parser.parse_args()
 
@@ -192,6 +198,7 @@ def main():
         base_tokenizer_name=args.base_tokenizer,
         character_coverage=args.character_coverage,
         scale_counts=args.scale_counts,
+        seed_sentencepiece_size=args.seed_sentencepiece_size,
     )
 
 
