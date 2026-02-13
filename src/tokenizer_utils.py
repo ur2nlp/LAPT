@@ -23,25 +23,23 @@ def extract_base_vocabulary_frequencies(
     text_file_path: str,
     base_tokenizer_name: str,
     output_file: str,
-    target_mass: int = 10_000_000,
     filter_special_tokens: bool = True,
     min_frequency: int = 1
 ) -> dict[str, int]:
     """
-    Tokenize corpus with base tokenizer and extract normalized vocabulary.
+    Tokenize corpus with base tokenizer and extract raw token frequencies.
 
-    Normalized counts allow merging with target-extracted vocabulary for hybrid seeding.
+    Raw counts are cached to disk and can be normalized later by the caller.
 
     Args:
         text_file_path: Path to plain text training file (one sentence per line)
         base_tokenizer_name: Name of base model tokenizer
         output_file: Path where base vocabulary counts will be saved (for caching)
-        target_mass: Target total count for normalization (default: 10M)
         filter_special_tokens: Filter out <unk>, <s>, </s>, <pad>, and <madeupword*> tokens
         min_frequency: Minimum raw frequency threshold to include a token (default: 1)
 
     Returns:
-        Dictionary mapping token strings to normalized counts
+        Dictionary mapping token strings to raw counts
     """
     # Check cache
     if os.path.exists(output_file):
@@ -108,29 +106,19 @@ def extract_base_vocabulary_frequencies(
         for reason, count in filtered_reasons.most_common():
             print(f"    {reason}: {count}", file=sys.stderr)
 
-    # Normalize to target mass
     total_count = sum(filtered_vocab.values())
-    print(f"  Total raw token count: {total_count}", file=sys.stderr)
+    print(f"  Total raw token count: {total_count:,}", file=sys.stderr)
 
-    normalized_vocab = {}
-    for token, count in filtered_vocab.items():
-        normalized_count = round((count / total_count) * target_mass)
-        if normalized_count > 0:
-            normalized_vocab[token] = normalized_count
-
-    print(f"  Normalized to target mass: {target_mass:,}", file=sys.stderr)
-    print(f"  Tokens in normalized vocab: {len(normalized_vocab)}", file=sys.stderr)
-
-    # Write to cache file
+    # Write raw counts to cache file
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with open(output_file, 'w', encoding='utf-8') as f:
         # Sort by frequency (descending) for better readability
-        for token_str, count in sorted(normalized_vocab.items(), key=lambda x: x[1], reverse=True):
+        for token_str, count in sorted(filtered_vocab.items(), key=lambda x: x[1], reverse=True):
             f.write(f"{token_str}\t{count}\n")
 
     print(f"Base vocabulary saved to {output_file}", file=sys.stderr)
 
-    return normalized_vocab
+    return filtered_vocab
 
 
 def prepare_focus_training_data(
@@ -229,19 +217,20 @@ def extract_target_seed_vocab(
     spm_model_path: str,
     target_mass: int = 10_000_000,
     filter_special_tokens: bool = True
-) -> dict[str, int]:
+) -> dict[str, float]:
     """
     Extract vocabulary from trained SentencePiece model and normalize to target mass.
 
-    Converts log probabilities to normalized counts: count = exp(log_prob) * target_mass
+    Converts log probabilities to normalized counts: count = exp(log_prob) * target_mass.
+    Returns exact floats — rounding is deferred to the merge step.
 
     Args:
         spm_model_path: Path to .model file from SentencePiece training
-        target_mass: Target total count for normalization (default: 10M)
+        target_mass: Target total count for normalization (should match base vocab total)
         filter_special_tokens: Whether to filter out special tokens
 
     Returns:
-        Dictionary mapping token strings to normalized counts
+        Dictionary mapping token strings to normalized counts (exact floats)
     """
     import math
 
@@ -264,10 +253,9 @@ def extract_target_seed_vocab(
             if token.startswith('<madeupword'):
                 continue
 
-        # Convert log prob to normalized count
+        # Convert log prob to normalized count (exact float, no rounding)
         # prob = exp(log_prob), count = prob * target_mass
-        probability = math.exp(log_prob)
-        count = round(probability * target_mass)
+        count = math.exp(log_prob) * target_mass
 
         if count > 0:
             vocab[token] = count
@@ -276,10 +264,10 @@ def extract_target_seed_vocab(
 
 
 def merge_vocabularies(
-    base_vocab: dict[str, int],
-    target_vocab: dict[str, int],
+    base_vocab: dict[str, int | float],
+    target_vocab: dict[str, int | float],
     lambda_weight: float = 0.5,
-    round_mode: str = "ceil"
+    round_mode: str = "round"
 ) -> dict[str, int]:
     """
     Merge base and target vocabularies with lambda interpolation.
@@ -295,17 +283,16 @@ def merge_vocabularies(
     - lambda=1.0: Pure base vocabulary
 
     Args:
-        base_vocab: Normalized vocabulary from base tokenizer
-        target_vocab: Normalized vocabulary from target-trained tokenizer
+        base_vocab: Raw counts from base tokenizer corpus analysis
+        target_vocab: Normalized counts from target-trained tokenizer
         lambda_weight: Interpolation weight (0=target, 1=base, default: 0.5)
-        round_mode: Rounding method: "ceil" (default), "floor", or "round"
+        round_mode: Rounding method: "ceil", "floor", or "round"
 
     Returns:
         Merged vocabulary with combined weights
     """
     import math
 
-    # Select rounding function
     if round_mode == "ceil":
         round_func = math.ceil
     elif round_mode == "floor":
@@ -322,10 +309,9 @@ def merge_vocabularies(
         base_count = base_vocab.get(token, 0)
         target_count = target_vocab.get(token, 0)
 
-        # Symmetric interpolation: base * lambda + target * (1 - lambda)
-        combined_count = round_func(
-            base_count * lambda_weight + target_count * (1 - lambda_weight)
-        )
+        combined_count = base_count * lambda_weight + target_count * (1 - lambda_weight)
+
+        combined_count = round_func(combined_count)
 
         if combined_count > 0:
             merged[token] = combined_count
@@ -344,9 +330,9 @@ def train_new_tokenizer(
     use_seed_vocabulary: bool = False,
     seed_min_frequency: int = 1,
     seed_lambda: float = 0.5,
-    seed_round_mode: str = "ceil",
+    seed_round_mode: str = "round",
     seed_vocab_multiplier: float = 5.0,
-    seed_target_mass: int = 10_000_000
+    seed_mass_multiplier: float = 1.0
 ) -> PreTrainedTokenizerFast:
     """
     Train a new tokenizer on JSONL data using SentencePiece library.
@@ -370,9 +356,13 @@ def train_new_tokenizer(
         seed_min_frequency: Minimum frequency for including base tokenizer tokens (default: 1)
         seed_lambda: Interpolation weight (0-1): 0.0 = pure target vocab, 1.0 = pure base vocab,
             0.5 = balanced mix (default: 0.5)
-        seed_round_mode: Rounding method when merging vocabularies: "ceil" (default), "floor", or "round"
+        seed_round_mode: Rounding method when merging vocabularies: "round" (default),
+            "ceil", or "floor"
         seed_vocab_multiplier: Size multiplier for seed tokenizer (default: 5.0)
-        seed_target_mass: Normalization target for vocabulary counts (default: 10M)
+        seed_mass_multiplier: Scales all seed file counts to control the seed's influence
+            during SentencePiece training (default: 1.0). The effective target mass is
+            total_base_tokens * seed_mass_multiplier. Values < 1.0 reduce seed influence
+            (letting SentencePiece discover more from corpus), values > 1.0 increase it.
 
     Returns:
         Trained tokenizer
@@ -462,28 +452,40 @@ def train_new_tokenizer(
         else:
             print(f"Seed tokenizer already exists at {seed_output_path}", file=sys.stderr)
 
-        # Step 2: Extract normalized target vocabulary from seed tokenizer
-        print(f"Extracting target vocabulary from seed tokenizer", file=sys.stderr)
-        target_vocab = extract_target_seed_vocab(
-            spm_model_path=seed_model_path,
-            target_mass=seed_target_mass,
-            filter_special_tokens=True
-        )
-        print(f"  Target vocab size: {len(target_vocab)} tokens", file=sys.stderr)
-
-        # Step 3: Extract normalized base vocabulary from corpus
-        # Cache in seed tokenizer dir (shared across lambda values, not per-lambda output)
+        # Step 2: Extract raw base vocabulary counts from corpus
+        # Cache in seed tokenizer dir (shared across lambda values and target_mass values)
         print(f"Extracting base tokenizer vocabulary", file=sys.stderr)
         base_vocab_file = os.path.join(seed_output_path, 'base_vocab_counts.txt')
         base_vocab = extract_base_vocabulary_frequencies(
             text_file_path=text_file_path,
             base_tokenizer_name=base_tokenizer_name,
             output_file=base_vocab_file,
-            target_mass=seed_target_mass,
             filter_special_tokens=True,
             min_frequency=seed_min_frequency
         )
+        total_base_tokens = sum(base_vocab.values())
+        target_mass = int(total_base_tokens * seed_mass_multiplier)
         print(f"  Base vocab size: {len(base_vocab)} tokens", file=sys.stderr)
+        print(f"  Total base tokens: {total_base_tokens:,}", file=sys.stderr)
+        if seed_mass_multiplier != 1.0:
+            print(f"  Mass multiplier: {seed_mass_multiplier} → effective target mass: {target_mass:,}", file=sys.stderr)
+
+        # Step 3: Extract target vocabulary from seed tokenizer, normalized to target mass scale
+        # Both vocabularies are scaled to the same target_mass so they're directly comparable
+        print(f"Extracting target vocabulary from seed tokenizer", file=sys.stderr)
+        target_vocab = extract_target_seed_vocab(
+            spm_model_path=seed_model_path,
+            target_mass=target_mass,
+            filter_special_tokens=True
+        )
+        print(f"  Target vocab size: {len(target_vocab)} tokens", file=sys.stderr)
+
+        # Scale base counts to match target mass (no-op when seed_mass_multiplier=1.0)
+        if seed_mass_multiplier != 1.0:
+            base_vocab = {
+                token: count * seed_mass_multiplier
+                for token, count in base_vocab.items()
+            }
 
         # Step 4: Merge vocabularies with lambda weighting
         print(f"Merging vocabularies with lambda={seed_lambda}, round_mode={seed_round_mode}", file=sys.stderr)

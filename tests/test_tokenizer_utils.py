@@ -341,7 +341,7 @@ class TestTokenizerTraining:
             use_seed_vocabulary=True,
             seed_lambda=0.5,
             seed_vocab_multiplier=multiplier,
-            seed_target_mass=1000,  # Small for testing
+            seed_mass_multiplier=0.001,  # Small for testing
             character_coverage=0.9995  # Reduce coverage to allow smaller vocab
         )
 
@@ -365,7 +365,7 @@ class TestTokenizerTraining:
             use_seed_vocabulary=True,
             seed_lambda=0.7,  # Different lambda
             seed_vocab_multiplier=multiplier,
-            seed_target_mass=1000,
+            seed_mass_multiplier=0.001,
             character_coverage=0.9995
         )
 
