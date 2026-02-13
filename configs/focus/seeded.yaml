@@ -13,9 +13,10 @@ seed_lambda: 0.5
 # Higher values preserve more candidates but increase training time
 seed_vocab_multiplier: 5.0
 
-# Normalization target for vocabulary merging (controls long-tail preservation)
-seed_target_mass: 10000000  # 10 million tokens
+# Scales all seed file counts to control seed influence during SentencePiece training
+# Values < 1.0 reduce seed influence, > 1.0 increase it (default: 1.0)
+seed_mass_multiplier: 1.0
 
 # Additional parameters
 seed_min_frequency: 1  # Minimum frequency for base tokenizer tokens
-seed_round_mode: ceil  # Rounding when merging: "ceil" preserves rare tokens, "floor" filters aggressively, "round" splits difference
+seed_round_mode: round  # Rounding when merging: "round" (default), "ceil", or "floor"
