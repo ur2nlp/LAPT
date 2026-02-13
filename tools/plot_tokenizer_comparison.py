@@ -72,6 +72,7 @@ def format_file_name_as_language(file_name: str) -> str:
         'old_norse_test.txt': 'Old Norse',
         'english.txt': 'English',
         'english_test.txt': 'English',
+        'monolingual_all-codices_both-scripts_train.txt': 'Gothic',
         'training_subset.jsonl': 'Training Data',
         'test.txt': 'Test Data',
         'val.txt': 'Validation Data',
