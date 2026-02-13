@@ -514,6 +514,14 @@ def train_new_tokenizer(
         print(f"Hybrid seed vocabulary saved to {seed_file}", file=sys.stderr)
 
     # Train final SentencePiece model
+    # When using seed vocabulary, set seed_sentencepiece_size to the seed
+    # tokenizer's vocab size so that the merged vocabulary gets truncated to
+    # that size. This makes lambda interpolation meaningful: base tokens compete
+    # with corpus-derived tokens for spots in the top-k.
+    # Note: if truncation removes single characters required by character_coverage,
+    # SentencePiece re-adds them at finalization with penalty scores. Unlikely
+    # with reasonable multiplier values since the base tokenizer covers most
+    # characters already.
     sp_model = _train_sentencepiece_model(
         text_file_path=text_file_path,
         model_type=model_type,
@@ -521,7 +529,8 @@ def train_new_tokenizer(
         special_tokens_config=special_tokens_config,
         output_path=output_path,
         character_coverage=character_coverage,
-        seed_sentencepieces_file=seed_file
+        seed_sentencepieces_file=seed_file,
+        seed_sentencepiece_size=seed_vocab_size if use_seed_vocabulary else None
     )
 
     # Extract vocabulary with scores for HuggingFace tokenizer initialization
@@ -593,7 +602,8 @@ def _train_sentencepiece_model(
     special_tokens_config: dict,
     output_path: str,
     character_coverage: float = 1.0,
-    seed_sentencepieces_file: Optional[str] = None
+    seed_sentencepieces_file: Optional[str] = None,
+    seed_sentencepiece_size: Optional[int] = None
 ) -> spm.SentencePieceProcessor:
     """
     Train a SentencePiece model and return the loaded processor.
@@ -606,6 +616,9 @@ def _train_sentencepiece_model(
         output_path: Directory where model files will be saved
         character_coverage: Fraction of character occurrences to cover (0-1)
         seed_sentencepieces_file: Optional path to seed vocabulary file
+        seed_sentencepiece_size: Max seed pieces to keep (default: SentencePiece's 1M).
+            When set, the top-k seed pieces by count are kept, forcing lambda-weighted
+            counts to determine which tokens survive the cutoff.
 
     Returns:
         Loaded SentencePieceProcessor with the trained model
@@ -629,6 +642,8 @@ def _train_sentencepiece_model(
     # Add seed vocabulary file if provided
     if seed_sentencepieces_file is not None:
         train_args['seed_sentencepieces_file'] = seed_sentencepieces_file
+        if seed_sentencepiece_size is not None:
+            train_args['seed_sentencepiece_size'] = seed_sentencepiece_size
 
     train_args.update(special_tokens_config)
 
