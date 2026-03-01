@@ -1,0 +1,94 @@
+seed: 1
+hf_model: facebook/xglm-564M
+dataset:
+  type: multinomial
+  language: old_germanic
+  cache_dir: data/old_germanic
+  sources:
+  - type: plaintext
+    language: ang
+    path: data/beowulf/beowulf_clean.txt
+  - type: concat
+    language: got
+    dev_size: -1
+    sources:
+    - type: plaintext
+      path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
+    - type: plaintext
+      path: data/gothic_prepared/transliteration_all-codices_both-directions_train.txt
+  - type: concat
+    language: non
+    sources:
+    - type: plaintext
+      path: data/sagas/sagas_clean.txt
+    - type: plaintext
+      path: data/icecorpus-texts/icepahc_12th-18th_clean.txt
+  - type: plaintext
+    language: got-eng
+    dev_size: -1
+    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_train.txt
+  - type: plaintext
+    language: eng
+    path: data/flan_filtered/flan_nli_qa_short.txt
+  alpha: 0.7
+  total_samples: 200000
+output_dir: models
+model_name: null
+resume_from_checkpoint: null
+training:
+  name: l40_optimized
+  max_length: 512
+  num_train_epochs: 1.0
+  max_steps: 100000
+  train_batch_size: 18
+  gradient_accumulation_steps: 10
+  gradient_checkpointing: false
+  learning_rate: 2.0e-05
+  lr_scheduler_type: linear
+  warmup_ratio: 0.005
+  max_grad_norm: 1.0
+  bf16: true
+  optim: adamw_torch_fused
+  dataloader_num_workers: 4
+  torch_compile: false
+  dropout: 0.12
+  attention_dropout: 0.12
+  activation_dropout: 0.0
+  weight_decay: 0.01
+  logging_steps: 250
+  eval_strategy: steps
+  metric_for_best_model: got_holdout_loss
+  eval_steps: 1000
+  eval_batch_size: 36
+  dev_size: 0.1
+  compute_ttr: true
+  save_steps: 1000
+  save_total_limit: 2
+  early_stopping_patience: 10
+  early_stopping_delay_ratio: 0.0
+  freeze_main_model: false
+  model_freeze_prefix: model.layer
+  unfreeze_step_ratio: 0.05
+focus:
+  enabled: true
+  tokenizer_path: null
+  vocab_size: 32768
+  num_samples: 200000
+  inherit_additional_special_tokens: true
+  character_coverage: 0.999
+  fasttext_model_min_count: 1
+  use_seed_vocabulary: true
+  seed_lambda: 0.99
+  seed_vocab_multiplier: 3.0
+  seed_target_mass: 10000000
+  seed_min_frequency: 1
+  seed_round_mode: ceil
+external_eval:
+  external_eval_sets:
+  - name: got_holdout
+    path: data/gothic_prepared/mono-translit_all-codices_both-scripts_both_directions_test.txt
+    format: plaintext
+  - name: got-eng_holdout
+    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_test.txt
+    format: plaintext
+experiment_id: v35

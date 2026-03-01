@@ -2,11 +2,14 @@
 
 Maintains a lightweight YAML registry (outputs/registry.yaml) that maps
 experiment IDs to their key hyperparameters and human-written annotations.
+Resolved training configs are stored in outputs/configs/{run_id}.yaml and
+trainer states in outputs/trainer_states/{run_id}.json.
 
 Subcommands:
     extract   - Parse training_config.yaml → extract key params → upsert into registry
     show      - Display registry entries, optionally joined with metrics
     diff      - Show only parameters that vary between selected runs
+    verify    - Check registry params match local config files in outputs/configs/
     annotate  - Set era/group/note/observation for a run
 
 Usage:
@@ -337,7 +340,7 @@ def cmd_show(args: argparse.Namespace) -> None:
             sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
             from tools.summarize_results import parse_trainer_state
 
-        outputs_dir = Path("outputs")
+        outputs_dir = Path("outputs/trainer_states")
         for rid in run_ids:
             json_path = outputs_dir / f"{rid}.json"
             if json_path.exists():
@@ -460,6 +463,88 @@ def cmd_annotate(args: argparse.Namespace) -> None:
         print("No annotations specified. Use --era, --group, --note, or --observation.")
 
 
+def cmd_verify(args: argparse.Namespace) -> None:
+    """Handle the 'verify' subcommand.
+
+    For each run, looks for a config file at outputs/configs/{run_id}.yaml,
+    re-extracts params using the same logic as 'extract', and diffs against
+    what is stored in the registry.
+    """
+    registry = load_registry()
+
+    if args.runs:
+        run_ids = list(args.runs)
+        missing_from_registry = [rid for rid in run_ids if rid not in registry]
+        if missing_from_registry:
+            print(
+                f"Error: not in registry: {', '.join(missing_from_registry)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        run_ids = sorted(registry.keys(), key=_natural_sort_key)
+
+    ok_count = 0
+    missing_count = 0
+    mismatch_count = 0
+
+    for run_id in run_ids:
+        config_path = Path("outputs/configs") / f"{run_id}.yaml"
+
+        if not config_path.exists():
+            print(f"{run_id}: MISSING ({config_path})")
+            missing_count += 1
+            continue
+
+        try:
+            with open(config_path) as config_file:
+                config = yaml.safe_load(config_file)
+            _, extracted_params = extract_params(config)
+        except yaml.YAMLError as exc:
+            print(f"{run_id}: ERROR (invalid YAML in {config_path}: {exc})")
+            mismatch_count += 1
+            continue
+        except ValueError as exc:
+            print(f"{run_id}: ERROR ({exc})")
+            mismatch_count += 1
+            continue
+
+        registry_params = registry[run_id].get("params", {})
+
+        all_keys = sorted(set(extracted_params) | set(registry_params))
+        differences = []
+        for key in all_keys:
+            in_extracted = key in extracted_params
+            in_registry = key in registry_params
+            if in_extracted and in_registry:
+                if extracted_params[key] != registry_params[key]:
+                    differences.append((
+                        key,
+                        format_param_value(registry_params[key]),
+                        format_param_value(extracted_params[key]),
+                    ))
+            elif in_registry:
+                differences.append((key, format_param_value(registry_params[key]), "<missing>"))
+            else:
+                differences.append((key, "<missing>", format_param_value(extracted_params[key])))
+
+        if differences:
+            print(f"{run_id}: MISMATCH ({len(differences)} param(s) differ)")
+            key_width = max(len(key) for key, _, _ in differences)
+            for key, registry_val, config_val in differences:
+                print(f"  {key:<{key_width}}  registry={registry_val!r}  config={config_val!r}")
+            mismatch_count += 1
+        else:
+            print(f"{run_id}: OK")
+            ok_count += 1
+
+    total = ok_count + missing_count + mismatch_count
+    print(
+        f"\nSummary ({total} run(s)): {ok_count} OK, "
+        f"{missing_count} missing config, {mismatch_count} mismatch(es)"
+    )
+
+
 def _natural_sort_key(run_id: str) -> tuple:
     """Sort key that handles 'v81' style IDs numerically."""
     import re
@@ -523,7 +608,7 @@ def main():
     show_parser.add_argument(
         "--metrics",
         action="store_true",
-        help="Join with metrics from outputs/*.json",
+        help="Join with metrics from outputs/trainer_states/*.json",
     )
 
     # diff
@@ -535,6 +620,17 @@ def main():
         "runs",
         nargs="+",
         help="Run IDs to compare",
+    )
+
+    # verify
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Check registry params match local config files in outputs/configs/",
+    )
+    verify_parser.add_argument(
+        "runs",
+        nargs="*",
+        help="Specific run IDs to verify (default: all)",
     )
 
     # annotate
@@ -557,6 +653,7 @@ def main():
         "extract": cmd_extract,
         "show": cmd_show,
         "diff": cmd_diff,
+        "verify": cmd_verify,
         "annotate": cmd_annotate,
     }
     commands[args.command](args)
