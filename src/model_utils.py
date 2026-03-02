@@ -176,6 +176,9 @@ def get_tokenizer_suffix(args: DictConfig) -> str:
         min_freq = args.focus.get('seed_min_frequency', 1)
         if min_freq > 1:
             suffix += f"-min{min_freq}"
+        score_mode = args.focus.get('seed_score_mode', 'count')
+        if score_mode != 'count':
+            suffix += f"-{score_mode}"
 
     return suffix
 
@@ -288,7 +291,8 @@ def _initialize_focus_model(args: DictConfig):
             seed_lambda=args.focus.get('seed_lambda', 0.5),
             seed_round_mode=args.focus.get('seed_round_mode', 'round'),
             seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
-            seed_mass_multiplier=args.focus.get('seed_mass_multiplier', 1.0)
+            seed_mass_multiplier=args.focus.get('seed_mass_multiplier', 1.0),
+            seed_score_mode=args.focus.get('seed_score_mode', 'count'),
         )
 
         # Save config if we just created the tokenizer
