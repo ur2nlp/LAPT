@@ -263,6 +263,43 @@ def extract_target_seed_vocab(
     return vocab
 
 
+def apply_character_weighting(vocab: dict[str, int | float]) -> dict[str, float]:
+    """Weight token counts by character length.
+
+    Transforms raw token counts into character-coverage scores:
+    `score[t] = count[t] * len(t)`. This measures how many characters of text
+    each token handles, providing a more principled basis for comparing tokens
+    across vocabularies with different size/shape distributions.
+
+    Args:
+        vocab: Dictionary mapping token strings to counts.
+
+    Returns:
+        New dictionary with counts multiplied by token character length.
+    """
+    return {token: count * len(token) for token, count in vocab.items()}
+
+
+def normalize_vocab_mass(
+    vocab: dict[str, int | float],
+    target_mass: int,
+) -> dict[str, float]:
+    """Scale vocabulary counts so they sum to target_mass.
+
+    Args:
+        vocab: Dictionary mapping token strings to counts.
+        target_mass: Desired total mass after normalization.
+
+    Returns:
+        New dictionary with counts scaled to sum to target_mass.
+    """
+    current_mass = sum(vocab.values())
+    if current_mass == 0:
+        return {token: 0.0 for token in vocab}
+    scale = target_mass / current_mass
+    return {token: count * scale for token, count in vocab.items()}
+
+
 def merge_vocabularies(
     base_vocab: dict[str, int | float],
     target_vocab: dict[str, int | float],
@@ -332,7 +369,8 @@ def train_new_tokenizer(
     seed_lambda: float = 0.5,
     seed_round_mode: str = "round",
     seed_vocab_multiplier: float = 5.0,
-    seed_mass_multiplier: float = 1.0
+    seed_mass_multiplier: float = 1.0,
+    seed_score_mode: str = "count",
 ) -> PreTrainedTokenizerFast:
     """
     Train a new tokenizer on JSONL data using SentencePiece library.
@@ -363,6 +401,10 @@ def train_new_tokenizer(
             during SentencePiece training (default: 1.0). The effective target mass is
             total_base_tokens * seed_mass_multiplier. Values < 1.0 reduce seed influence
             (letting SentencePiece discover more from corpus), values > 1.0 increase it.
+        seed_score_mode: Scoring method for seed vocabulary ranking. "count" uses raw token
+            counts (default, original behavior). "charlength" weights counts by token character
+            length, measuring character coverage rather than token frequency. This addresses the
+            distributional shape mismatch between base and target vocabularies.
 
     Returns:
         Trained tokenizer
@@ -480,12 +522,35 @@ def train_new_tokenizer(
         )
         print(f"  Target vocab size: {len(target_vocab)} tokens", file=sys.stderr)
 
+        # Optional: convert from token-count scoring to character-length scoring
+        if seed_score_mode == "charlength":
+            print("Applying character-length weighting to vocabularies", file=sys.stderr)
+            # Save original vocabs for count-based seed file output
+            base_vocab_counts = dict(base_vocab)
+            target_vocab_counts = dict(target_vocab)
+            base_vocab = apply_character_weighting(base_vocab)
+            target_vocab = apply_character_weighting(target_vocab)
+            # Re-normalize target to match base character mass
+            base_char_mass = int(sum(base_vocab.values()))
+            target_vocab = normalize_vocab_mass(target_vocab, base_char_mass)
+            print(f"  Base character mass: {base_char_mass:,}", file=sys.stderr)
+        elif seed_score_mode != "count":
+            raise ValueError(
+                f"Invalid seed_score_mode: {seed_score_mode}. "
+                "Must be 'count' or 'charlength'"
+            )
+
         # Scale base counts to match target mass (no-op when seed_mass_multiplier=1.0)
         if seed_mass_multiplier != 1.0:
             base_vocab = {
                 token: count * seed_mass_multiplier
                 for token, count in base_vocab.items()
             }
+            if seed_score_mode == "charlength":
+                base_vocab_counts = {
+                    token: count * seed_mass_multiplier
+                    for token, count in base_vocab_counts.items()
+                }
 
         # Step 4: Merge vocabularies with lambda weighting
         print(f"Merging vocabularies with lambda={seed_lambda}, round_mode={seed_round_mode}", file=sys.stderr)
@@ -496,6 +561,18 @@ def train_new_tokenizer(
             round_mode=seed_round_mode
         )
         print(f"  Merged vocab size: {len(merged_vocab)} tokens", file=sys.stderr)
+
+        # For charlength mode: also merge original counts for seed file output.
+        # Character-weighted merge determines ranking (which tokens survive the
+        # top-k cutoff), but the seed file should contain token counts since
+        # SentencePiece uses them for initial lattice weights via ToLogProb.
+        if seed_score_mode == "charlength":
+            merged_vocab_counts = merge_vocabularies(
+                base_vocab=base_vocab_counts,
+                target_vocab=target_vocab_counts,
+                lambda_weight=seed_lambda,
+                round_mode=seed_round_mode,
+            )
 
         # Compute overlap statistics
         base_only = set(base_vocab.keys()) - set(target_vocab.keys())
@@ -508,9 +585,28 @@ def train_new_tokenizer(
         # Step 5: Write merged vocabulary as seed file
         seed_file = os.path.join(output_path, 'seed_vocab.txt')
         with open(seed_file, 'w', encoding='utf-8') as f:
-            # Sort by frequency (descending) for better readability
-            for token, count in sorted(merged_vocab.items(), key=lambda x: x[1], reverse=True):
-                f.write(f"{token}\t{count}\n")
+            if seed_score_mode == "charlength":
+                # Rank by character-weighted score, but write token counts.
+                # Pre-truncate to seed_vocab_size so SentencePiece keeps all
+                # tokens (no further truncation by count values needed).
+                ranked_tokens = sorted(
+                    merged_vocab.items(), key=lambda x: x[1], reverse=True,
+                )[:seed_vocab_size]
+                for token, _ in ranked_tokens:
+                    count = merged_vocab_counts.get(token, 0)
+                    if count > 0:
+                        f.write(f"{token}\t{count}\n")
+                print(
+                    f"  Pre-truncated to {len(ranked_tokens)} tokens "
+                    f"(ranked by char score, values are token counts)",
+                    file=sys.stderr,
+                )
+            else:
+                # Sort by frequency (descending) for better readability
+                for token, count in sorted(
+                    merged_vocab.items(), key=lambda x: x[1], reverse=True,
+                ):
+                    f.write(f"{token}\t{count}\n")
         print(f"Hybrid seed vocabulary saved to {seed_file}", file=sys.stderr)
 
     # Train final SentencePiece model
