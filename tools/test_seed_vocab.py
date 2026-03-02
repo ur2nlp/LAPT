@@ -35,7 +35,8 @@ def test_hybrid_seed_vocabulary(
     seed_vocab_multiplier: float = 5.0,
     seed_mass_multiplier: float = 1.0,
     seed_round_mode: str = "round",
-    output_dir: str = None
+    seed_score_mode: str = "count",
+    output_dir: str = None,
 ):
     """
     Test the hybrid seed vocabulary pipeline.
@@ -47,6 +48,7 @@ def test_hybrid_seed_vocabulary(
         seed_vocab_multiplier: Size multiplier for intermediate tokenizer
         seed_mass_multiplier: Scales seed file counts to control seed influence (default: 1.0)
         seed_round_mode: Rounding method for merging
+        seed_score_mode: Scoring method: "count" (default) or "charlength"
         output_dir: Output directory (default: temporary directory)
     """
     print("=" * 80)
@@ -59,6 +61,7 @@ def test_hybrid_seed_vocabulary(
     print(f"  seed_vocab_multiplier: {seed_vocab_multiplier}")
     print(f"  seed_mass_multiplier: {seed_mass_multiplier}")
     print(f"  seed_round_mode: {seed_round_mode}")
+    print(f"  seed_score_mode: {seed_score_mode}")
     print()
 
     # Check that JSONL file exists
@@ -120,7 +123,8 @@ def test_hybrid_seed_vocabulary(
         # Step 2: Train tokenizer WITH hybrid seed vocabulary
         print(f"Step 2: Training hybrid seeded tokenizer (lambda={seed_lambda})")
         print("-" * 80)
-        seeded_output = tokenizers_dir / f"xglm564m_focus-v{vocab_str}-s{samples_str}_seeded-{seed_vocab_multiplier}x-lambda{seed_lambda}"
+        score_suffix = f"-{seed_score_mode}" if seed_score_mode != "count" else ""
+        seeded_output = tokenizers_dir / f"xglm564m_focus-v{vocab_str}-s{samples_str}_seeded-{seed_vocab_multiplier}x-lambda{seed_lambda}{score_suffix}"
         try:
             seeded_tokenizer = train_new_tokenizer(
                 jsonl_path=str(jsonl_path),
@@ -133,7 +137,8 @@ def test_hybrid_seed_vocabulary(
                 seed_vocab_multiplier=seed_vocab_multiplier,
                 seed_mass_multiplier=seed_mass_multiplier,
                 seed_round_mode=seed_round_mode,
-                character_coverage=1.0
+                seed_score_mode=seed_score_mode,
+                character_coverage=1.0,
             )
             seeded_vocab = set(seeded_tokenizer.get_vocab().keys())
             print(f"Seeded vocab size: {len(seeded_vocab)}")
@@ -311,6 +316,12 @@ def main():
         default="round",
         help="Rounding mode for merging: round (default), ceil, or floor"
     )
+    parser.add_argument(
+        "--score_mode",
+        choices=["count", "charlength"],
+        default="count",
+        help="Scoring method: count (default) or charlength (weight by token length)"
+    )
 
     args = parser.parse_args()
 
@@ -321,7 +332,8 @@ def main():
         seed_vocab_multiplier=args.multiplier,
         seed_mass_multiplier=args.mass_multiplier,
         seed_round_mode=args.round_mode,
-        output_dir=args.output_dir
+        seed_score_mode=args.score_mode,
+        output_dir=args.output_dir,
     )
 
     sys.exit(0 if success else 1)
