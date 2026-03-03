@@ -33,7 +33,6 @@ def test_hybrid_seed_vocabulary(
     vocab_size: int = 1000,
     seed_lambda: float = 0.5,
     seed_vocab_multiplier: float = 5.0,
-    seed_mass_multiplier: float = 1.0,
     seed_round_mode: str = "round",
     seed_score_mode: str = "count",
     output_dir: str = None,
@@ -46,7 +45,6 @@ def test_hybrid_seed_vocabulary(
         vocab_size: Target vocabulary size for final tokenizer
         seed_lambda: Interpolation weight (0=corpus, 1=base)
         seed_vocab_multiplier: Size multiplier for intermediate tokenizer
-        seed_mass_multiplier: Scales seed file counts to control seed influence (default: 1.0)
         seed_round_mode: Rounding method for merging
         seed_score_mode: Scoring method: "count" (default) or "charlength"
         output_dir: Output directory (default: temporary directory)
@@ -59,7 +57,6 @@ def test_hybrid_seed_vocabulary(
     print(f"  vocab_size: {vocab_size}")
     print(f"  seed_lambda: {seed_lambda}")
     print(f"  seed_vocab_multiplier: {seed_vocab_multiplier}")
-    print(f"  seed_mass_multiplier: {seed_mass_multiplier}")
     print(f"  seed_round_mode: {seed_round_mode}")
     print(f"  seed_score_mode: {seed_score_mode}")
     print()
@@ -135,7 +132,6 @@ def test_hybrid_seed_vocabulary(
                 use_seed_vocabulary=True,
                 seed_lambda=seed_lambda,
                 seed_vocab_multiplier=seed_vocab_multiplier,
-                seed_mass_multiplier=seed_mass_multiplier,
                 seed_round_mode=seed_round_mode,
                 seed_score_mode=seed_score_mode,
                 character_coverage=1.0,
@@ -305,12 +301,6 @@ def main():
         help="Intermediate tokenizer size multiplier (default: 5.0)"
     )
     parser.add_argument(
-        "--mass_multiplier",
-        type=float,
-        default=1.0,
-        help="Scale seed file counts to control seed influence (default: 1.0)"
-    )
-    parser.add_argument(
         "--round_mode",
         choices=["ceil", "floor", "round"],
         default="round",
@@ -330,7 +320,6 @@ def main():
         vocab_size=args.vocab_size,
         seed_lambda=args.seed_lambda,
         seed_vocab_multiplier=args.multiplier,
-        seed_mass_multiplier=args.mass_multiplier,
         seed_round_mode=args.round_mode,
         seed_score_mode=args.score_mode,
         output_dir=args.output_dir,

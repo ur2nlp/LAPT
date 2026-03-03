@@ -369,7 +369,6 @@ def train_new_tokenizer(
     seed_lambda: float = 0.5,
     seed_round_mode: str = "round",
     seed_vocab_multiplier: float = 5.0,
-    seed_mass_multiplier: float = 1.0,
     seed_score_mode: str = "count",
 ) -> PreTrainedTokenizerFast:
     """
@@ -397,10 +396,6 @@ def train_new_tokenizer(
         seed_round_mode: Rounding method when merging vocabularies: "round" (default),
             "ceil", or "floor"
         seed_vocab_multiplier: Size multiplier for seed tokenizer (default: 5.0)
-        seed_mass_multiplier: Scales all seed file counts to control the seed's influence
-            during SentencePiece training (default: 1.0). The effective target mass is
-            total_base_tokens * seed_mass_multiplier. Values < 1.0 reduce seed influence
-            (letting SentencePiece discover more from corpus), values > 1.0 increase it.
         seed_score_mode: Scoring method for seed vocabulary ranking. "count" uses raw token
             counts (default, original behavior). "charlength" weights counts by token character
             length, measuring character coverage rather than token frequency. This addresses the
@@ -495,7 +490,7 @@ def train_new_tokenizer(
             print(f"Seed tokenizer already exists at {seed_output_path}", file=sys.stderr)
 
         # Step 2: Extract raw base vocabulary counts from corpus
-        # Cache in seed tokenizer dir (shared across lambda values and target_mass values)
+        # Cache in seed tokenizer dir (shared across lambda values)
         print(f"Extracting base tokenizer vocabulary", file=sys.stderr)
         base_vocab_file = os.path.join(seed_output_path, 'base_vocab_counts.txt')
         base_vocab = extract_base_vocabulary_frequencies(
@@ -506,11 +501,9 @@ def train_new_tokenizer(
             min_frequency=seed_min_frequency
         )
         total_base_tokens = sum(base_vocab.values())
-        target_mass = int(total_base_tokens * seed_mass_multiplier)
+        target_mass = total_base_tokens
         print(f"  Base vocab size: {len(base_vocab)} tokens", file=sys.stderr)
         print(f"  Total base tokens: {total_base_tokens:,}", file=sys.stderr)
-        if seed_mass_multiplier != 1.0:
-            print(f"  Mass multiplier: {seed_mass_multiplier} → effective target mass: {target_mass:,}", file=sys.stderr)
 
         # Step 3: Extract target vocabulary from seed tokenizer, normalized to target mass scale
         # Both vocabularies are scaled to the same target_mass so they're directly comparable
@@ -539,18 +532,6 @@ def train_new_tokenizer(
                 f"Invalid seed_score_mode: {seed_score_mode}. "
                 "Must be 'count' or 'charlength'"
             )
-
-        # Scale base counts to match target mass (no-op when seed_mass_multiplier=1.0)
-        if seed_mass_multiplier != 1.0:
-            base_vocab = {
-                token: count * seed_mass_multiplier
-                for token, count in base_vocab.items()
-            }
-            if seed_score_mode == "charlength":
-                base_vocab_counts = {
-                    token: count * seed_mass_multiplier
-                    for token, count in base_vocab_counts.items()
-                }
 
         # Step 4: Merge vocabularies with lambda weighting
         print(f"Merging vocabularies with lambda={seed_lambda}, round_mode={seed_round_mode}", file=sys.stderr)
