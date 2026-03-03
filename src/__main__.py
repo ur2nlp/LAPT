@@ -18,7 +18,10 @@ from model_utils import (
     initialize_model_and_tokenizer, set_random_seeds, get_tokenizer_suffix, get_model_shortname,
     get_seed_tokenizer_suffix, get_tokenized_path, is_local_model_path, get_init_model_identifier
 )
-from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
+from eval_utils import (
+    compute_ttr_metrics, preprocess_logits_for_metrics,
+    compute_chars_per_token, BPCCallback,
+)
 from config_utils import (
     check_dataset_config, save_dataset_config, check_tokenized_config, save_tokenized_config,
     save_model_config
@@ -397,6 +400,11 @@ def lapt(args: DictConfig):
         external_eval_sets=external_eval_sets
     )
 
+    # Compute chars-per-token ratios for BPC metric
+    chars_per_token_ratios = compute_chars_per_token(eval_dataset, tokenizer)
+    for prefix, ratio in chars_per_token_ratios.items():
+        print(f"  {prefix} chars_per_token = {ratio:.2f}", file=sys.stderr)
+
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as
     # well make sure everything is trainable at first
@@ -466,6 +474,9 @@ def lapt(args: DictConfig):
 
     broken_loss_callback = DetectBrokenLossCallback(trainer)
     trainer.add_callback(broken_loss_callback)
+
+    bpc_callback = BPCCallback(chars_per_token_ratios)
+    trainer.add_callback(bpc_callback)
 
     if args.training.get('early_stopping_patience', None):
         delay_ratio = args.training.get('early_stopping_delay_ratio', 0.0)
