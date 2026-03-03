@@ -186,17 +186,29 @@ def bin_position(raw_pos: int, total_tokens: int, num_bins: int) -> float:
 def proportional_log_stacks(
     base_arr: np.ndarray,
     target_arr: np.ndarray,
+    base_proportion: np.ndarray | None = None,
+    target_proportion: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute log-height bars split by linear proportion.
 
-    Total bar height is log1p(combined), split proportionally by each source's
-    linear contribution. Makes the tail visible while preserving honest
-    base-vs-target proportions.
+    Total bar height is log1p(base_arr + target_arr). Color split comes from
+    the proportion arrays if given, otherwise from the height arrays themselves.
+
+    Args:
+        base_arr: Base contribution to bar height (typically lambda-weighted).
+        target_arr: Target contribution to bar height (typically lambda-weighted).
+        base_proportion: Base values for color split (e.g., raw pre-lambda counts).
+        target_proportion: Target values for color split (e.g., raw pre-lambda counts).
     """
     combined = base_arr + target_arr
     log_height = np.log1p(combined)
+
+    prop_base = base_proportion if base_proportion is not None else base_arr
+    prop_target = target_proportion if target_proportion is not None else target_arr
+    prop_total = prop_base + prop_target
     with np.errstate(invalid="ignore"):
-        base_frac = np.where(combined > 0, base_arr / combined, 0.0)
+        base_frac = np.where(prop_total > 0, prop_base / prop_total, 0.0)
+
     log_base = log_height * base_frac
     log_target = log_height * (1.0 - base_frac)
     return log_base, log_target
@@ -243,12 +255,15 @@ def draw_plot3(
     boundary_pos: float,
     bar_kwargs: dict,
     score_mode: str = "count",
+    raw_base: np.ndarray | None = None,
+    raw_target: np.ndarray | None = None,
 ) -> None:
     """Plot 3: Interpolated, stacked, original rank order (log-proportional)."""
     x = np.arange(len(w_base))
-    log_base, log_target = proportional_log_stacks(w_base, w_target)
+    log_base, log_target = proportional_log_stacks(w_base, w_target, raw_base, raw_target)
     unit = "char score" if score_mode == "charlength" else "count"
 
+    prop_label = "raw" if raw_base is not None else "weighted"
     ax.bar(x, log_base, color=COLOR_BASE, label=f"Base × {lambda_weight}", **bar_kwargs)
     ax.bar(
         x, log_target, bottom=log_base,
@@ -259,9 +274,9 @@ def draw_plot3(
     ax.set_title(f"Interpolated (λ={lambda_weight}, original rank order)")
     ax.legend(loc="upper right", framealpha=0.8, fontsize=9)
     ax.annotate(
-        f"Log-scaled heights: color shows per-rank {unit} proportion, not relative mass",
-        xy=(0.5, 0.01), xycoords="axes fraction",
-        ha="center", fontsize=7, fontstyle="italic", color="#666666",
+        f"Log-scaled heights; color shows {prop_label} per-rank {unit} proportion, not relative mass",
+        xy=(0.02, 0.95), xycoords="axes fraction",
+        ha="left", va="top", fontsize=7, fontstyle="italic", color="#666666",
     )
 
 
@@ -274,12 +289,15 @@ def draw_plot4(
     cutoff_rank: int | None,
     bar_kwargs: dict,
     score_mode: str = "count",
+    raw_base: np.ndarray | None = None,
+    raw_target: np.ndarray | None = None,
 ) -> None:
     """Plot 4: Interpolated, re-ranked by combined mass (log-proportional)."""
     x = np.arange(len(r_base))
-    log_base, log_target = proportional_log_stacks(r_base, r_target)
+    log_base, log_target = proportional_log_stacks(r_base, r_target, raw_base, raw_target)
     unit = "char score" if score_mode == "charlength" else "count"
 
+    prop_label = "raw" if raw_base is not None else "weighted"
     ax.bar(x, log_base, color=COLOR_BASE, label=f"Base × {lambda_weight}", **bar_kwargs)
     ax.bar(
         x, log_target, bottom=log_base,
@@ -297,9 +315,9 @@ def draw_plot4(
     ax.set_title(f"Interpolated (λ={lambda_weight}, re-ranked by combined {unit})")
     ax.legend(loc="upper right", framealpha=0.8, fontsize=9)
     ax.annotate(
-        f"Log-scaled heights: color shows per-rank {unit} proportion, not relative mass",
-        xy=(0.5, 0.01), xycoords="axes fraction",
-        ha="center", fontsize=7, fontstyle="italic", color="#666666",
+        f"Log-scaled heights; color shows {prop_label} per-rank {unit} proportion, not relative mass",
+        xy=(0.02, 0.95), xycoords="axes fraction",
+        ha="left", va="top", fontsize=7, fontstyle="italic", color="#666666",
     )
 
 
@@ -320,6 +338,7 @@ def create_figure(
     width: float = 16,
     height_per_row: float = 3.0,
     score_mode: str = "count",
+    raw_proportions: bool = False,
 ) -> plt.Figure:
     """Create figure with selected plots for one or more lambda values.
 
@@ -341,6 +360,8 @@ def create_figure(
         width: Figure width in inches.
         height_per_row: Height per subplot row in inches.
         score_mode: Scoring method used ("count" or "charlength"), for title.
+        raw_proportions: If True, color split in plots 3-4 uses pre-lambda
+            counts while bar height still reflects lambda-weighted counts.
 
     Returns:
         Matplotlib Figure.
@@ -422,6 +443,19 @@ def create_figure(
             w_base = data["weighted_base"]
             w_target = data["weighted_target"]
 
+        # Pre-lambda counts for color proportions (when --raw-proportions)
+        prop_base_3 = None
+        prop_target_3 = None
+        prop_base_4 = None
+        prop_target_4 = None
+        if raw_proportions:
+            if do_bin:
+                prop_base_3 = bin_array(data["base_counts"], num_bins)
+                prop_target_3 = bin_array(data["target_counts"], num_bins)
+            else:
+                prop_base_3 = data["base_counts"]
+                prop_target_3 = data["target_counts"]
+
         rerank = data["rerank_order"]
         r_base_raw = data["weighted_base"][rerank]
         r_target_raw = data["weighted_target"][rerank]
@@ -434,21 +468,46 @@ def create_figure(
             r_target = r_target_raw
             n_display_4 = total_tokens
 
+        if raw_proportions:
+            r_prop_base_raw = data["base_counts"][rerank]
+            r_prop_target_raw = data["target_counts"][rerank]
+            if do_bin:
+                prop_base_4 = bin_array(r_prop_base_raw, num_bins)
+                prop_target_4 = bin_array(r_prop_target_raw, num_bins)
+            else:
+                prop_base_4 = r_prop_base_raw
+                prop_target_4 = r_prop_target_raw
+
         # Resolve cutoff into bin-space
         if cutoff_position is not None:
             cut_bin = bin_position(cutoff_position, total_tokens, num_bins) if do_bin else cutoff_position
         else:
             cut_bin = None
 
+        lambda_axes = []
         for p in lambda_plots:
             ax = axes[row_idx]
             if p == 3:
-                draw_plot3(ax, w_base, w_target, lw, boundary_pos, bar_kwargs, score_mode)
+                draw_plot3(
+                    ax, w_base, w_target, lw, boundary_pos, bar_kwargs, score_mode,
+                    raw_base=prop_base_3, raw_target=prop_target_3,
+                )
                 ax.set_xlim(-0.5, n_display - 0.5)
             elif p == 4:
-                draw_plot4(ax, r_base, r_target, lw, cut_bin, cutoff_position, bar_kwargs, score_mode)
+                draw_plot4(
+                    ax, r_base, r_target, lw, cut_bin, cutoff_position, bar_kwargs, score_mode,
+                    raw_base=prop_base_4, raw_target=prop_target_4,
+                )
                 ax.set_xlim(-0.5, n_display_4 - 0.5)
+            lambda_axes.append(ax)
             row_idx += 1
+
+        # Share y-axis limits between plots 3 and 4 for this lambda
+        if len(lambda_axes) >= 2:
+            ylims = [ax.get_ylim() for ax in lambda_axes]
+            shared_ylim = (min(y[0] for y in ylims), max(y[1] for y in ylims))
+            for ax in lambda_axes:
+                ax.set_ylim(shared_ylim)
 
     # Shared formatting
     for ax in axes:
@@ -587,6 +646,14 @@ def main():
         default="count",
         help="Scoring method: count (default) or charlength (weight by token length)",
     )
+    parser.add_argument(
+        "--raw-proportions",
+        action="store_true",
+        help=(
+            "In plots 3-4, use pre-lambda counts for color proportions "
+            "while bar height remains lambda-weighted"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -674,6 +741,7 @@ def main():
         width=args.width,
         height_per_row=args.row_height,
         score_mode=args.score_mode,
+        raw_proportions=args.raw_proportions,
     )
 
     # Save
