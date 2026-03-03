@@ -185,8 +185,16 @@ class BPCCallback(TrainerCallback):
         if metrics is None:
             return
 
+        bpc_values = {}
         for prefix, chars_per_token in self.chars_per_token_ratios.items():
             loss_key = f"{prefix}_loss"
             bpc_key = f"{prefix}_bpc"
             if loss_key in metrics and chars_per_token > 0:
-                metrics[bpc_key] = metrics[loss_key] / (chars_per_token * math.log(2))
+                bpc = metrics[loss_key] / (chars_per_token * math.log(2))
+                metrics[bpc_key] = bpc
+                bpc_values[bpc_key] = bpc
+
+        # Trainer logs metrics before on_evaluate fires, so patch the most
+        # recent log_history entry so BPC appears in saved trainer state
+        if bpc_values and state.log_history:
+            state.log_history[-1].update(bpc_values)

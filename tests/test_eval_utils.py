@@ -244,23 +244,44 @@ class TestComputeCharsPerToken:
         assert result == {"eval": 0.0}
 
 
+def _make_mock_state(log_entry: dict = None):
+    """Create a mock TrainerState with a log_history list."""
+    state = MagicMock()
+    state.log_history = [log_entry] if log_entry is not None else []
+    return state
+
+
 class TestBPCCallback:
     def test_injects_bpc(self):
         """Test that BPC is correctly computed and injected into metrics."""
         callback = BPCCallback({"eval": 4.0})
         metrics = {"eval_loss": 2.0}
+        state = _make_mock_state({"eval_loss": 2.0})
 
-        callback.on_evaluate(args=None, state=None, control=None, metrics=metrics)
+        callback.on_evaluate(args=None, state=state, control=None, metrics=metrics)
 
         expected_bpc = 2.0 / (4.0 * math.log(2))
         assert metrics["eval_bpc"] == pytest.approx(expected_bpc)
+
+    def test_patches_log_history(self):
+        """Test that BPC values are patched into state.log_history."""
+        callback = BPCCallback({"eval": 4.0})
+        metrics = {"eval_loss": 2.0}
+        log_entry = {"eval_loss": 2.0, "step": 100}
+        state = _make_mock_state(log_entry)
+
+        callback.on_evaluate(args=None, state=state, control=None, metrics=metrics)
+
+        expected_bpc = 2.0 / (4.0 * math.log(2))
+        assert state.log_history[-1]["eval_bpc"] == pytest.approx(expected_bpc)
 
     def test_multi_split(self):
         """Test BPC injection for multiple eval splits."""
         callback = BPCCallback({"eval_got": 4.0, "eval_ang": 3.0})
         metrics = {"eval_got_loss": 2.0, "eval_ang_loss": 1.5}
+        state = _make_mock_state({"eval_got_loss": 2.0, "eval_ang_loss": 1.5})
 
-        callback.on_evaluate(args=None, state=None, control=None, metrics=metrics)
+        callback.on_evaluate(args=None, state=state, control=None, metrics=metrics)
 
         assert "eval_got_bpc" in metrics
         assert "eval_ang_bpc" in metrics
@@ -270,15 +291,17 @@ class TestBPCCallback:
     def test_no_metrics(self):
         """Test that callback handles None metrics gracefully."""
         callback = BPCCallback({"eval": 4.0})
+        state = _make_mock_state()
         # Should not raise
-        callback.on_evaluate(args=None, state=None, control=None, metrics=None)
+        callback.on_evaluate(args=None, state=state, control=None, metrics=None)
 
     def test_missing_loss_key(self):
         """Test that callback skips splits without a matching loss key."""
         callback = BPCCallback({"eval": 4.0, "eval_other": 3.0})
         metrics = {"eval_loss": 2.0}
+        state = _make_mock_state({"eval_loss": 2.0})
 
-        callback.on_evaluate(args=None, state=None, control=None, metrics=metrics)
+        callback.on_evaluate(args=None, state=state, control=None, metrics=metrics)
 
         assert "eval_bpc" in metrics
         assert "eval_other_bpc" not in metrics
