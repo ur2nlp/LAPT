@@ -1,13 +1,20 @@
 """
-Tests for evaluation utilities, particularly distinct-n metrics.
+Tests for evaluation utilities: TTR metrics, BPC computation, and logit preprocessing.
 """
+
+import math
 
 import numpy as np
 import pytest
 import torch
 from collections import namedtuple
+from unittest.mock import MagicMock
+from datasets import Dataset
 
-from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
+from eval_utils import (
+    compute_ttr_metrics, preprocess_logits_for_metrics,
+    compute_chars_per_token, BPCCallback,
+)
 
 
 # Create a simple EvalPrediction-like object for testing
@@ -161,3 +168,117 @@ def test_distinctness_argmaxed_input():
 
     # Within seq: (3/5 + 2/5) / 2 = 0.5
     assert metrics['ttr-seq'] == 0.5
+
+
+# --- BPC tests ---
+
+def _make_mock_tokenizer(token_to_text: dict[int, str]):
+    """Create a mock tokenizer that decodes token IDs to predetermined strings."""
+    tokenizer = MagicMock()
+
+    def mock_decode(input_ids, skip_special_tokens=True):
+        return "".join(token_to_text.get(tid, "") for tid in input_ids)
+
+    tokenizer.decode = mock_decode
+    return tokenizer
+
+
+class TestComputeCharsPerToken:
+    def test_single_dataset(self):
+        """Test chars_per_token with a single eval dataset (non-dict)."""
+        # Each token decodes to "ab" (2 chars)
+        token_map = {1: "ab", 2: "cd", 3: "ef"}
+        tokenizer = _make_mock_tokenizer(token_map)
+
+        ds = Dataset.from_dict({
+            "input_ids": [[1, 2, 3], [1, 2, 3]],
+        })
+
+        result = compute_chars_per_token(ds, tokenizer)
+
+        # 2 examples, each: 6 chars, 2 loss tokens (3 tokens - 1 for CLM shift)
+        # total_chars=12, total_tokens=4, ratio=3.0
+        assert result == {"eval": 3.0}
+
+    def test_dict_dataset_multi_split(self):
+        """Test chars_per_token with a dict of eval datasets."""
+        token_map = {1: "a", 2: "bb", 3: "ccc"}
+        tokenizer = _make_mock_tokenizer(token_map)
+
+        split_a = Dataset.from_dict({
+            "input_ids": [[1, 2, 3]],
+        })
+        split_b = Dataset.from_dict({
+            "input_ids": [[1, 1, 1, 1]],
+        })
+
+        result = compute_chars_per_token({"got": split_a, "ang": split_b}, tokenizer)
+
+        # split_a: 1 example, chars="a"+"bb"+"ccc"=6 chars, tokens=3-1=2, ratio=3.0
+        assert result["eval_got"] == pytest.approx(3.0)
+        # split_b: 1 example, chars="a"*4=4 chars, tokens=4-1=3, ratio=4/3
+        assert result["eval_ang"] == pytest.approx(4.0 / 3.0)
+
+    def test_with_labels_masking(self):
+        """Test that -100 labels are excluded from token count."""
+        token_map = {1: "ab", 2: "cd", 3: "ef", 4: "gh"}
+        tokenizer = _make_mock_tokenizer(token_map)
+
+        ds = Dataset.from_dict({
+            "input_ids": [[1, 2, 3, 4]],
+            "labels": [[-100, -100, 3, 4]],
+        })
+
+        result = compute_chars_per_token(ds, tokenizer)
+
+        # chars = "ab"+"cd"+"ef"+"gh" = 8 chars (decode uses all input_ids)
+        # non-masked labels = 2 (tokens 3 and 4), loss tokens = 2-1 = 1
+        # ratio = 8/1 = 8.0
+        assert result == {"eval": 8.0}
+
+    def test_empty_dataset(self):
+        """Test with an empty dataset."""
+        tokenizer = _make_mock_tokenizer({})
+        ds = Dataset.from_dict({"input_ids": []})
+        result = compute_chars_per_token(ds, tokenizer)
+        assert result == {"eval": 0.0}
+
+
+class TestBPCCallback:
+    def test_injects_bpc(self):
+        """Test that BPC is correctly computed and injected into metrics."""
+        callback = BPCCallback({"eval": 4.0})
+        metrics = {"eval_loss": 2.0}
+
+        callback.on_evaluate(args=None, state=None, control=None, metrics=metrics)
+
+        expected_bpc = 2.0 / (4.0 * math.log(2))
+        assert metrics["eval_bpc"] == pytest.approx(expected_bpc)
+
+    def test_multi_split(self):
+        """Test BPC injection for multiple eval splits."""
+        callback = BPCCallback({"eval_got": 4.0, "eval_ang": 3.0})
+        metrics = {"eval_got_loss": 2.0, "eval_ang_loss": 1.5}
+
+        callback.on_evaluate(args=None, state=None, control=None, metrics=metrics)
+
+        assert "eval_got_bpc" in metrics
+        assert "eval_ang_bpc" in metrics
+        assert metrics["eval_got_bpc"] == pytest.approx(2.0 / (4.0 * math.log(2)))
+        assert metrics["eval_ang_bpc"] == pytest.approx(1.5 / (3.0 * math.log(2)))
+
+    def test_no_metrics(self):
+        """Test that callback handles None metrics gracefully."""
+        callback = BPCCallback({"eval": 4.0})
+        # Should not raise
+        callback.on_evaluate(args=None, state=None, control=None, metrics=None)
+
+    def test_missing_loss_key(self):
+        """Test that callback skips splits without a matching loss key."""
+        callback = BPCCallback({"eval": 4.0, "eval_other": 3.0})
+        metrics = {"eval_loss": 2.0}
+
+        callback.on_evaluate(args=None, state=None, control=None, metrics=metrics)
+
+        assert "eval_bpc" in metrics
+        assert "eval_other_bpc" not in metrics
