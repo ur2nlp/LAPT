@@ -8,9 +8,6 @@ dataset:
   - type: plaintext
     language: ang
     path: data/beowulf/beowulf_clean.txt
-  - type: plaintext
-    language: got
-    path: data/gotica/gotica_clean.txt
   - type: concat
     language: non
     sources:
@@ -29,20 +26,32 @@ dataset:
 output_dir: models
 model_name: null
 resume_from_checkpoint: null
+focus:
+  enabled: true
+  tokenizer_path: null
+  vocab_size: 16384
+  num_samples: 100000
+  dataset: null
+  inherit_additional_special_tokens: true
+  fasttext_model_min_count: 1
+  character_coverage: 0.999
+  use_seed_vocabulary: true
+  seed_filter_single_chars: true
+  seed_min_frequency: 1
 training:
   name: l40_basic
   max_length: 512
   num_train_epochs: 1.0
   max_steps: 100000
-  train_batch_size: 12
+  train_batch_size: 10
   gradient_accumulation_steps: 10
   gradient_checkpointing: false
   learning_rate: 1.0e-05
   lr_scheduler_type: linear
   warmup_ratio: 0.005
   max_grad_norm: 1.0
-  dropout: 0.1
-  attention_dropout: 0.1
+  dropout: 0.15
+  attention_dropout: 0.15
   activation_dropout: 0.0
   logging_steps: ${divide:${training.max_steps},400}
   eval_strategy: steps
@@ -50,24 +59,11 @@ training:
   eval_steps: ${divide:${training.max_steps},100}
   eval_batch_size: 20
   dev_size: 0.1
-  compute_ttr: true
   save_steps: ${divide:${training.max_steps},100}
   save_total_limit: 2
   early_stopping_patience: 10
-  early_stopping_delay_ratio: 0.2
-  freeze_main_model: false
+  early_stopping_delay_ratio: 0.25
+  freeze_main_model: true
   model_freeze_prefix: model.layer
-  unfreeze_step_ratio: 0.2
-focus:
-  dataset: null
-  enabled: true
-  tokenizer_path: null
-  vocab_size: 16384
-  num_samples: 200000
-  inherit_additional_special_tokens: true
-  character_coverage: 0.999
-  fasttext_model_min_count: 1
-  use_seed_vocabulary: true
-  seed_min_frequency: 1
-  seed_filter_single_chars: true
-experiment_id: v9
+  unfreeze_step_ratio: 0.25
+experiment_id: v04

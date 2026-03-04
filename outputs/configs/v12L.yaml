@@ -61,7 +61,7 @@ training:
   dropout: 0.025
   attention_dropout: 0.025
   activation_dropout: 0.0
-  weight_decay: 0.1
+  weight_decay: 0.0
   logging_steps: 250
   eval_strategy: steps
   metric_for_best_model: got_holdout_loss
@@ -85,7 +85,7 @@ focus:
   character_coverage: 0.999
   fasttext_model_min_count: 1
   use_seed_vocabulary: true
-  seed_lambda: 0.99
+  seed_lambda: 0.9
   seed_vocab_multiplier: 2.0
   seed_mass_multiplier: 1.0
   seed_min_frequency: 1
@@ -98,4 +98,4 @@ external_eval:
   - name: got-eng_holdout
     path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_test.txt
     format: plaintext
-experiment_id: v6L
+experiment_id: v12L

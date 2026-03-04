@@ -1,4 +1,4 @@
-v4L:
+v04L:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -47,7 +47,7 @@ v4L:
   group: large-hparam-sweep
   note: XGLM-1.7B, lr 1e-5, dropout 0.025, multiplier 2
   observation: ''
-v5L:
+v05L:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -96,7 +96,7 @@ v5L:
   group: large-hparam-sweep
   note: XGLM-1.7B, lr 1e-5, dropout 0.025, multiplier 2, max_grad_norm 4
   observation: ''
-v6L:
+v06L:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -145,7 +145,7 @@ v6L:
   group: large-hparam-sweep
   note: XGLM-1.7B, lr 1e-5, dropout 0.025, multiplier 2, max_grad_norm 4, batch 90
   observation: ''
-v1L:
+v01L:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -194,7 +194,7 @@ v1L:
   group: large-hparam-sweep
   note: XGLM-1.7B, lr 1e-5, dropout 0.25
   observation: ''
-v2L:
+v02L:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -243,7 +243,7 @@ v2L:
   group: large-hparam-sweep
   note: XGLM-1.7B, lr 2e-5, dropout 0.25
   observation: ''
-v3L:
+v03L:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -1517,7 +1517,7 @@ v83:
   group: 200k-dropout
   note: 200k steps, dropout 0.25, lr 2.4e-5
   observation: ''
-v3:
+v03:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -1552,7 +1552,7 @@ v3:
   group: ''
   note: 200k steps; best loss/TTR of early runs, still degenerate
   observation: ''
-v5:
+v05:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -1590,7 +1590,7 @@ v5:
   group: ''
   note: Batch 200
   observation: ''
-v4:
+v04:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -1665,7 +1665,7 @@ v10:
   group: ''
   note: Frozen 5k, unseeded
   observation: ''
-v6:
+v06:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -1858,7 +1858,7 @@ v14:
   group: ''
   note: Both Gothic scripts; Flan Focus (possibly bugged)
   observation: ''
-v7:
+v07:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -1897,7 +1897,7 @@ v7:
   group: ''
   note: Unfrozen, seeded; overlap now ~16k due to bug fix
   observation: ''
-v8:
+v08:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -1936,7 +1936,7 @@ v8:
   group: ''
   note: Unfrozen, batch 240, seeded
   observation: ''
-v9:
+v09:
   params:
     max_length: 512
     num_train_epochs: 1.0
@@ -4289,4 +4289,293 @@ v64:
   era: eng-scale-sweep
   group: alpha-sweep
   note: alpha 0.6
+  observation: ''
+v07L:
+  params:
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 15
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.025
+    attention_dropout: 0.025
+    activation_dropout: 0.0
+    weight_decay: 0.1
+    logging_steps: 250
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    dev_size: 0.1
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    alpha: 0.5
+    total_samples: 9000000
+    vocab_size: 32768
+    num_samples: 5000000
+    inherit_additional_special_tokens: true
+    character_coverage: 0.999
+    fasttext_model_min_count: 1
+    use_seed_vocabulary: false
+    effective_batch: 90
+    lr: 1.0e-05
+    focus_enabled: true
+  era: ''
+  group: ''
+  note: ''
+  observation: ''
+v09L:
+  params:
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 15
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.0
+    attention_dropout: 0.0
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 250
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    dev_size: 0.1
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    alpha: 0.5
+    total_samples: 9000000
+    vocab_size: 32768
+    num_samples: 5000000
+    inherit_additional_special_tokens: true
+    character_coverage: 0.999
+    fasttext_model_min_count: 1
+    use_seed_vocabulary: true
+    seed_lambda: 0.99
+    seed_vocab_multiplier: 2.0
+    seed_mass_multiplier: 1.0
+    seed_min_frequency: 1
+    seed_round_mode: round
+    effective_batch: 90
+    lr: 1.0e-05
+    focus_enabled: true
+  era: ''
+  group: ''
+  note: ''
+  observation: ''
+v08L:
+  params:
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 15
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.025
+    attention_dropout: 0.025
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 250
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    dev_size: 0.1
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    alpha: 0.5
+    total_samples: 9000000
+    vocab_size: 32768
+    num_samples: 5000000
+    inherit_additional_special_tokens: true
+    character_coverage: 0.999
+    fasttext_model_min_count: 1
+    use_seed_vocabulary: true
+    seed_lambda: 0.99
+    seed_vocab_multiplier: 2.0
+    seed_mass_multiplier: 1.0
+    seed_min_frequency: 1
+    seed_round_mode: round
+    effective_batch: 90
+    lr: 1.0e-05
+    focus_enabled: true
+  era: ''
+  group: ''
+  note: ''
+  observation: ''
+v10L:
+  params:
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 200000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.025
+    attention_dropout: 0.025
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 500
+    eval_strategy: steps
+    eval_steps: 2000
+    eval_batch_size: 12
+    dev_size: 0.1
+    compute_ttr: true
+    save_steps: 2000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    alpha: 0.5
+    total_samples: 9000000
+    vocab_size: 32768
+    num_samples: 5000000
+    inherit_additional_special_tokens: true
+    character_coverage: 0.999
+    fasttext_model_min_count: 1
+    use_seed_vocabulary: true
+    seed_lambda: 0.99
+    seed_vocab_multiplier: 2.0
+    seed_mass_multiplier: 1.0
+    seed_min_frequency: 1
+    seed_round_mode: round
+    effective_batch: 60
+    lr: 1.0e-05
+    focus_enabled: true
+  era: ''
+  group: ''
+  note: Check if longer training with smaller batches is effective
+  observation: ''
+v11L:
+  params:
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 15
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.025
+    attention_dropout: 0.025
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 250
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    dev_size: 0.1
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    alpha: 0.5
+    total_samples: 9000000
+    vocab_size: 32768
+    num_samples: 5000000
+    inherit_additional_special_tokens: true
+    character_coverage: 0.999
+    fasttext_model_min_count: 1
+    use_seed_vocabulary: true
+    seed_lambda: 0.99
+    seed_vocab_multiplier: 2.0
+    seed_mass_multiplier: 1.0
+    seed_min_frequency: 1
+    seed_round_mode: round
+    effective_batch: 90
+    lr: 2.0e-05
+    focus_enabled: true
+  era: ''
+  group: ''
+  note: Try normal training length with higher LR
+  observation: ''
+v12L:
+  params:
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 15
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.025
+    attention_dropout: 0.025
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 250
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    dev_size: 0.1
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    alpha: 0.5
+    total_samples: 9000000
+    vocab_size: 32768
+    num_samples: 5000000
+    inherit_additional_special_tokens: true
+    character_coverage: 0.999
+    fasttext_model_min_count: 1
+    use_seed_vocabulary: true
+    seed_lambda: 0.9
+    seed_vocab_multiplier: 2.0
+    seed_mass_multiplier: 1.0
+    seed_min_frequency: 1
+    seed_round_mode: round
+    effective_batch: 90
+    lr: 1.0e-05
+    focus_enabled: true
+  era: ''
+  group: ''
+  note: ''
   observation: ''

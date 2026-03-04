@@ -41,8 +41,8 @@ training:
   lr_scheduler_type: linear
   warmup_ratio: 0.005
   max_grad_norm: 1.0
-  dropout: 0.15
-  attention_dropout: 0.15
+  dropout: 0.1
+  attention_dropout: 0.1
   activation_dropout: 0.0
   logging_steps: ${divide:${training.max_steps},400}
   eval_strategy: steps
@@ -55,40 +55,11 @@ training:
   save_total_limit: 2
   early_stopping_patience: 10
   early_stopping_delay_ratio: 0.2
-  freeze_main_model: true
+  freeze_main_model: false
   model_freeze_prefix: model.layer
   unfreeze_step_ratio: 0.2
 focus:
-  dataset:
-    type: multinomial
-    language: old_germanic
-    sources:
-    - type: plaintext
-      language: ang
-      path: data/beowulf/beowulf_clean.txt
-    - type: plaintext
-      language: got
-      path: data/gotica/gotica_clean.txt
-    - type: concat
-      language: non
-      sources:
-      - type: plaintext
-        path: data/sagas/sagas_clean.txt
-      - type: plaintext
-        path: data/icecorpus-texts/icepahc_12th-18th_clean.txt
-    - type: plaintext
-      language: got-eng
-      path: data/parallel/gothic_english.txt
-    - type: huggingface
-      language: eng
-      name: wikitext
-      config: wikitext-103-v1
-      split: train
-      text_column: text
-      max_samples: 100000
-    alpha: 0.7
-    total_samples: 200000
-    cache_dir: data/old_germanic_no_flan
+  dataset: null
   enabled: true
   tokenizer_path: null
   vocab_size: 16384
@@ -96,6 +67,7 @@ focus:
   inherit_additional_special_tokens: true
   character_coverage: 0.999
   fasttext_model_min_count: 1
-  use_seed_vocabulary: false
-experiment_id: v6
-fresh_dataset: true
+  use_seed_vocabulary: true
+  seed_min_frequency: 1
+  seed_filter_single_chars: true
+experiment_id: v09

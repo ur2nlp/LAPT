@@ -48,7 +48,7 @@ training:
   num_train_epochs: 1.0
   max_steps: 100000
   train_batch_size: 6
-  gradient_accumulation_steps: 20
+  gradient_accumulation_steps: 15
   gradient_checkpointing: false
   learning_rate: 1.0e-05
   lr_scheduler_type: linear
@@ -84,12 +84,7 @@ focus:
   inherit_additional_special_tokens: true
   character_coverage: 0.999
   fasttext_model_min_count: 1
-  use_seed_vocabulary: true
-  seed_lambda: 0.99
-  seed_vocab_multiplier: 2.0
-  seed_mass_multiplier: 1.0
-  seed_min_frequency: 1
-  seed_round_mode: round
+  use_seed_vocabulary: false
 external_eval:
   external_eval_sets:
   - name: got_holdout
@@ -98,4 +93,4 @@ external_eval:
   - name: got-eng_holdout
     path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_test.txt
     format: plaintext
-experiment_id: v5L
+experiment_id: v07L
