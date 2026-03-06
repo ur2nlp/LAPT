@@ -42,7 +42,7 @@ for dir in $dirs; do
         continue
     fi
 
-    exp_id=$(grep "^experiment_id:" "$config" | awk '{print $2}')
+    exp_id=$(grep "^experiment_id:" "$config" | awk '{print $2}') || true
     if [ -z "$exp_id" ]; then
         continue
     fi
@@ -51,7 +51,7 @@ for dir in $dirs; do
     if [ -f "$dir/trainer_state.json" ]; then
         echo -e "${exp_id}\t${dir_name}\t${dir}/trainer_state.json\t${config}"
     else
-        latest_ckpt=$(ls -d "$dir"/checkpoint-* 2>/dev/null | sort -t- -k2 -n | tail -1)
+        latest_ckpt=$(ls -d "$dir"/checkpoint-* 2>/dev/null | sort -t- -k2 -n | tail -1) || true
         if [ -n "$latest_ckpt" ] && [ -f "$latest_ckpt/trainer_state.json" ]; then
             echo -e "${exp_id}\t${dir_name}\t${latest_ckpt}/trainer_state.json\t${config}"
         fi

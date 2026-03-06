@@ -13,12 +13,26 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 
 TRAINER_STATES_DIR = Path("outputs/trainer_states")
 CONFIGS_DIR = Path("outputs/configs")
+
+
+def normalize_exp_id(exp_id: str) -> str:
+    """Normalize experiment ID to canonical zero-padded form.
+
+    Pads single-digit numbers to two digits so that 'v8L' and 'v08L' are
+    treated as the same experiment and stored consistently as 'v08L'.
+    """
+    match = re.match(r'^(v)(\d+)(.*)$', exp_id)
+    if match:
+        num = int(match.group(2))
+        return f"{match.group(1)}{num:02d}{match.group(3)}"
+    return exp_id
 
 
 def get_local_status(filepath: Path) -> str:
@@ -52,15 +66,15 @@ def main():
     if TRAINER_STATES_DIR.exists():
         for filepath in TRAINER_STATES_DIR.glob("*.json"):
             try:
-                local_runs[filepath.stem] = get_local_status(filepath)
+                local_runs[normalize_exp_id(filepath.stem)] = get_local_status(filepath)
             except (json.JSONDecodeError, KeyError):
-                local_runs[filepath.stem] = "unknown"
+                local_runs[normalize_exp_id(filepath.stem)] = "unknown"
 
     # track which configs already exist locally
     local_configs: set[str] = set()
     if CONFIGS_DIR.exists():
         for filepath in CONFIGS_DIR.glob("*.yaml"):
-            local_configs.add(filepath.stem)
+            local_configs.add(normalize_exp_id(filepath.stem))
 
     # read remote inventory from stdin
     to_fetch: list[tuple[str, str, str | None, str]] = []
@@ -73,7 +87,7 @@ def main():
         if len(parts) < 3:
             print(f"Warning: malformed line: {line}", file=sys.stderr)
             continue
-        exp_id = parts[0]
+        exp_id = normalize_exp_id(parts[0])
         remote_trainer_state = parts[2]
         remote_config = parts[3] if len(parts) >= 4 else None
 
