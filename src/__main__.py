@@ -18,12 +18,14 @@ from model_utils import (
     initialize_model_and_tokenizer, set_random_seeds,
     get_tokenized_path, is_local_model_path, get_init_model_identifier
 )
-from artifact_configs import TokenizerConfig, DatasetConfig, TokenizedDatasetConfig
+from artifact_configs import (
+    TokenizerConfig, DatasetConfig, TokenizedDatasetConfig, ModelConfig,
+    resolve_dev_size,
+)
 from eval_utils import (
     compute_ttr_metrics, preprocess_logits_for_metrics,
     compute_chars_per_token, BPCCallback,
 )
-from artifact_configs import ModelConfig
 
 
 OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))
@@ -322,7 +324,10 @@ def lapt(args: DictConfig):
     _handle_cache_cleanup(args)
 
     # Build dataset config for tracking
-    dataset_config = DatasetConfig.from_args(args, dev_size=args.training.dev_size)
+    dev_size = resolve_dev_size(args)
+
+    # Build dataset config for tracking
+    dataset_config = DatasetConfig.from_args(args)
     dataset_config_path = f"{args.dataset.cache_dir}/untokenized/config.yaml"
 
     # Check if dataset cache exists
@@ -344,7 +349,7 @@ def lapt(args: DictConfig):
     untokenized_path = load_untokenized_dataset(
         dataset_config=args.dataset,
         cache_dir=args.dataset.cache_dir,
-        dev_size=args.training.dev_size
+        dev_size=dev_size
     )
 
     # Save config if we just created the dataset
@@ -382,7 +387,7 @@ def lapt(args: DictConfig):
         tokenized_path=tokenized_path,
         tokenizer=tokenizer,
         max_length=args.training.max_length,
-        dev_size=args.training.dev_size
+        dev_size=dev_size
     )
 
     # Save config if we just created the tokenized dataset

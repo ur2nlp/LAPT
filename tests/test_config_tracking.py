@@ -172,17 +172,36 @@ class TestDatasetConfig:
                 'sources': [{'type': 'oscar', 'language': 'hy'}],
                 'alpha': 0.7,
                 'total_samples': 1000000,
-                'cache_dir': 'data/multi'
+                'cache_dir': 'data/multi',
+                'dev_size': 0.1,
             },
             'seed': 42
         })
 
-        config = DatasetConfig.from_args(args, dev_size=0.1).to_dict()
+        config = DatasetConfig.from_args(args).to_dict()
         assert config['type'] == 'multinomial'
         assert config['alpha'] == 0.7
         assert config['total_samples'] == 1000000
         assert config['dev_size'] == 0.1
         assert config['seed'] == 42
+
+    def test_multinomial_config_dev_size_fallback(self):
+        """dev_size in training config should work with a deprecation warning."""
+        args = OmegaConf.create({
+            'dataset': {
+                'type': 'multinomial',
+                'sources': [{'type': 'oscar', 'language': 'hy'}],
+                'alpha': 0.7,
+                'total_samples': 1000000,
+                'cache_dir': 'data/multi',
+            },
+            'training': {'dev_size': 0.2},
+            'seed': 42
+        })
+
+        with pytest.warns(FutureWarning, match="should be under 'dataset'"):
+            config = DatasetConfig.from_args(args).to_dict()
+        assert config['dev_size'] == 0.2
 
 
 
@@ -556,12 +575,10 @@ class TestTokenizedDatasetConfig:
             'dataset': {
                 'type': 'oscar',
                 'language': 'hy',
-                'cache_dir': 'data/hy'
+                'cache_dir': 'data/hy',
+                'dev_size': 0.1,
             },
-            'training': {
-                'max_length': 512,
-                'dev_size': 0.1
-            },
+            'training': {'max_length': 512},
             'focus': {'enabled': False},
             'hf_model': 'facebook/xglm-564M',
             'seed': 42
@@ -581,12 +598,10 @@ class TestTokenizedDatasetConfig:
             'dataset': {
                 'type': 'oscar',
                 'language': 'hy',
-                'cache_dir': 'data/hy'
+                'cache_dir': 'data/hy',
+                'dev_size': 0.1,
             },
-            'training': {
-                'max_length': 512,
-                'dev_size': 0.1
-            },
+            'training': {'max_length': 512},
             'focus': {'enabled': False},
             'hf_model': '/local/path/to/checkpoint',
             'init_model_id': 'v81',
@@ -604,12 +619,10 @@ class TestTokenizedDatasetConfig:
             'dataset': {
                 'type': 'oscar',
                 'language': 'hy',
-                'cache_dir': 'data/hy'
+                'cache_dir': 'data/hy',
+                'dev_size': 0.2,
             },
-            'training': {
-                'max_length': 1024,
-                'dev_size': 0.2
-            },
+            'training': {'max_length': 1024},
             'focus': {
                 'enabled': True,
                 'vocab_size': 32768,
@@ -630,12 +643,10 @@ class TestTokenizedDatasetConfig:
             'dataset': {
                 'type': 'oscar',
                 'language': 'hy',
-                'cache_dir': 'data/hy'
+                'cache_dir': 'data/hy',
+                'dev_size': 0.1,
             },
-            'training': {
-                'max_length': 512,
-                'dev_size': 0.1
-            },
+            'training': {'max_length': 512},
             'focus': {'enabled': False},
             'hf_model': 'facebook/xglm-564M',
             'seed': 42
@@ -650,12 +661,10 @@ class TestTokenizedDatasetConfig:
             'dataset': {
                 'type': 'oscar',
                 'language': 'hy',
-                'cache_dir': 'data/hy'
+                'cache_dir': 'data/hy',
+                'dev_size': 0.1,
             },
-            'training': {
-                'max_length': 512,
-                'dev_size': 0.1
-            },
+            'training': {'max_length': 512},
             'focus': {
                 'enabled': True,
                 'vocab_size': 16384,
@@ -675,12 +684,10 @@ class TestTokenizedDatasetConfig:
             'dataset': {
                 'type': 'oscar',
                 'language': 'hy',
-                'cache_dir': 'data/hy'
+                'cache_dir': 'data/hy',
+                'dev_size': 0.1,
             },
-            'training': {
-                'max_length': 512,
-                'dev_size': 0.1
-            },
+            'training': {'max_length': 512},
             'focus': {'enabled': False},
             'hf_model': '/local/path/to/checkpoint',
             'init_model_id': 'v81',

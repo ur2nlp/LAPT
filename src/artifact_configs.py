@@ -10,11 +10,49 @@ Each artifact (tokenizer, dataset, model) has a config class that:
 
 import os
 import sys
+import warnings
 from dataclasses import dataclass, field
 from typing import Optional
 
 import yaml
 from omegaconf import DictConfig, OmegaConf
+
+
+def resolve_dev_size(args: DictConfig):
+    """
+    Resolve dev_size from the Hydra config, with fallback for backwards compatibility.
+
+    Preferred location is args.dataset.dev_size. Falls back to args.training.dev_size
+    with a deprecation warning. Raises ValueError if found in neither.
+
+    Args:
+        args: Full Hydra configuration
+
+    Returns:
+        The resolved dev_size value
+    """
+    dataset_dev_size = getattr(args.dataset, 'dev_size', None)
+    if dataset_dev_size is not None:
+        return dataset_dev_size
+
+    training_dev_size = getattr(args.training, 'dev_size', None)
+    if training_dev_size is not None:
+        warnings.warn(
+            "dev_size is set under 'training' config but should be under 'dataset'. "
+            "Please move it to your dataset config. "
+            "Falling back to training.dev_size for now.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return training_dev_size
+
+    # TODO: currently dev_size is required, but it would be reasonable to allow
+    # skipping it when using only external eval sets. Would need dev_size=None
+    # support in load_tokenized_dataset.
+    raise ValueError(
+        "dev_size not found in dataset or training config. "
+        "Please set dataset.dev_size in your config."
+    )
 
 
 class ArtifactConfig:
@@ -344,14 +382,12 @@ class DatasetConfig(ArtifactConfig):
         self._config = config
 
     @classmethod
-    def from_args(cls, args: DictConfig, dev_size=None) -> 'DatasetConfig':
+    def from_args(cls, args: DictConfig) -> 'DatasetConfig':
         """
         Extract DatasetConfig from full Hydra config.
 
         Args:
             args: Full Hydra configuration
-            dev_size: Dev split size for multinomial datasets (lives in training config,
-                      passed explicitly since it's outside the dataset config namespace)
 
         Returns:
             DatasetConfig instance
@@ -383,7 +419,7 @@ class DatasetConfig(ArtifactConfig):
             config['sources'] = OmegaConf.to_container(args.dataset.sources, resolve=True)
             config['alpha'] = args.dataset.alpha
             config['total_samples'] = args.dataset.total_samples
-            config['dev_size'] = dev_size
+            config['dev_size'] = resolve_dev_size(args)
 
         return cls(config)
 
@@ -430,8 +466,9 @@ class TokenizedDatasetConfig(ArtifactConfig):
         Returns:
             TokenizedDatasetConfig instance
         """
-        dataset_config = DatasetConfig.from_args(args, dev_size=args.training.dev_size)
+        dataset_config = DatasetConfig.from_args(args)
         tokenizer_config = TokenizerConfig.from_args(args)
+        dev_size = resolve_dev_size(args)
 
         hf_model = None
         init_model_id = None
@@ -449,7 +486,7 @@ class TokenizedDatasetConfig(ArtifactConfig):
 
         return cls(
             max_length=args.training.max_length,
-            dev_size=args.training.dev_size,
+            dev_size=dev_size,
             dataset_config=dataset_config,
             tokenizer_id=tokenizer_id,
             tokenizer_config=tokenizer_config,
