@@ -19,42 +19,7 @@ from tokenizer_utils import (
     prepare_focus_training_data,
     train_new_tokenizer
 )
-from config_utils import save_config, load_config, check_config_match
-from artifact_configs import TokenizerConfig
-
-
-def format_number(n: int) -> str:
-    """
-    Format large numbers with k/m suffix for directory names.
-
-    Args:
-        n: Number to format
-
-    Returns:
-        Formatted string (e.g., 50000 -> "50k", 1000000 -> "1m")
-    """
-    if n >= 1_000_000:
-        return f"{n // 1_000_000}m"
-    elif n >= 1_000:
-        return f"{n // 1_000}k"
-    return str(n)
-
-
-def get_model_shortname(hf_model: str) -> str:
-    """
-    Extract a short identifier from HuggingFace model name.
-
-    Args:
-        hf_model: Full HuggingFace model name (e.g., "facebook/xglm-564M")
-
-    Returns:
-        Short identifier (e.g., "xglm564m")
-    """
-    # Take the part after "/" if present, otherwise use full name
-    model_name = hf_model.split('/')[-1]
-    # Remove dots and dashes, lowercase, make compact
-    shortname = model_name.replace('-', '').replace('.', '').lower()
-    return shortname
+from artifact_configs import TokenizerConfig, get_model_shortname, format_number
 
 
 def is_local_model_path(hf_model: str) -> bool:
@@ -110,7 +75,7 @@ def get_tokenized_path(args: DictConfig) -> str:
     tokenizer_config = TokenizerConfig.from_args(args)
 
     if tokenizer_config is not None:
-        return f"{args.dataset.cache_dir}/tokenized_{tokenizer_config.focus_suffix()}"
+        return f"{args.dataset.cache_dir}/tokenized_{tokenizer_config.tokenizer_id()}"
     else:
         init_model_identifier = get_init_model_identifier(args)
         return f"{args.dataset.cache_dir}/tokenized_{init_model_identifier}"
@@ -164,7 +129,7 @@ def _initialize_focus_model(args: DictConfig):
 
     # Extract tokenizer config (handles path generation and validation)
     tokenizer_config = TokenizerConfig.from_args(args)
-    focus_suffix = tokenizer_config.focus_suffix()
+    tokenizer_id = tokenizer_config.tokenizer_id()
 
     # Prepare JSONL training data for FOCUS
     # Store FOCUS training data alongside the dataset it's sampled from
@@ -173,7 +138,7 @@ def _initialize_focus_model(args: DictConfig):
         focus_data_cache = args.focus.dataset.cache_dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{focus_data_cache}/{focus_suffix}/training_subset.jsonl",
+            output_jsonl_path=f"{focus_data_cache}/{tokenizer_id}/training_subset.jsonl",
             seed=args.seed,
             dataset_config=args.focus.dataset
         )
@@ -181,7 +146,7 @@ def _initialize_focus_model(args: DictConfig):
         # Using training dataset - store in training dataset's cache dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{args.dataset.cache_dir}/{focus_suffix}/training_subset.jsonl",
+            output_jsonl_path=f"{args.dataset.cache_dir}/{tokenizer_id}/training_subset.jsonl",
             seed=args.seed,
             train_dataset_cache=args.dataset.cache_dir
         )
@@ -192,24 +157,24 @@ def _initialize_focus_model(args: DictConfig):
         tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
     else:
         tokenizer_output_dir = tokenizer_config.cache_dir(args.dataset.language)
+        config_path = os.path.join(tokenizer_output_dir, "training_config.yaml")
 
-        # Check if tokenizer cache and config exist
+        # Check if tokenizer cache exists
         tokenizer_cache_exists = os.path.exists(
             os.path.join(tokenizer_output_dir, "tokenizer.json")
         )
-        config_path = os.path.join(tokenizer_output_dir, "training_config.yaml")
-        tokenizer_config_exists = os.path.exists(config_path)
 
-        # Verify config matches if both cache and config exist
-        if tokenizer_cache_exists and tokenizer_config_exists:
-            cached_config = load_config(config_path)
-            check_config_match(cached_config, tokenizer_config.to_dict(), "Tokenizer")
-        elif tokenizer_cache_exists and not tokenizer_config_exists:
-            print(
-                f"Note: Using cached tokenizer at {tokenizer_output_dir} without config tracking\n"
-                f"      (artifact was created before config tracking was implemented)",
-                file=sys.stderr
-            )
+        # Verify config matches if cache exists
+        if tokenizer_cache_exists:
+            if os.path.exists(config_path):
+                tokenizer_config.check_cached(config_path)
+            else:
+                print(
+                    f"Note: Using cached tokenizer at {tokenizer_output_dir}"
+                    f" without config tracking\n"
+                    f"      (artifact was created before config tracking was implemented)",
+                    file=sys.stderr
+                )
 
         tokenizer = train_new_tokenizer(
             config=tokenizer_config,
@@ -219,8 +184,7 @@ def _initialize_focus_model(args: DictConfig):
 
         # Save config if we just created the tokenizer
         if not tokenizer_cache_exists:
-            save_config(tokenizer_config.to_dict(), config_path)
-            print(f"Saved tokenizer config to {config_path}", file=sys.stderr)
+            tokenizer_config.save(config_path)
 
     # Load model and apply FOCUS
     print(f"Loading model: {args.hf_model}", file=sys.stderr)

@@ -5,13 +5,143 @@ Each artifact (tokenizer, dataset, model) has a config class that:
 1. Defines all parameters that affect the artifact
 2. Provides from_args() to extract from full Hydra config
 3. Provides cache_path() to generate consistent cache paths
-4. Supports == comparison for cache validation
+4. Provides save() / check_cached() for config tracking
 """
 
+import os
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
+import yaml
 from omegaconf import DictConfig, OmegaConf
+
+
+class ArtifactConfig:
+    """Base class for artifact configuration tracking.
+
+    Subclasses must implement to_dict() and set artifact_name.
+    """
+    artifact_name: str
+
+    def to_dict(self) -> dict:
+        raise NotImplementedError
+
+    def save(self, config_path: str):
+        """Save this config to a YAML file.
+
+        Args:
+            config_path: Full path to the config file to write
+        """
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, 'w') as f:
+            yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
+        print(f"Saved {self.artifact_name} config to {config_path}", file=sys.stderr)
+
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Check if cached config at path matches this config.
+
+        Args:
+            config_path: Full path to the cached config file
+            error_on_mismatch: If True (default), raise ValueError on mismatch.
+                               If False, print warning and return False.
+
+        Returns:
+            True if configs match (or no cached config exists),
+            False if mismatch and error_on_mismatch is False
+
+        Raises:
+            ValueError: If configs don't match and error_on_mismatch is True
+        """
+        if not os.path.exists(config_path):
+            return True
+
+        with open(config_path, 'r') as f:
+            cached_config = yaml.safe_load(f)
+
+        if cached_config is None:
+            return True
+
+        diffs = _dict_diff(cached_config, self.to_dict())
+        if not diffs:
+            return True
+
+        error_msg = (
+            f"\n{'=' * 70}\n"
+            f"CONFIG MISMATCH: {self.artifact_name}\n"
+            f"{'=' * 70}\n"
+            f"Cached artifact was created with different parameters:\n\n"
+            + "\n".join(f"  {diff}" for diff in diffs)
+            + f"\n\n"
+            f"The cached config file represents what actually created this artifact.\n"
+            f"To proceed, either:\n\n"
+            f"  1. Regenerate with current config:\n"
+            f"     Add fresh_dataset=true (dataset), fresh_tokenizer=true (tokenizer),\n"
+            f"     or fresh_model=true (model) to your command\n\n"
+            f"  2. Update your config to match the cached version\n"
+            f"{'=' * 70}\n"
+        )
+
+        if error_on_mismatch:
+            raise ValueError(error_msg)
+        else:
+            print(error_msg, file=sys.stderr)
+            return False
+
+
+def _dict_diff(dict1: dict, dict2: dict, path: str = "") -> list[str]:
+    """
+    Recursively find differences between two dictionaries.
+
+    Args:
+        dict1: First dictionary (cached)
+        dict2: Second dictionary (current)
+        path: Current path in nested structure (for error messages)
+
+    Returns:
+        List of difference descriptions
+    """
+    diffs = []
+
+    only_in_1 = set(dict1.keys()) - set(dict2.keys())
+    for key in only_in_1:
+        diffs.append(
+            f"{path}.{key}" if path
+            else f"{key}: present in cached config but not in current"
+        )
+
+    only_in_2 = set(dict2.keys()) - set(dict1.keys())
+    for key in only_in_2:
+        diffs.append(
+            f"{path}.{key}" if path
+            else f"{key}: present in current config but not in cached"
+        )
+
+    for key in set(dict1.keys()) & set(dict2.keys()):
+        val1 = dict1[key]
+        val2 = dict2[key]
+        current_path = f"{path}.{key}" if path else key
+
+        if isinstance(val1, dict) and isinstance(val2, dict):
+            diffs.extend(_dict_diff(val1, val2, current_path))
+        elif val1 != val2:
+            diffs.append(f"{current_path}: {val1} (cached) != {val2} (current)")
+
+    return diffs
+
+
+def get_model_shortname(hf_model: str) -> str:
+    """
+    Extract a short identifier from HuggingFace model name.
+
+    Args:
+        hf_model: Full HuggingFace model name (e.g., "facebook/xglm-564M")
+
+    Returns:
+        Short identifier (e.g., "xglm564m")
+    """
+    model_name = hf_model.split('/')[-1]
+    return model_name.lower().replace('-', '').replace('.', '')
 
 
 def format_number(n: int) -> str:
@@ -35,7 +165,7 @@ def format_number(n: int) -> str:
 
 
 @dataclass
-class TokenizerConfig:
+class TokenizerConfig(ArtifactConfig):
     """
     Configuration for FOCUS tokenizer training.
 
@@ -44,6 +174,8 @@ class TokenizerConfig:
     - Validating cached tokenizers match current config
     - Passing to train_new_tokenizer()
     """
+    artifact_name = "Tokenizer"
+
     # Core tokenizer parameters
     hf_model: str
     vocab_size: int
@@ -149,8 +281,7 @@ class TokenizerConfig:
         """Extract short model name, preferring init_model_id for local paths."""
         if self.init_model_id:
             return self.init_model_id
-        model_name = self.hf_model.split('/')[-1]
-        return model_name.lower().replace('-', '').replace('.', '')
+        return get_model_shortname(self.hf_model)
 
     def cache_dir(self, language: str) -> str:
         """
@@ -162,9 +293,7 @@ class TokenizerConfig:
         Returns:
             Path like "tokenizers/got/xglm564m_focus-v16k-s100k_seeded-5.0x-lambda0.5"
         """
-        model_short = self._model_shortname()
-        suffix = self._build_suffix()
-        return f"tokenizers/{language}/{model_short}_{suffix}"
+        return f"tokenizers/{language}/{self.tokenizer_id()}"
 
     def seed_tokenizer_suffix(self) -> str:
         """
@@ -181,9 +310,12 @@ class TokenizerConfig:
         samples_str = format_number(self.num_samples)
         return f"{model_short}_focus-v{vocab_str}-s{samples_str}_seed-{self.seed_vocab_multiplier}x"
 
-    def focus_suffix(self) -> str:
+    def tokenizer_id(self) -> str:
         """
-        Generate the full FOCUS suffix used in various paths.
+        Generate unique identifier for this tokenizer configuration.
+
+        Used as a path component in tokenizer cache, tokenized dataset,
+        model output, and FOCUS training data directories.
 
         Returns:
             String like "xglm564m_focus-v16k-s100k_seeded-5.0x-lambda0.5"
@@ -196,3 +328,192 @@ class TokenizerConfig:
         """Convert to dictionary for saving to YAML."""
         from dataclasses import asdict
         return asdict(self)
+
+
+class DatasetConfig(ArtifactConfig):
+    """
+    Configuration for untokenized dataset caching.
+
+    Unlike TokenizerConfig, this is not a dataclass because the tracked
+    parameters vary by dataset type. Internally stores a config dict
+    built by the type-dispatch logic in from_args().
+    """
+    artifact_name = "Untokenized Dataset"
+
+    def __init__(self, config: dict):
+        self._config = config
+
+    @classmethod
+    def from_args(cls, args: DictConfig, dev_size=None) -> 'DatasetConfig':
+        """
+        Extract DatasetConfig from full Hydra config.
+
+        Args:
+            args: Full Hydra configuration
+            dev_size: Dev split size for multinomial datasets (lives in training config,
+                      passed explicitly since it's outside the dataset config namespace)
+
+        Returns:
+            DatasetConfig instance
+        """
+        config = {
+            'type': args.dataset.type,
+            'seed': args.seed,
+        }
+
+        dataset_type = args.dataset.type
+        if dataset_type == 'oscar':
+            config['language'] = args.dataset.language
+        elif dataset_type == 'huggingface':
+            config['name'] = args.dataset.name
+            config['config'] = getattr(args.dataset, 'config', None)
+            config['split'] = getattr(args.dataset, 'split', 'train')
+            config['text_column'] = getattr(args.dataset, 'text_column', 'text')
+            config['max_samples'] = getattr(args.dataset, 'max_samples', None)
+            config['min_words_per_line'] = getattr(args.dataset, 'min_words_per_line', None)
+            config['oversampling_factor'] = getattr(args.dataset, 'oversampling_factor', 3)
+        elif dataset_type == 'plaintext':
+            config['path'] = args.dataset.path
+        elif dataset_type == 'plaintext_dir':
+            config['directory'] = args.dataset.directory
+            config['pattern'] = getattr(args.dataset, 'pattern', '*.txt')
+        elif dataset_type == 'concat':
+            config['sources'] = OmegaConf.to_container(args.dataset.sources, resolve=True)
+        elif dataset_type == 'multinomial':
+            config['sources'] = OmegaConf.to_container(args.dataset.sources, resolve=True)
+            config['alpha'] = args.dataset.alpha
+            config['total_samples'] = args.dataset.total_samples
+            config['dev_size'] = dev_size
+
+        return cls(config)
+
+    def to_dict(self) -> dict:
+        """Return config dictionary for saving to YAML."""
+        return dict(self._config)
+
+
+class TokenizedDatasetConfig(ArtifactConfig):
+    """
+    Configuration for tokenized dataset caching.
+
+    Composes DatasetConfig and TokenizerConfig (or base model identity when
+    FOCUS is disabled) along with tokenization-specific parameters.
+    """
+    artifact_name = "Tokenized Dataset"
+
+    def __init__(
+        self,
+        max_length: int,
+        dev_size: float,
+        dataset_config: DatasetConfig,
+        tokenizer_id: str,
+        tokenizer_config: Optional[TokenizerConfig] = None,
+        hf_model: Optional[str] = None,
+        init_model_id: Optional[str] = None,
+    ):
+        self.max_length = max_length
+        self.dev_size = dev_size
+        self.dataset_config = dataset_config
+        self._tokenizer_id = tokenizer_id
+        self.tokenizer_config = tokenizer_config
+        self.hf_model = hf_model
+        self.init_model_id = init_model_id
+
+    @classmethod
+    def from_args(cls, args: DictConfig) -> 'TokenizedDatasetConfig':
+        """
+        Extract TokenizedDatasetConfig from full Hydra config.
+
+        Args:
+            args: Full Hydra configuration
+
+        Returns:
+            TokenizedDatasetConfig instance
+        """
+        dataset_config = DatasetConfig.from_args(args, dev_size=args.training.dev_size)
+        tokenizer_config = TokenizerConfig.from_args(args)
+
+        hf_model = None
+        init_model_id = None
+        if tokenizer_config is not None:
+            tokenizer_id = tokenizer_config.tokenizer_id()
+        else:
+            hf_model = getattr(args, 'hf_model', None)
+            init_model_id = getattr(args, 'init_model_id', None)
+            if init_model_id:
+                tokenizer_id = init_model_id
+            elif hf_model:
+                tokenizer_id = get_model_shortname(hf_model)
+            else:
+                raise ValueError("No model identifier available for tokenized path")
+
+        return cls(
+            max_length=args.training.max_length,
+            dev_size=args.training.dev_size,
+            dataset_config=dataset_config,
+            tokenizer_id=tokenizer_id,
+            tokenizer_config=tokenizer_config,
+            hf_model=hf_model,
+            init_model_id=init_model_id,
+        )
+
+    def cache_dir(self, dataset_cache_dir: str) -> str:
+        """
+        Generate tokenized dataset cache directory path.
+
+        Args:
+            dataset_cache_dir: Parent dataset cache directory
+
+        Returns:
+            Path like "{dataset_cache_dir}/tokenized_xglm564m_focus-v16k-s100k"
+        """
+        return f"{dataset_cache_dir}/tokenized_{self._tokenizer_id}"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for saving to YAML."""
+        config = {
+            'max_length': self.max_length,
+            'dev_size': self.dev_size,
+            'dataset': self.dataset_config.to_dict(),
+        }
+
+        if self.tokenizer_config is not None:
+            config['tokenizer'] = self.tokenizer_config.to_dict()
+        else:
+            if self.hf_model:
+                config['hf_model'] = self.hf_model
+            if self.init_model_id:
+                config['init_model_id'] = self.init_model_id
+
+        return config
+
+
+class ModelConfig(ArtifactConfig):
+    """
+    Configuration for model training.
+
+    Captures the full Hydra config for reproducibility. Unlike other artifact
+    configs, this doesn't generate cache paths or do selective extraction —
+    it saves the entire resolved config alongside model checkpoints.
+    """
+    artifact_name = "Model"
+
+    def __init__(self, config: dict):
+        self._config = config
+
+    @classmethod
+    def from_args(cls, args: DictConfig) -> 'ModelConfig':
+        """
+        Extract ModelConfig from full Hydra config.
+
+        Args:
+            args: Full Hydra configuration
+
+        Returns:
+            ModelConfig instance containing the full resolved config
+        """
+        return cls(OmegaConf.to_container(args, resolve=True))
+
+    def to_dict(self) -> dict:
+        """Return config dictionary for saving to YAML."""
+        return dict(self._config)

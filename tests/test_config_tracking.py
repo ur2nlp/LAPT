@@ -10,15 +10,9 @@ import tempfile
 import pytest
 from omegaconf import OmegaConf
 
-from src.config_utils import (
-    extract_dataset_config,
-    extract_tokenized_config,
-    save_config,
-    load_config,
-    check_config_match,
-    _dict_diff
+from src.artifact_configs import (
+    TokenizerConfig, DatasetConfig, TokenizedDatasetConfig, _dict_diff,
 )
-from src.artifact_configs import TokenizerConfig
 
 
 class TestDictDiff:
@@ -59,73 +53,89 @@ class TestDictDiff:
         assert 'a.y: 2 (cached) != 3 (current)' in diffs[0]
 
 
-class TestConfigSaveLoad:
-    """Test saving and loading configuration files."""
+class TestArtifactConfigSaveAndCheck:
+    """Test ArtifactConfig save/check_cached via a concrete subclass (DatasetConfig)."""
 
-    def test_save_and_load_config(self):
+    def test_save_and_check_roundtrip(self):
+        args = OmegaConf.create({
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy'},
+            'seed': 42
+        })
+        config = DatasetConfig.from_args(args)
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            config = {'key1': 'value1', 'key2': 42}
-            config_path = os.path.join(tmpdir, 'test_config.yaml')
-
-            save_config(config, config_path)
+            config_path = os.path.join(tmpdir, 'config.yaml')
+            config.save(config_path)
             assert os.path.exists(config_path)
-
-            loaded = load_config(config_path)
-            assert loaded == config
-
-    def test_load_nonexistent_config(self):
-        result = load_config('/nonexistent/path/config.yaml')
-        assert result is None
+            assert config.check_cached(config_path) is True
 
     def test_save_creates_directories(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config = {'test': 'data'}
-            config_path = os.path.join(tmpdir, 'nested', 'dir', 'config.yaml')
+        args = OmegaConf.create({
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy'},
+            'seed': 42
+        })
+        config = DatasetConfig.from_args(args)
 
-            save_config(config, config_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, 'nested', 'dir', 'config.yaml')
+            config.save(config_path)
             assert os.path.exists(config_path)
 
-
-class TestConfigMatch:
-    """Test configuration matching and error handling."""
-
-    def test_match_with_no_cached_config(self):
+    def test_check_cached_no_file(self):
         """No cached config should return True (no error)."""
-        current_config = {'a': 1}
-        result = check_config_match(None, current_config, "Test Artifact")
+        args = OmegaConf.create({
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy'},
+            'seed': 42
+        })
+        result = DatasetConfig.from_args(args).check_cached('/nonexistent/config.yaml')
         assert result is True
 
-    def test_match_with_identical_configs(self):
-        """Identical configs should return True."""
-        config = {'a': 1, 'b': 2}
-        result = check_config_match(config, config, "Test Artifact")
-        assert result is True
-
-    def test_mismatch_raises_error(self):
+    def test_check_cached_mismatch_raises(self):
         """Different configs should raise ValueError by default."""
-        cached = {'a': 1}
-        current = {'a': 2}
+        args1 = OmegaConf.create({
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy'},
+            'seed': 42
+        })
+        args2 = OmegaConf.create({
+            'dataset': {'type': 'oscar', 'language': 'ka', 'cache_dir': 'data/ka'},
+            'seed': 42
+        })
 
-        with pytest.raises(ValueError) as exc_info:
-            check_config_match(cached, current, "Test Artifact")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, 'config.yaml')
+            DatasetConfig.from_args(args1).save(config_path)
 
-        assert "CONFIG MISMATCH" in str(exc_info.value)
-        assert "Test Artifact" in str(exc_info.value)
-        assert "a: 1 (cached) != 2 (current)" in str(exc_info.value)
+            with pytest.raises(ValueError) as exc_info:
+                DatasetConfig.from_args(args2).check_cached(config_path)
 
-    def test_mismatch_warning_mode(self):
+            assert "CONFIG MISMATCH" in str(exc_info.value)
+            assert "Untokenized Dataset" in str(exc_info.value)
+
+    def test_check_cached_mismatch_warning_mode(self):
         """With error_on_mismatch=False, should return False instead of error."""
-        cached = {'a': 1}
-        current = {'a': 2}
+        args1 = OmegaConf.create({
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy'},
+            'seed': 42
+        })
+        args2 = OmegaConf.create({
+            'dataset': {'type': 'oscar', 'language': 'ka', 'cache_dir': 'data/ka'},
+            'seed': 42
+        })
 
-        result = check_config_match(cached, current, "Test", error_on_mismatch=False)
-        assert result is False
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, 'config.yaml')
+            DatasetConfig.from_args(args1).save(config_path)
+
+            result = DatasetConfig.from_args(args2).check_cached(
+                config_path, error_on_mismatch=False
+            )
+            assert result is False
 
 
-class TestExtractDatasetConfig:
-    """Test extraction of dataset-relevant config parameters."""
+class TestDatasetConfig:
+    """Test DatasetConfig extraction and dict conversion."""
 
-    def test_extract_oscar_config(self):
+    def test_oscar_config(self):
         args = OmegaConf.create({
             'dataset': {
                 'type': 'oscar',
@@ -135,12 +145,12 @@ class TestExtractDatasetConfig:
             'seed': 42
         })
 
-        config = extract_dataset_config(args)
+        config = DatasetConfig.from_args(args).to_dict()
         assert config['type'] == 'oscar'
         assert config['language'] == 'hy'
         assert config['seed'] == 42
 
-    def test_extract_plaintext_config(self):
+    def test_plaintext_config(self):
         args = OmegaConf.create({
             'dataset': {
                 'type': 'plaintext',
@@ -150,12 +160,12 @@ class TestExtractDatasetConfig:
             'seed': 42
         })
 
-        config = extract_dataset_config(args)
+        config = DatasetConfig.from_args(args).to_dict()
         assert config['type'] == 'plaintext'
         assert config['path'] == '/path/to/data.txt'
         assert config['seed'] == 42
 
-    def test_extract_multinomial_config(self):
+    def test_multinomial_config(self):
         args = OmegaConf.create({
             'dataset': {
                 'type': 'multinomial',
@@ -164,18 +174,16 @@ class TestExtractDatasetConfig:
                 'total_samples': 1000000,
                 'cache_dir': 'data/multi'
             },
-            'training': {
-                'dev_size': 0.1
-            },
             'seed': 42
         })
 
-        config = extract_dataset_config(args)
+        config = DatasetConfig.from_args(args, dev_size=0.1).to_dict()
         assert config['type'] == 'multinomial'
         assert config['alpha'] == 0.7
         assert config['total_samples'] == 1000000
         assert config['dev_size'] == 0.1
         assert config['seed'] == 42
+
 
 
 class TestTokenizerConfig:
@@ -253,7 +261,7 @@ class TestTokenizerConfig:
 
 class TestTokenizerConfigFocusSuffix:
     """
-    Test suite for TokenizerConfig.focus_suffix() method.
+    Test suite for TokenizerConfig.tokenizer_id() method.
 
     This method builds the path suffix that encodes FOCUS tokenizer parameters
     to avoid cache collisions when changing vocabulary settings.
@@ -274,7 +282,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "xglm564m_focus-v50k-s100k"
+        assert tok_config.tokenizer_id() == "xglm564m_focus-v50k-s100k"
 
     def test_suffix_with_no_additional_flag(self):
         """Test suffix when not inheriting additional special tokens."""
@@ -291,7 +299,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "xglm564m_focus-v32k-s1m_no-additional"
+        assert tok_config.tokenizer_id() == "xglm564m_focus-v32k-s1m_no-additional"
 
     def test_suffix_with_seed_vocabulary_default_params(self):
         """Test suffix with seed vocabulary using default parameters."""
@@ -311,7 +319,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5"
+        assert tok_config.tokenizer_id() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5"
 
     def test_suffix_with_seed_vocabulary_custom_min_frequency(self):
         """Test suffix with non-default seed min frequency."""
@@ -331,7 +339,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5-min5"
+        assert tok_config.tokenizer_id() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5-min5"
 
     def test_suffix_with_seed_lambda(self):
         """Test suffix with non-default seed lambda."""
@@ -351,7 +359,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.7"
+        assert tok_config.tokenizer_id() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.7"
 
     def test_suffix_with_all_flags(self):
         """Test suffix with all optional flags enabled."""
@@ -371,7 +379,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "xglm564m_focus-v32k-s1m_no-additional_seeded-5.0x-lambda0.7-min10"
+        assert tok_config.tokenizer_id() == "xglm564m_focus-v32k-s1m_no-additional_seeded-5.0x-lambda0.7-min10"
 
     def test_suffix_respects_number_formatting(self):
         """Test that vocab and sample sizes use format_number() correctly."""
@@ -388,7 +396,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "gpt2_focus-v128k-s5m"
+        assert tok_config.tokenizer_id() == "gpt2_focus-v128k-s5m"
 
     def test_suffix_with_different_model(self):
         """Test suffix generation with different base model."""
@@ -405,7 +413,7 @@ class TestTokenizerConfigFocusSuffix:
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.focus_suffix() == "llama27b_focus-v50k-s100k"
+        assert tok_config.tokenizer_id() == "llama27b_focus-v50k-s100k"
 
 
 class TestTokenizerConfigInitModelId:
@@ -429,16 +437,16 @@ class TestTokenizerConfigInitModelId:
             args['init_model_id'] = init_model_id
         return OmegaConf.create(args)
 
-    def test_focus_suffix_without_init_model_id(self):
+    def test_tokenizer_id_without_init_model_id(self):
         """Without init_model_id, derives shortname from hf_model."""
         tok_config = TokenizerConfig.from_args(self._make_args())
-        assert tok_config.focus_suffix().startswith("xglm17b_")
+        assert tok_config.tokenizer_id().startswith("xglm17b_")
 
-    def test_focus_suffix_with_init_model_id(self):
+    def test_tokenizer_id_with_init_model_id(self):
         """With init_model_id, uses it instead of derived shortname."""
         tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="xglm1b"))
-        assert tok_config.focus_suffix().startswith("xglm1b_")
-        assert "xglm17b" not in tok_config.focus_suffix()
+        assert tok_config.tokenizer_id().startswith("xglm1b_")
+        assert "xglm17b" not in tok_config.tokenizer_id()
 
     def test_seed_tokenizer_suffix_with_init_model_id(self):
         """seed_tokenizer_suffix should also use init_model_id."""
@@ -455,15 +463,15 @@ class TestTokenizerConfigInitModelId:
         assert "xglm17b" not in path
 
     def test_all_suffixes_consistent(self):
-        """focus_suffix, seed_tokenizer_suffix, and cache_dir should all use the same model id."""
+        """tokenizer_id, seed_tokenizer_suffix, and cache_dir should all use the same model id."""
         tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="v81"))
-        assert tok_config.focus_suffix().startswith("v81_")
+        assert tok_config.tokenizer_id().startswith("v81_")
         assert tok_config.seed_tokenizer_suffix().startswith("v81_")
         assert "/v81_" in tok_config.cache_dir("got")
 
 
 class TestTokenizerConfigSeedScoreMode:
-    """Test that seed_score_mode is reflected in focus_suffix."""
+    """Test that seed_score_mode is reflected in tokenizer_id."""
 
     def _make_args(self, score_mode="count"):
         return OmegaConf.create({
@@ -484,13 +492,13 @@ class TestTokenizerConfigSeedScoreMode:
     def test_default_count_mode_not_in_suffix(self):
         """Default 'count' mode should not appear in the suffix."""
         tok_config = TokenizerConfig.from_args(self._make_args("count"))
-        assert "count" not in tok_config.focus_suffix()
-        assert "charlength" not in tok_config.focus_suffix()
+        assert "count" not in tok_config.tokenizer_id()
+        assert "charlength" not in tok_config.tokenizer_id()
 
     def test_charlength_mode_in_suffix(self):
         """Non-default 'charlength' mode should appear in the suffix."""
         tok_config = TokenizerConfig.from_args(self._make_args("charlength"))
-        assert tok_config.focus_suffix().endswith("-charlength")
+        assert tok_config.tokenizer_id().endswith("-charlength")
 
     def test_score_mode_not_in_seed_tokenizer_suffix(self):
         """Seed tokenizer suffix should NOT include score_mode (shared across modes)."""
@@ -540,10 +548,10 @@ class TestSeedTokenizerSuffix:
         assert tok_config.seed_tokenizer_suffix() == "xglm564m_focus-v32k-s5m_seed-2.0x"
 
 
-class TestExtractTokenizedConfig:
-    """Test extraction of tokenized dataset config parameters."""
+class TestTokenizedDatasetConfig:
+    """Test TokenizedDatasetConfig extraction, dict conversion, and cache paths."""
 
-    def test_extract_tokenized_config_no_focus(self):
+    def test_from_args_no_focus(self):
         args = OmegaConf.create({
             'dataset': {
                 'type': 'oscar',
@@ -559,7 +567,7 @@ class TestExtractTokenizedConfig:
             'seed': 42
         })
 
-        config = extract_tokenized_config(args)
+        config = TokenizedDatasetConfig.from_args(args).to_dict()
         assert config['max_length'] == 512
         assert config['dev_size'] == 0.1
         assert 'dataset' in config
@@ -567,8 +575,8 @@ class TestExtractTokenizedConfig:
         assert 'tokenizer' not in config
         assert config['hf_model'] == 'facebook/xglm-564M'
 
-    def test_extract_tokenized_config_no_focus_with_init_model_id(self):
-        """When FOCUS is disabled and init_model_id is set, both hf_model and init_model_id are tracked."""
+    def test_from_args_no_focus_with_init_model_id(self):
+        """When FOCUS is disabled and init_model_id is set, both are tracked."""
         args = OmegaConf.create({
             'dataset': {
                 'type': 'oscar',
@@ -585,12 +593,12 @@ class TestExtractTokenizedConfig:
             'seed': 42
         })
 
-        config = extract_tokenized_config(args)
+        config = TokenizedDatasetConfig.from_args(args).to_dict()
         assert config['hf_model'] == '/local/path/to/checkpoint'
         assert config['init_model_id'] == 'v81'
         assert 'tokenizer' not in config
 
-    def test_extract_tokenized_config_with_focus(self):
+    def test_from_args_with_focus(self):
         args = OmegaConf.create({
             'hf_model': 'facebook/xglm-564M',
             'dataset': {
@@ -610,9 +618,74 @@ class TestExtractTokenizedConfig:
             'seed': 42
         })
 
-        config = extract_tokenized_config(args)
+        config = TokenizedDatasetConfig.from_args(args).to_dict()
         assert config['max_length'] == 1024
         assert config['dev_size'] == 0.2
         assert 'dataset' in config
         assert 'tokenizer' in config
         assert config['tokenizer']['vocab_size'] == 32768
+
+    def test_cache_dir_no_focus(self):
+        args = OmegaConf.create({
+            'dataset': {
+                'type': 'oscar',
+                'language': 'hy',
+                'cache_dir': 'data/hy'
+            },
+            'training': {
+                'max_length': 512,
+                'dev_size': 0.1
+            },
+            'focus': {'enabled': False},
+            'hf_model': 'facebook/xglm-564M',
+            'seed': 42
+        })
+
+        tok_dataset = TokenizedDatasetConfig.from_args(args)
+        assert tok_dataset.cache_dir('data/hy') == 'data/hy/tokenized_xglm564m'
+
+    def test_cache_dir_with_focus(self):
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {
+                'type': 'oscar',
+                'language': 'hy',
+                'cache_dir': 'data/hy'
+            },
+            'training': {
+                'max_length': 512,
+                'dev_size': 0.1
+            },
+            'focus': {
+                'enabled': True,
+                'vocab_size': 16384,
+                'num_samples': 100000,
+                'use_seed_vocabulary': False
+            },
+            'seed': 42
+        })
+
+        tok_dataset = TokenizedDatasetConfig.from_args(args)
+        assert tok_dataset.cache_dir('data/hy') == (
+            'data/hy/tokenized_xglm564m_focus-v16k-s100k'
+        )
+
+    def test_cache_dir_with_init_model_id(self):
+        args = OmegaConf.create({
+            'dataset': {
+                'type': 'oscar',
+                'language': 'hy',
+                'cache_dir': 'data/hy'
+            },
+            'training': {
+                'max_length': 512,
+                'dev_size': 0.1
+            },
+            'focus': {'enabled': False},
+            'hf_model': '/local/path/to/checkpoint',
+            'init_model_id': 'v81',
+            'seed': 42
+        })
+
+        tok_dataset = TokenizedDatasetConfig.from_args(args)
+        assert tok_dataset.cache_dir('data/hy') == 'data/hy/tokenized_v81'
