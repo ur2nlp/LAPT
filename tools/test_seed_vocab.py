@@ -33,8 +33,7 @@ def test_hybrid_seed_vocabulary(
     vocab_size: int = 1000,
     seed_lambda: float = 0.5,
     seed_vocab_multiplier: float = 5.0,
-    seed_target_mass: int = 10_000_000,
-    seed_round_mode: str = "ceil",
+    seed_round_mode: str = "round",
     output_dir: str = None
 ):
     """
@@ -45,7 +44,6 @@ def test_hybrid_seed_vocabulary(
         vocab_size: Target vocabulary size for final tokenizer
         seed_lambda: Interpolation weight (0=corpus, 1=base)
         seed_vocab_multiplier: Size multiplier for intermediate tokenizer
-        seed_target_mass: Normalization target
         seed_round_mode: Rounding method for merging
         output_dir: Output directory (default: temporary directory)
     """
@@ -57,7 +55,6 @@ def test_hybrid_seed_vocabulary(
     print(f"  vocab_size: {vocab_size}")
     print(f"  seed_lambda: {seed_lambda}")
     print(f"  seed_vocab_multiplier: {seed_vocab_multiplier}")
-    print(f"  seed_target_mass: {seed_target_mass:,}")
     print(f"  seed_round_mode: {seed_round_mode}")
     print()
 
@@ -131,7 +128,6 @@ def test_hybrid_seed_vocabulary(
                 use_seed_vocabulary=True,
                 seed_lambda=seed_lambda,
                 seed_vocab_multiplier=seed_vocab_multiplier,
-                seed_target_mass=seed_target_mass,
                 seed_round_mode=seed_round_mode,
                 character_coverage=1.0
             )
@@ -300,16 +296,10 @@ def main():
         help="Intermediate tokenizer size multiplier (default: 5.0)"
     )
     parser.add_argument(
-        "--target_mass",
-        type=int,
-        default=10_000_000,
-        help="Normalization target (default: 10000000)"
-    )
-    parser.add_argument(
         "--round_mode",
         choices=["ceil", "floor", "round"],
-        default="ceil",
-        help="Rounding mode for merging (default: ceil)"
+        default="round",
+        help="Rounding mode for merging: round (default), ceil, or floor"
     )
 
     args = parser.parse_args()
@@ -319,7 +309,6 @@ def main():
         vocab_size=args.vocab_size,
         seed_lambda=args.seed_lambda,
         seed_vocab_multiplier=args.multiplier,
-        seed_target_mass=args.target_mass,
         seed_round_mode=args.round_mode,
         output_dir=args.output_dir
     )

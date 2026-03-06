@@ -57,13 +57,16 @@ class TokenizerConfig:
     seed_lambda: float
     seed_min_frequency: int
     seed_round_mode: str
-    seed_target_mass: int
+    seed_score_mode: str
 
     # Embedding initialization
     fasttext_model_min_count: int
 
     # Reproducibility
     seed: int
+
+    # Model identifier (optional override for local model paths)
+    init_model_id: Optional[str] = None
 
     # Data source (one of these will be set)
     train_dataset_cache: Optional[str] = None
@@ -91,6 +94,8 @@ class TokenizerConfig:
         else:
             train_dataset_cache = args.dataset.cache_dir
 
+        init_model_id = getattr(args, 'init_model_id', None) or None
+
         return cls(
             hf_model=args.hf_model,
             vocab_size=args.focus.vocab_size,
@@ -103,10 +108,11 @@ class TokenizerConfig:
             seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
             seed_lambda=args.focus.get('seed_lambda', 0.5),
             seed_min_frequency=args.focus.get('seed_min_frequency', 1),
-            seed_round_mode=args.focus.get('seed_round_mode', 'ceil'),
-            seed_target_mass=args.focus.get('seed_target_mass', 10_000_000),
+            seed_round_mode=args.focus.get('seed_round_mode', 'round'),
+            seed_score_mode=args.focus.get('seed_score_mode', 'count'),
             fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4),
             seed=args.seed,
+            init_model_id=init_model_id,
             train_dataset_cache=train_dataset_cache,
             focus_dataset=focus_dataset,
         )
@@ -134,11 +140,15 @@ class TokenizerConfig:
             suffix += f"-lambda{self.seed_lambda}"
             if self.seed_min_frequency > 1:
                 suffix += f"-min{self.seed_min_frequency}"
+            if self.seed_score_mode != 'count':
+                suffix += f"-{self.seed_score_mode}"
 
         return suffix
 
     def _model_shortname(self) -> str:
-        """Extract short model name from HuggingFace model path."""
+        """Extract short model name, preferring init_model_id for local paths."""
+        if self.init_model_id:
+            return self.init_model_id
         model_name = self.hf_model.split('/')[-1]
         return model_name.lower().replace('-', '').replace('.', '')
 
@@ -155,6 +165,21 @@ class TokenizerConfig:
         model_short = self._model_shortname()
         suffix = self._build_suffix()
         return f"tokenizers/{language}/{model_short}_{suffix}"
+
+    def seed_tokenizer_suffix(self) -> str:
+        """
+        Generate directory name for the intermediate seed tokenizer.
+
+        The seed tokenizer is shared across lambda values since it only depends
+        on vocab_size, num_samples, and multiplier.
+
+        Returns:
+            String like "xglm564m_focus-v16k-s200k_seed-5.0x"
+        """
+        model_short = self._model_shortname()
+        vocab_str = format_number(self.vocab_size)
+        samples_str = format_number(self.num_samples)
+        return f"{model_short}_focus-v{vocab_str}-s{samples_str}_seed-{self.seed_vocab_multiplier}x"
 
     def focus_suffix(self) -> str:
         """

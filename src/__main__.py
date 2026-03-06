@@ -16,10 +16,13 @@ from dataset_utils import (
 )
 from model_utils import (
     initialize_model_and_tokenizer, set_random_seeds,
-    get_model_shortname, get_seed_tokenizer_suffix
+    get_tokenized_path, is_local_model_path, get_init_model_identifier
 )
 from artifact_configs import TokenizerConfig
-from eval_utils import compute_ttr_metrics, preprocess_logits_for_metrics
+from eval_utils import (
+    compute_ttr_metrics, preprocess_logits_for_metrics,
+    compute_chars_per_token, BPCCallback,
+)
 from config_utils import (
     check_dataset_config, save_dataset_config, check_tokenized_config, save_tokenized_config,
     save_model_config
@@ -158,21 +161,30 @@ def _get_tokenizer_path(args: DictConfig) -> str:
     return tokenizer_config.cache_dir(args.dataset.language)
 
 
-def _get_tokenized_path(args: DictConfig) -> str:
+def _validate_init_model_id(args: DictConfig):
     """
-    Compute tokenized dataset path based on configuration.
+    Validate that init_model_id is provided when required.
+
+    When hf_model points to a local checkpoint path (rather than a HuggingFace Hub model),
+    init_model_id is required because we can't derive a meaningful short identifier from local paths.
 
     Args:
         args: Hydra configuration object
 
-    Returns:
-        Path to tokenized dataset directory
+    Raises:
+        ValueError: If init_model_id is required but not provided
     """
-    tokenizer_config = TokenizerConfig.from_args(args)
-    if tokenizer_config is not None:
-        return f"{args.dataset.cache_dir}/tokenized_{tokenizer_config.focus_suffix()}"
-    else:
-        return f"{args.dataset.cache_dir}/tokenized"
+    init_model_id = getattr(args, 'init_model_id', None)
+    if init_model_id:
+        return  # init_model_id provided, all good
+
+    if is_local_model_path(args.hf_model):
+        raise ValueError(
+            f"init_model_id is required when hf_model is a local path.\n"
+            f"  hf_model: {args.hf_model}\n"
+            f"  Add init_model_id=<short_identifier> to your config to identify this starting checkpoint.\n"
+            f"  Example: init_model_id=v81 (for a Stage 1 checkpoint from experiment v81)"
+        )
 
 
 def _get_output_dir(args: DictConfig) -> str:
@@ -189,13 +201,14 @@ def _get_output_dir(args: DictConfig) -> str:
         return f"{args.output_dir}/{args.model_name}"
 
     training_config = args.training.name.replace('_', '-')
+    init_model_identifier = get_init_model_identifier(args)
 
     # Build base path
     tokenizer_config = TokenizerConfig.from_args(args)
     if tokenizer_config is not None:
         base_path = f"{args.output_dir}/{args.dataset.language}/{tokenizer_config.focus_suffix()}_{training_config}"
     else:
-        base_path = f"{args.output_dir}/{args.dataset.language}/{training_config}"
+        base_path = f"{args.output_dir}/{args.dataset.language}/{init_model_identifier}_{training_config}"
 
     # Append experiment_id if provided
     experiment_id = getattr(args, 'experiment_id', None)
@@ -232,7 +245,7 @@ def _handle_cache_cleanup(args: DictConfig):
 
     # Compute paths that might need cleaning
     tokenizer_path = _get_tokenizer_path(args)
-    tokenized_path = _get_tokenized_path(args)
+    tokenized_path = get_tokenized_path(args)
     output_dir = _get_output_dir(args)
 
     if fresh_dataset:
@@ -258,15 +271,12 @@ def _handle_cache_cleanup(args: DictConfig):
             shutil.rmtree(tokenizer_path)
 
             # Also remove the seed tokenizer if using seed vocabulary
-            if args.focus.enabled and args.focus.use_seed_vocabulary:
+            tokenizer_config = TokenizerConfig.from_args(args)
+            if tokenizer_config is not None and tokenizer_config.use_seed_vocabulary:
                 parent_dir = os.path.dirname(tokenizer_path)
-                model_short = get_model_shortname(args.hf_model)
-                seed_suffix = get_seed_tokenizer_suffix(
-                    vocab_size=args.focus.vocab_size,
-                    num_samples=args.focus.num_samples,
-                    seed_vocab_multiplier=args.focus.seed_vocab_multiplier
+                seed_tokenizer_path = os.path.join(
+                    parent_dir, tokenizer_config.seed_tokenizer_suffix()
                 )
-                seed_tokenizer_path = os.path.join(parent_dir, f"{model_short}_{seed_suffix}")
                 if os.path.exists(seed_tokenizer_path):
                     print(f"  Removing {seed_tokenizer_path}", file=sys.stderr)
                     shutil.rmtree(seed_tokenizer_path)
@@ -307,6 +317,9 @@ def _handle_cache_cleanup(args: DictConfig):
 @hydra.main(version_base=None, config_path="../configs", config_name="main")
 def lapt(args: DictConfig):
     set_random_seeds(args.seed)
+
+    # Validate init_model_id is provided when hf_model is a local path
+    _validate_init_model_id(args)
 
     # Handle cache cleanup if requested
     _handle_cache_cleanup(args)
@@ -382,6 +395,11 @@ def lapt(args: DictConfig):
         external_eval_sets=external_eval_sets
     )
 
+    # Compute chars-per-token ratios for BPC metric
+    chars_per_token_ratios = compute_chars_per_token(eval_dataset, tokenizer)
+    for prefix, ratio in chars_per_token_ratios.items():
+        print(f"  {prefix} chars_per_token = {ratio:.2f}", file=sys.stderr)
+
     # for sanity, make sure all parameters require gradients initially;
     # this is mostly in response to new embeddings not having grads, but might as
     # well make sure everything is trainable at first
@@ -451,6 +469,9 @@ def lapt(args: DictConfig):
 
     broken_loss_callback = DetectBrokenLossCallback(trainer)
     trainer.add_callback(broken_loss_callback)
+
+    bpc_callback = BPCCallback(chars_per_token_ratios)
+    trainer.add_callback(bpc_callback)
 
     if args.training.get('early_stopping_patience', None):
         delay_ratio = args.training.get('early_stopping_delay_ratio', 0.0)

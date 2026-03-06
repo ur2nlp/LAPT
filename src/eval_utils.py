@@ -3,11 +3,16 @@ Evaluation utilities for measuring prediction diversity and detecting model coll
 
 This module provides metrics for diagnosing pathological model behavior, particularly
 degenerate generation where models collapse to repeatedly predicting a small set of
-high-frequency tokens.
+high-frequency tokens. Also provides bits-per-character (BPC) computation for
+tokenizer-agnostic evaluation.
 """
+
+import math
+import sys
 
 import numpy as np
 import torch
+from transformers import TrainerCallback
 from typing import Dict
 
 
@@ -94,3 +99,102 @@ def compute_ttr_metrics(eval_pred) -> Dict[str, float]:
     return {
         'ttr-seq': avg_ttr,
     }
+
+
+def compute_chars_per_token(
+    eval_dataset,
+    tokenizer,
+) -> dict[str, float]:
+    """Compute the average characters per loss-contributing token for each eval split.
+
+    This ratio enables converting per-token eval loss (nats) to bits-per-character (BPC),
+    which is comparable across tokenizers.
+
+    For CLM, the model predicts token[i+1] from token[i], so the number of loss-contributing
+    tokens per example is (non-masked labels) - 1.
+
+    Args:
+        eval_dataset: Either a single Dataset or a dict of Datasets (keyed by split name).
+        tokenizer: The tokenizer used to encode the dataset, needed for decoding back to text.
+
+    Returns:
+        Mapping from metric prefix to chars_per_token ratio.
+        For a single dataset: {"eval": 4.2}
+        For a dict: {"eval_got": 4.2, "eval_ang": 3.8, ...}
+    """
+    if isinstance(eval_dataset, dict):
+        splits = eval_dataset
+    else:
+        splits = {"__single__": eval_dataset}
+
+    ratios = {}
+    for split_name, split_ds in splits.items():
+        total_chars = 0
+        total_tokens = 0
+
+        input_ids_list = split_ds["input_ids"]
+        has_labels = "labels" in split_ds.column_names if hasattr(split_ds, "column_names") else False
+        labels_list = split_ds["labels"] if has_labels else None
+
+        for i in range(len(split_ds)):
+            input_ids = input_ids_list[i]
+            decoded = tokenizer.decode(input_ids, skip_special_tokens=True)
+            total_chars += len(decoded)
+
+            if labels_list is not None:
+                labels = labels_list[i]
+                # Count non-masked labels, minus 1 for CLM shift
+                non_masked = sum(1 for label in labels if label != -100)
+            else:
+                non_masked = len(input_ids)
+
+            # CLM shift: model predicts next token, so loss tokens = non_masked - 1
+            loss_tokens = max(non_masked - 1, 0)
+            total_tokens += loss_tokens
+
+        if total_tokens == 0:
+            ratio = 0.0
+        else:
+            ratio = total_chars / total_tokens
+
+        if split_name == "__single__":
+            ratios["eval"] = ratio
+        else:
+            ratios[f"eval_{split_name}"] = ratio
+
+    return ratios
+
+
+class BPCCallback(TrainerCallback):
+    """Trainer callback that injects bits-per-character (BPC) into eval metrics.
+
+    BPC = eval_loss / (chars_per_token * ln(2))
+
+    This normalizes per-token cross-entropy loss by character count, enabling fair
+    comparison across different tokenizers.
+
+    Args:
+        chars_per_token_ratios: Mapping from metric prefix (e.g. "eval", "eval_got")
+            to the chars_per_token ratio for that split.
+    """
+
+    def __init__(self, chars_per_token_ratios: dict[str, float]):
+        self.chars_per_token_ratios = chars_per_token_ratios
+
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        if metrics is None:
+            return
+
+        bpc_values = {}
+        for prefix, chars_per_token in self.chars_per_token_ratios.items():
+            loss_key = f"{prefix}_loss"
+            bpc_key = f"{prefix}_bpc"
+            if loss_key in metrics and chars_per_token > 0:
+                bpc = metrics[loss_key] / (chars_per_token * math.log(2))
+                metrics[bpc_key] = bpc
+                bpc_values[bpc_key] = bpc
+
+        # Trainer logs metrics before on_evaluate fires, so patch the most
+        # recent log_history entry so BPC appears in saved trainer state
+        if bpc_values and state.log_history:
+            state.log_history[-1].update(bpc_values)

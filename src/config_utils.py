@@ -88,6 +88,14 @@ def extract_tokenized_config(args: DictConfig) -> dict:
     tokenizer_config = TokenizerConfig.from_args(args)
     if tokenizer_config is not None:
         config['tokenizer'] = tokenizer_config.to_dict()
+    else:
+        # When FOCUS is disabled, track which model's tokenizer was used
+        hf_model = getattr(args, 'hf_model', None)
+        if hf_model:
+            config['hf_model'] = hf_model
+        init_model_id = getattr(args, 'init_model_id', None)
+        if init_model_id:
+            config['init_model_id'] = init_model_id
 
     return config
 

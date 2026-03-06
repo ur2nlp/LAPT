@@ -18,9 +18,9 @@ def make_tokenizer_config(
     use_seed_vocabulary: bool = False,
     seed_lambda: float = 0.5,
     seed_vocab_multiplier: float = 5.0,
-    seed_target_mass: int = 10_000_000,
+    seed_score_mode: str = "count",
     character_coverage: float = 1.0,
-    hf_model: str = "facebook/xglm-564M"
+    hf_model: str = "facebook/xglm-564M",
 ) -> TokenizerConfig:
     """Helper to create TokenizerConfig for tests with sensible defaults."""
     return TokenizerConfig(
@@ -33,12 +33,10 @@ def make_tokenizer_config(
         seed_vocab_multiplier=seed_vocab_multiplier,
         seed_lambda=seed_lambda,
         seed_min_frequency=1,
-        seed_round_mode="ceil",
-        seed_target_mass=seed_target_mass,
+        seed_round_mode="round",
+        seed_score_mode=seed_score_mode,
         fasttext_model_min_count=4,
         seed=42,
-        train_dataset_cache=None,
-        focus_dataset=None
     )
 
 
@@ -374,7 +372,6 @@ class TestTokenizerTraining:
             use_seed_vocabulary=True,
             seed_lambda=0.5,
             seed_vocab_multiplier=multiplier,
-            seed_target_mass=1000,  # Small for testing
             character_coverage=0.9995  # Reduce coverage to allow smaller vocab
         )
         output_dir_1 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.5"
@@ -400,7 +397,6 @@ class TestTokenizerTraining:
             use_seed_vocabulary=True,
             seed_lambda=0.7,  # Different lambda
             seed_vocab_multiplier=multiplier,
-            seed_target_mass=1000,
             character_coverage=0.9995
         )
         output_dir_2 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.7"

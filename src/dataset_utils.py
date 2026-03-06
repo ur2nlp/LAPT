@@ -17,6 +17,35 @@ from omegaconf import DictConfig
 from transformers import PreTrainedTokenizer
 
 
+def _get_source_id(config: DictConfig, fallback: str = None) -> str:
+    """
+    Extract source identifier from config, with backwards compatibility.
+
+    Checks 'id' field first, then falls back to deprecated 'language' field,
+    then to the provided fallback string.
+
+    Args:
+        config: Source configuration (DictConfig)
+        fallback: Default value if neither 'id' nor 'language' is present
+
+    Returns:
+        Source identifier string
+    """
+    source_id = getattr(config, 'id', None)
+    if not source_id:
+        # Backwards compatibility: check for deprecated 'language' field
+        source_id = getattr(config, 'language', None)
+        if source_id:
+            print(
+                f"Warning: 'language' field for source identification is deprecated, "
+                f"use 'id' instead (found language='{source_id}')",
+                file=sys.stderr
+            )
+    if not source_id:
+        source_id = fallback
+    return source_id
+
+
 def docs_to_lines(examples):
     """
     Convert document-based examples to line-based examples.
@@ -102,8 +131,8 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         return _load_plaintext_dir_dataset(cache_dir, directory, pattern)
     elif dataset_type == 'concat':
         sources = dataset_config.sources
-        parent_name = getattr(dataset_config, 'name', None)
-        return _load_concat_dataset(cache_dir, sources, parent_name)
+        parent_id = _get_source_id(dataset_config, fallback=None)
+        return _load_concat_dataset(cache_dir, sources, parent_id)
     elif dataset_type == 'multinomial':
         sources = dataset_config.sources
         alpha = dataset_config.alpha
@@ -406,6 +435,48 @@ def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '
     return _load_concat_dataset(cache_dir, sources)
 
 
+def _load_instruction_jsonl_file(file_path: str) -> tuple[list[str], list[str]]:
+    """
+    Load prompts and responses from an instruction JSONL file.
+
+    Each line should be a JSON object with 'prompt' and 'response' fields:
+    {"prompt": "Translate to Gothic: hello\\nResponse:", "response": " hails"}
+
+    Args:
+        file_path: Path to JSONL file
+
+    Returns:
+        Tuple of (prompts, responses) lists
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Instruction JSONL file not found: {file_path}")
+
+    prompts = []
+    responses = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON on line {line_num}: {e}")
+
+            if 'prompt' not in obj or 'response' not in obj:
+                raise ValueError(
+                    f"Line {line_num} missing 'prompt' or 'response' field. "
+                    f"Got keys: {list(obj.keys())}"
+                )
+            prompts.append(obj['prompt'])
+            responses.append(obj['response'])
+
+    if not prompts:
+        raise ValueError(f"JSONL file {file_path} contains no valid examples")
+
+    return prompts, responses
+
+
 def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     """
     Load instruction-tuning data from JSONL file(s).
@@ -429,31 +500,7 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     if not os.path.exists(untokenized_path):
         print(f"Loading instruction data from {file_path}", file=sys.stderr)
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Instruction JSONL file not found: {file_path}")
-
-        prompts = []
-        responses = []
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError as e:
-                    raise ValueError(f"Invalid JSON on line {line_num}: {e}")
-
-                if 'prompt' not in obj or 'response' not in obj:
-                    raise ValueError(
-                        f"Line {line_num} missing 'prompt' or 'response' field. "
-                        f"Got keys: {list(obj.keys())}"
-                    )
-                prompts.append(obj['prompt'])
-                responses.append(obj['response'])
-
-        if not prompts:
-            raise ValueError(f"JSONL file {file_path} contains no valid examples")
+        prompts, responses = _load_instruction_jsonl_file(file_path)
 
         print(f"Loaded {len(prompts)} instruction examples from JSONL file", file=sys.stderr)
 
@@ -465,14 +512,14 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     return untokenized_path
 
 
-def _load_concat_dataset(cache_dir: str, sources: list, parent_name: str = None) -> str:
+def _load_concat_dataset(cache_dir: str, sources: list, parent_id: str = None) -> str:
     """
     Concatenate multiple dataset sources into a single dataset.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (may include 'name' field for naming)
-        parent_name: Optional name from parent concat config (used for fallback naming)
+        sources: List of dataset source configurations (may include 'id' field for naming)
+        parent_id: Optional id from parent concat config (used for fallback naming)
 
     Returns:
         Path to the untokenized concatenated dataset
@@ -491,17 +538,13 @@ def _load_concat_dataset(cache_dir: str, sources: list, parent_name: str = None)
             source_dict_config = DictConfig(source_config)
 
             # Determine source cache name:
-            # 1. Use source's name field if present
-            # 2. Use parent_name_{idx} if parent has name
+            # 1. Use source's id field if present (or deprecated 'language')
+            # 2. Use parent_id_{idx} if parent has id
             # 3. Fall back to source_{idx}
-            source_name = getattr(source_dict_config, 'name', None)
-            if not source_name:
-                if parent_name:
-                    source_name = f"{parent_name}_{idx}"
-                else:
-                    source_name = f"source_{idx}"
+            default_id = f"{parent_id}_{idx}" if parent_id else f"source_{idx}"
+            source_id = _get_source_id(source_dict_config, fallback=default_id)
 
-            source_cache = os.path.join(cache_dir, source_name)
+            source_cache = os.path.join(cache_dir, source_id)
 
             # Recursively load each source (supports nested concat/multinomial)
             source_path = load_untokenized_dataset(
@@ -512,7 +555,7 @@ def _load_concat_dataset(cache_dir: str, sources: list, parent_name: str = None)
             source_dataset = load_from_disk(source_path)
             datasets_to_concat.append(source_dataset['train'])
             print(
-                f"  Source {idx} ({source_name}): {len(source_dataset['train'])} examples",
+                f"  Source {idx} ({source_id}): {len(source_dataset['train'])} examples",
                 file=sys.stderr
             )
 
@@ -538,7 +581,7 @@ def _load_multinomial_dataset(
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (should have 'name' field for naming).
+        sources: List of dataset source configurations (should have 'id' field for naming).
             Each source can optionally include a 'dev_size' field to override the global dev_size.
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
         total_samples: Total number of training examples to sample (dev set size is separate)
@@ -602,14 +645,14 @@ def _load_multinomial_dataset(
 
         # Load all sources, split into train/dev, and record train sizes
         for idx, source_config in enumerate(sources):
-            source_name, train_data, dev_data = _load_and_split_source(
+            source_id, train_data, dev_data = _load_and_split_source(
                 source_config, cache_dir, dev_size, idx
             )
 
             train_datasets.append(train_data)
             if dev_data is not None:
                 dev_datasets.append(dev_data)
-                dev_names.append(source_name)
+                dev_names.append(source_id)
             train_sizes.append(len(train_data))
 
         # Check for empty datasets
@@ -685,17 +728,15 @@ def _load_and_split_source(
         idx: Source index (for default naming and error messages)
 
     Returns:
-        Tuple of (source_name, train_data, dev_data) where dev_data is None
+        Tuple of (source_id, train_data, dev_data) where dev_data is None
         if dev split was skipped for this source.
     """
     source_dict_config = DictConfig(source_config)
 
-    # Determine source name from name field or default to source_{idx}
-    source_name = getattr(source_dict_config, 'name', None)
-    if not source_name:
-        source_name = f"source_{idx}"
+    # Determine source id from id field (or deprecated 'language'), default to source_{idx}
+    source_id = _get_source_id(source_dict_config, fallback=f"source_{idx}")
 
-    source_cache = os.path.join(cache_dir, source_name)
+    source_cache = os.path.join(cache_dir, source_id)
 
     source_path = load_untokenized_dataset(
         dataset_config=source_dict_config,
@@ -736,18 +777,18 @@ def _load_and_split_source(
     )
     if dev_data is not None:
         print(
-            f"  Source {idx} ({source_name}): "
+            f"  Source {idx} ({source_id}): "
             f"{len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})",
             file=sys.stderr
         )
     else:
         print(
-            f"  Source {idx} ({source_name}): "
+            f"  Source {idx} ({source_id}): "
             f"{len(train_data)} examples (no dev split, {dev_size_label})",
             file=sys.stderr
         )
 
-    return source_name, train_data, dev_data
+    return source_id, train_data, dev_data
 
 
 def _exhaust_first_sample(dataset_size: int, num_samples: int) -> list[int]:
@@ -1004,6 +1045,7 @@ def load_external_eval_set(
         with open(path, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f if line.strip()]
         dataset = Dataset.from_dict({'text': lines})
+        is_instruction = False
 
     elif file_format == 'jsonl':
         # Load JSONL file
@@ -1019,24 +1061,41 @@ def load_external_eval_set(
                             f"JSONL file missing '{text_column}' column: {path}"
                         )
         dataset = Dataset.from_dict({'text': data})
+        is_instruction = False
+
+    elif file_format == 'instruction_jsonl':
+        # Load instruction JSONL with prompt/response fields
+        prompts, responses = _load_instruction_jsonl_file(path)
+        dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
+        is_instruction = True
 
     else:
         raise ValueError(
             f"Unsupported format '{file_format}' for external eval set. "
-            f"Supported formats: 'plaintext', 'jsonl'"
+            f"Supported formats: 'plaintext', 'jsonl', 'instruction_jsonl'"
         )
 
     print(f"  Loaded {len(dataset)} examples", file=sys.stderr)
 
     # Tokenize the dataset
-    dataset = dataset.map(
-        lambda examples: tokenizer(
-            examples['text'], max_length=max_length, truncation=True
-        ),
-        batched=True,
-        remove_columns=['text'],
-        desc=f"Tokenizing external eval set '{name}'"
-    )
+    if is_instruction:
+        # Instruction format: use label masking (loss only on response)
+        dataset = dataset.map(
+            lambda examples: _tokenize_instruction_examples(examples, tokenizer, max_length),
+            batched=True,
+            remove_columns=['prompt', 'response'],
+            desc=f"Tokenizing external eval set '{name}'"
+        )
+    else:
+        # Plain text format: standard tokenization
+        dataset = dataset.map(
+            lambda examples: tokenizer(
+                examples['text'], max_length=max_length, truncation=True
+            ),
+            batched=True,
+            remove_columns=['text'],
+            desc=f"Tokenizing external eval set '{name}'"
+        )
 
     return dataset
 

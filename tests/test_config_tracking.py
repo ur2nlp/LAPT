@@ -408,6 +408,138 @@ class TestTokenizerConfigFocusSuffix:
         assert tok_config.focus_suffix() == "llama27b_focus-v50k-s100k"
 
 
+class TestTokenizerConfigInitModelId:
+    """Test that init_model_id overrides derived model shortname in all suffix methods."""
+
+    def _make_args(self, init_model_id=None):
+        args = {
+            'hf_model': 'facebook/xglm-1.7B',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 32768,
+                'num_samples': 5000000,
+                'use_seed_vocabulary': True,
+                'seed_vocab_multiplier': 2.0,
+                'seed_lambda': 0.5,
+            },
+            'seed': 42,
+        }
+        if init_model_id is not None:
+            args['init_model_id'] = init_model_id
+        return OmegaConf.create(args)
+
+    def test_focus_suffix_without_init_model_id(self):
+        """Without init_model_id, derives shortname from hf_model."""
+        tok_config = TokenizerConfig.from_args(self._make_args())
+        assert tok_config.focus_suffix().startswith("xglm17b_")
+
+    def test_focus_suffix_with_init_model_id(self):
+        """With init_model_id, uses it instead of derived shortname."""
+        tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="xglm1b"))
+        assert tok_config.focus_suffix().startswith("xglm1b_")
+        assert "xglm17b" not in tok_config.focus_suffix()
+
+    def test_seed_tokenizer_suffix_with_init_model_id(self):
+        """seed_tokenizer_suffix should also use init_model_id."""
+        tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="xglm1b"))
+        suffix = tok_config.seed_tokenizer_suffix()
+        assert suffix.startswith("xglm1b_")
+        assert "xglm17b" not in suffix
+
+    def test_cache_dir_with_init_model_id(self):
+        """cache_dir should use init_model_id in the directory name."""
+        tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="xglm1b"))
+        path = tok_config.cache_dir("old_germanic")
+        assert "xglm1b_" in path
+        assert "xglm17b" not in path
+
+    def test_all_suffixes_consistent(self):
+        """focus_suffix, seed_tokenizer_suffix, and cache_dir should all use the same model id."""
+        tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="v81"))
+        assert tok_config.focus_suffix().startswith("v81_")
+        assert tok_config.seed_tokenizer_suffix().startswith("v81_")
+        assert "/v81_" in tok_config.cache_dir("got")
+
+
+class TestTokenizerConfigSeedScoreMode:
+    """Test that seed_score_mode is reflected in focus_suffix."""
+
+    def _make_args(self, score_mode="count"):
+        return OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {
+                'enabled': True,
+                'vocab_size': 16384,
+                'num_samples': 50000,
+                'use_seed_vocabulary': True,
+                'seed_vocab_multiplier': 5.0,
+                'seed_lambda': 0.5,
+                'seed_score_mode': score_mode,
+            },
+            'seed': 42,
+        })
+
+    def test_default_count_mode_not_in_suffix(self):
+        """Default 'count' mode should not appear in the suffix."""
+        tok_config = TokenizerConfig.from_args(self._make_args("count"))
+        assert "count" not in tok_config.focus_suffix()
+        assert "charlength" not in tok_config.focus_suffix()
+
+    def test_charlength_mode_in_suffix(self):
+        """Non-default 'charlength' mode should appear in the suffix."""
+        tok_config = TokenizerConfig.from_args(self._make_args("charlength"))
+        assert tok_config.focus_suffix().endswith("-charlength")
+
+    def test_score_mode_not_in_seed_tokenizer_suffix(self):
+        """Seed tokenizer suffix should NOT include score_mode (shared across modes)."""
+        tok_config = TokenizerConfig.from_args(self._make_args("charlength"))
+        assert "charlength" not in tok_config.seed_tokenizer_suffix()
+
+
+class TestSeedTokenizerSuffix:
+    """Test seed_tokenizer_suffix method directly."""
+
+    def test_basic_suffix(self):
+        """Test basic seed tokenizer suffix format."""
+        tok_config = TokenizerConfig(
+            hf_model='facebook/xglm-564M',
+            vocab_size=16384,
+            num_samples=200000,
+            character_coverage=1.0,
+            inherit_additional_special_tokens=True,
+            use_seed_vocabulary=True,
+            seed_vocab_multiplier=5.0,
+            seed_lambda=0.5,
+            seed_min_frequency=1,
+            seed_round_mode='round',
+            seed_score_mode='count',
+            fasttext_model_min_count=4,
+            seed=42,
+        )
+        assert tok_config.seed_tokenizer_suffix() == "xglm564m_focus-v16k-s200k_seed-5.0x"
+
+    def test_suffix_with_different_multiplier(self):
+        """Test that multiplier is reflected in seed tokenizer suffix."""
+        tok_config = TokenizerConfig(
+            hf_model='facebook/xglm-564M',
+            vocab_size=32768,
+            num_samples=5000000,
+            character_coverage=1.0,
+            inherit_additional_special_tokens=True,
+            use_seed_vocabulary=True,
+            seed_vocab_multiplier=2.0,
+            seed_lambda=0.5,
+            seed_min_frequency=1,
+            seed_round_mode='round',
+            seed_score_mode='count',
+            fasttext_model_min_count=4,
+            seed=42,
+        )
+        assert tok_config.seed_tokenizer_suffix() == "xglm564m_focus-v32k-s5m_seed-2.0x"
+
+
 class TestExtractTokenizedConfig:
     """Test extraction of tokenized dataset config parameters."""
 
@@ -423,6 +555,7 @@ class TestExtractTokenizedConfig:
                 'dev_size': 0.1
             },
             'focus': {'enabled': False},
+            'hf_model': 'facebook/xglm-564M',
             'seed': 42
         })
 
@@ -431,6 +564,30 @@ class TestExtractTokenizedConfig:
         assert config['dev_size'] == 0.1
         assert 'dataset' in config
         assert config['dataset']['type'] == 'oscar'
+        assert 'tokenizer' not in config
+        assert config['hf_model'] == 'facebook/xglm-564M'
+
+    def test_extract_tokenized_config_no_focus_with_init_model_id(self):
+        """When FOCUS is disabled and init_model_id is set, both hf_model and init_model_id are tracked."""
+        args = OmegaConf.create({
+            'dataset': {
+                'type': 'oscar',
+                'language': 'hy',
+                'cache_dir': 'data/hy'
+            },
+            'training': {
+                'max_length': 512,
+                'dev_size': 0.1
+            },
+            'focus': {'enabled': False},
+            'hf_model': '/local/path/to/checkpoint',
+            'init_model_id': 'v81',
+            'seed': 42
+        })
+
+        config = extract_tokenized_config(args)
+        assert config['hf_model'] == '/local/path/to/checkpoint'
+        assert config['init_model_id'] == 'v81'
         assert 'tokenizer' not in config
 
     def test_extract_tokenized_config_with_focus(self):
