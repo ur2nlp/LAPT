@@ -23,7 +23,6 @@ eval_strategy: steps
 metric_for_best_model: loss
 eval_steps: ${divide:${training.max_steps},100}
 eval_batch_size: 50
-dev_size: 100000
 compute_ttr: false  # Compute type-token ratio (TTR) diversity metric during evaluation
 save_steps: ${divide:${training.max_steps},100}
 save_total_limit: 2
