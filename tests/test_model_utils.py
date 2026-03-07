@@ -1,9 +1,13 @@
 """Tests for model_utils module."""
 
 import pytest
-from omegaconf import DictConfig
+from omegaconf import OmegaConf
 
-from src.model_utils import format_number, get_model_shortname, get_tokenizer_suffix
+from src.model_utils import (
+    format_number, get_model_shortname, get_tokenized_path,
+    is_local_model_path, get_init_model_identifier,
+)
+from src.__main__ import _validate_init_model_id
 
 
 class TestFormatNumber:
@@ -66,126 +70,134 @@ class TestGetModelShortname:
         assert get_model_shortname("organization/sub-org/model-v1.2.3") == "modelv123"
 
 
-class TestGetFocusSuffix:
-    """
-    Test suite for get_tokenizer_suffix() utility function.
+class TestIsLocalModelPath:
+    """Test detection of local model paths vs HuggingFace model names."""
 
-    This function builds the path suffix that encodes FOCUS tokenizer parameters
-    to avoid cache collisions when changing vocabulary settings.
-    """
+    def test_hf_model_name(self):
+        assert not is_local_model_path("facebook/xglm-564M")
 
-    def test_basic_suffix_no_optional_flags(self):
-        """Test basic suffix with just model, vocab, and samples."""
-        args = DictConfig({
+    def test_absolute_path(self):
+        assert is_local_model_path("/scratch/user/models/checkpoint")
+
+    def test_relative_path(self):
+        assert is_local_model_path("./models/checkpoint")
+
+    def test_home_path(self):
+        assert is_local_model_path("~/models/checkpoint")
+
+
+class TestGetInitModelIdentifier:
+    """Test model identifier resolution with and without init_model_id."""
+
+    def test_uses_init_model_id_when_provided(self):
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-1.7B',
+            'init_model_id': 'xglm1b',
+        })
+        assert get_init_model_identifier(args) == "xglm1b"
+
+    def test_derives_from_hf_model_when_no_init_model_id(self):
+        args = OmegaConf.create({
             'hf_model': 'facebook/xglm-564M',
+        })
+        assert get_init_model_identifier(args) == "xglm564m"
+
+
+class TestValidateInitModelId:
+    """Test validation that init_model_id is required for local model paths."""
+
+    def test_passes_with_hf_model_name(self):
+        """No error for standard HuggingFace model names."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+        })
+        _validate_init_model_id(args)
+
+    def test_passes_with_local_path_and_init_model_id(self):
+        """No error when init_model_id is provided for a local path."""
+        args = OmegaConf.create({
+            'hf_model': '/scratch/user/models/v81/best-checkpoint',
+            'init_model_id': 'v81',
+        })
+        _validate_init_model_id(args)
+
+    def test_raises_for_local_path_without_init_model_id(self):
+        """Error when hf_model is a local path but init_model_id is missing."""
+        args = OmegaConf.create({
+            'hf_model': '/scratch/user/models/checkpoint',
+        })
+        with pytest.raises(ValueError, match="init_model_id is required"):
+            _validate_init_model_id(args)
+
+
+class TestGetTokenizedPath:
+    """Test tokenized dataset path generation."""
+
+    def test_no_focus(self):
+        """Without FOCUS, path includes model shortname."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {'enabled': False},
+            'seed': 42,
+        })
+        path = get_tokenized_path(args)
+        assert path == "data/test/tokenized_xglm564m"
+
+    def test_no_focus_with_init_model_id(self):
+        """Without FOCUS but with init_model_id, uses init_model_id."""
+        args = OmegaConf.create({
+            'hf_model': '/local/checkpoint',
+            'init_model_id': 'v81',
+            'dataset': {'cache_dir': 'data/test'},
+            'focus': {'enabled': False},
+            'seed': 42,
+        })
+        path = get_tokenized_path(args)
+        assert path == "data/test/tokenized_v81"
+
+    def test_with_focus(self):
+        """With FOCUS, path includes full focus suffix."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
             'focus': {
-                'vocab_size': 50000,
+                'enabled': True,
+                'vocab_size': 16384,
                 'num_samples': 100000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': False
-            }
+            },
+            'seed': 42,
         })
-        assert get_tokenizer_suffix(args) == "focus-v50k-s100k"
+        path = get_tokenized_path(args)
+        assert path == "data/test/tokenized_xglm564m_focus-v16k-s100k"
 
-    def test_suffix_with_no_additional_flag(self):
-        """Test suffix when not inheriting additional special tokens."""
-        args = DictConfig({
-            'hf_model': 'facebook/xglm-564M',
+    def test_with_focus_and_init_model_id(self):
+        """With FOCUS and init_model_id, uses init_model_id in path."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-1.7B',
+            'init_model_id': 'xglm1b',
+            'dataset': {'cache_dir': 'data/test'},
             'focus': {
+                'enabled': True,
                 'vocab_size': 32768,
-                'num_samples': 1000000,
-                'inherit_additional_special_tokens': False,
-                'use_seed_vocabulary': False
-            }
-        })
-        assert get_tokenizer_suffix(args) == "focus-v32k-s1m_no-additional"
-
-    def test_suffix_with_seed_vocabulary_default_params(self):
-        """Test suffix with seed vocabulary using default parameters."""
-        args = DictConfig({
-            'hf_model': 'facebook/xglm-564M',
-            'focus': {
-                'vocab_size': 16384,
-                'num_samples': 50000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 1,
-                'seed_lambda': 0.5,
-                'seed_vocab_multiplier': 5.0
-            }
-        })
-        assert get_tokenizer_suffix(args) == "focus-v16k-s50k_seeded-5.0x-lambda0.5"
-
-    def test_suffix_with_seed_vocabulary_custom_min_frequency(self):
-        """Test suffix with non-default seed min frequency."""
-        args = DictConfig({
-            'hf_model': 'facebook/xglm-564M',
-            'focus': {
-                'vocab_size': 16384,
-                'num_samples': 50000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 5,
-                'seed_lambda': 0.5,
-                'seed_vocab_multiplier': 5.0
-            }
-        })
-        assert get_tokenizer_suffix(args) == "focus-v16k-s50k_seeded-5.0x-lambda0.5-min5"
-
-    def test_suffix_with_seed_lambda(self):
-        """Test suffix with non-default seed lambda."""
-        args = DictConfig({
-            'hf_model': 'facebook/xglm-564M',
-            'focus': {
-                'vocab_size': 16384,
-                'num_samples': 50000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 1,
-                'seed_lambda': 0.7,
-                'seed_vocab_multiplier': 5.0
-            }
-        })
-        assert get_tokenizer_suffix(args) == "focus-v16k-s50k_seeded-5.0x-lambda0.7"
-
-    def test_suffix_with_all_flags(self):
-        """Test suffix with all optional flags enabled."""
-        args = DictConfig({
-            'hf_model': 'facebook/xglm-564M',
-            'focus': {
-                'vocab_size': 32768,
-                'num_samples': 1000000,
-                'inherit_additional_special_tokens': False,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 10,
-                'seed_lambda': 0.7,
-                'seed_vocab_multiplier': 5.0
-            }
-        })
-        assert get_tokenizer_suffix(args) == "focus-v32k-s1m_no-additional_seeded-5.0x-lambda0.7-min10"
-
-    def test_suffix_respects_number_formatting(self):
-        """Test that vocab and sample sizes use format_number() correctly."""
-        args = DictConfig({
-            'hf_model': 'gpt2',
-            'focus': {
-                'vocab_size': 128000,
                 'num_samples': 5000000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': False
-            }
+            },
+            'seed': 42,
         })
-        assert get_tokenizer_suffix(args) == "focus-v128k-s5m"
+        path = get_tokenized_path(args)
+        assert path == "data/test/tokenized_xglm1b_focus-v32k-s5m"
 
-    def test_suffix_with_different_model(self):
-        """Test suffix generation with different base model."""
-        args = DictConfig({
-            'hf_model': 'meta-llama/Llama-2-7b',
+    def test_no_redundant_focus_prefix(self):
+        """Path should not contain 'tokenized_focus_' (old redundant format)."""
+        args = OmegaConf.create({
+            'hf_model': 'facebook/xglm-564M',
+            'dataset': {'cache_dir': 'data/test'},
             'focus': {
-                'vocab_size': 50000,
+                'enabled': True,
+                'vocab_size': 16384,
                 'num_samples': 100000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': False
-            }
+            },
+            'seed': 42,
         })
-        assert get_tokenizer_suffix(args) == "focus-v50k-s100k"
+        path = get_tokenized_path(args)
+        assert "tokenized_focus_" not in path

@@ -2,12 +2,42 @@
 
 import pytest
 
+from artifact_configs import TokenizerConfig
 from tokenizer_utils import (
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _validate_tokenizer,
     train_new_tokenizer,
 )
+
+
+def make_tokenizer_config(
+    vocab_size: int,
+    num_samples: int = None,
+    inherit_additional_special_tokens: bool = True,
+    use_seed_vocabulary: bool = False,
+    seed_lambda: float = 0.5,
+    seed_vocab_multiplier: float = 5.0,
+    seed_score_mode: str = "count",
+    character_coverage: float = 1.0,
+    hf_model: str = "facebook/xglm-564M",
+) -> TokenizerConfig:
+    """Helper to create TokenizerConfig for tests with sensible defaults."""
+    return TokenizerConfig(
+        hf_model=hf_model,
+        vocab_size=vocab_size,
+        num_samples=num_samples,
+        character_coverage=character_coverage,
+        inherit_additional_special_tokens=inherit_additional_special_tokens,
+        use_seed_vocabulary=use_seed_vocabulary,
+        seed_vocab_multiplier=seed_vocab_multiplier,
+        seed_lambda=seed_lambda,
+        seed_min_frequency=1,
+        seed_round_mode="round",
+        seed_score_mode=seed_score_mode,
+        fasttext_model_min_count=4,
+        seed=42,
+    )
 
 
 class TestTokenizerAlgorithmDetection:
@@ -212,12 +242,14 @@ class TestTokenizerTraining:
         vocab_size = 64
         output_dir = tmp_path / "tokenizer_with_additional"
 
-        tokenizer = train_new_tokenizer(
-            jsonl_path=str(sample_jsonl_path),
-            base_tokenizer_name="facebook/xglm-564M",
+        config = make_tokenizer_config(
             vocab_size=vocab_size,
-            output_path=str(output_dir),
             inherit_additional_special_tokens=True
+        )
+        tokenizer = train_new_tokenizer(
+            config=config,
+            jsonl_path=str(sample_jsonl_path),
+            output_path=str(output_dir)
         )
 
         # Verify tokenizer object
@@ -253,12 +285,14 @@ class TestTokenizerTraining:
         vocab_size = 64
         output_dir = tmp_path / "tokenizer_without_additional"
 
-        tokenizer = train_new_tokenizer(
-            jsonl_path=str(sample_jsonl_path),
-            base_tokenizer_name="facebook/xglm-564M",
+        config = make_tokenizer_config(
             vocab_size=vocab_size,
-            output_path=str(output_dir),
             inherit_additional_special_tokens=False
+        )
+        tokenizer = train_new_tokenizer(
+            config=config,
+            jsonl_path=str(sample_jsonl_path),
+            output_path=str(output_dir)
         )
 
         assert len(tokenizer) == vocab_size
@@ -280,13 +314,16 @@ class TestTokenizerTraining:
         vocab_size = 64
         output_dir = tmp_path / "tokenizer_cached"
 
+        config = make_tokenizer_config(
+            vocab_size=vocab_size,
+            inherit_additional_special_tokens=True
+        )
+
         # First call: actually trains
         tokenizer1 = train_new_tokenizer(
+            config=config,
             jsonl_path=str(sample_jsonl_path),
-            base_tokenizer_name="facebook/xglm-564M",
-            vocab_size=vocab_size,
-            output_path=str(output_dir),
-            inherit_additional_special_tokens=True
+            output_path=str(output_dir)
         )
 
         # Get timestamp of created file
@@ -295,11 +332,9 @@ class TestTokenizerTraining:
 
         # Second call: should load from cache
         tokenizer2 = train_new_tokenizer(
+            config=config,
             jsonl_path=str(sample_jsonl_path),
-            base_tokenizer_name="facebook/xglm-564M",
-            vocab_size=vocab_size,
-            output_path=str(output_dir),
-            inherit_additional_special_tokens=True
+            output_path=str(output_dir)
         )
 
         # Verify file wasn't modified (indicates it was loaded, not retrained)
@@ -331,17 +366,19 @@ class TestTokenizerTraining:
         tokenizers_dir.mkdir(parents=True)
 
         # First tokenizer with lambda=0.5
-        output_dir_1 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.5"
-        tokenizer1 = train_new_tokenizer(
-            jsonl_path=str(sample_jsonl_path),
-            base_tokenizer_name="facebook/xglm-564M",
+        config1 = make_tokenizer_config(
             vocab_size=vocab_size,
-            output_path=str(output_dir_1),
             num_samples=num_samples,
             use_seed_vocabulary=True,
             seed_lambda=0.5,
             seed_vocab_multiplier=multiplier,
             character_coverage=0.9995  # Reduce coverage to allow smaller vocab
+        )
+        output_dir_1 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.5"
+        tokenizer1 = train_new_tokenizer(
+            config=config1,
+            jsonl_path=str(sample_jsonl_path),
+            output_path=str(output_dir_1)
         )
 
         # Verify seed tokenizer directory exists at sibling level
@@ -354,17 +391,19 @@ class TestTokenizerTraining:
         seed_mtime_before = seed_model_file.stat().st_mtime
 
         # Second tokenizer with different lambda (should reuse seed tokenizer)
-        output_dir_2 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.7"
-        tokenizer2 = train_new_tokenizer(
-            jsonl_path=str(sample_jsonl_path),
-            base_tokenizer_name="facebook/xglm-564M",
+        config2 = make_tokenizer_config(
             vocab_size=vocab_size,
-            output_path=str(output_dir_2),
             num_samples=num_samples,
             use_seed_vocabulary=True,
             seed_lambda=0.7,  # Different lambda
             seed_vocab_multiplier=multiplier,
             character_coverage=0.9995
+        )
+        output_dir_2 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.7"
+        tokenizer2 = train_new_tokenizer(
+            config=config2,
+            jsonl_path=str(sample_jsonl_path),
+            output_path=str(output_dir_2)
         )
 
         # Verify seed tokenizer was NOT retrained (timestamp unchanged)
