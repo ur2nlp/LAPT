@@ -659,11 +659,11 @@ def _load_multinomial_dataset(
         if all(size == 0 for size in train_sizes):
             raise ValueError("Cannot sample: all source datasets are empty")
 
-        # Calculate sampling probabilities for TRAIN data: p_i = (size_i)^alpha / Z
-        # alpha < 1 upsamples smaller datasets, alpha > 1 amplifies size differences
-        weights = [size ** alpha for size in train_sizes]
-        total_weight = sum(weights)
-        sampling_probs = [w / total_weight for w in weights]
+        # Calculate sampling probabilities for TRAIN data
+        # Sources with explicit sampling_prob get their probability pinned directly.
+        # Remaining probability budget is distributed among unpinned sources using
+        # alpha-based reweighting: p_i = (size_i)^alpha / Z, scaled to fill the budget.
+        sampling_probs = _compute_sampling_probs(sources, train_sizes, alpha)
 
         # Convert probabilities to integer sample counts
         # Distribute remainder samples round-robin to handle rounding errors
@@ -675,7 +675,13 @@ def _load_multinomial_dataset(
         print("Train sampling distribution:", file=sys.stderr)
         for idx, count in enumerate(samples_per_source):
             percentage = 100 * count / total_samples
-            print(f"  Source {idx}: {count} samples ({percentage:.2f}%)", file=sys.stderr)
+            source_id = _get_source_id(DictConfig(sources[idx]), fallback=f"source_{idx}")
+            pinned = sources[idx].get('sampling_prob') is not None
+            pin_marker = " (pinned)" if pinned else ""
+            print(
+                f"  {source_id}: {count} samples ({percentage:.2f}%){pin_marker}",
+                file=sys.stderr,
+            )
 
         # Sample and upsample TRAIN data only
         selected_train_datasets = []
@@ -707,6 +713,74 @@ def _load_multinomial_dataset(
             )
 
     return untokenized_path
+
+
+def _compute_sampling_probs(
+    sources: list[dict],
+    train_sizes: list[int],
+    alpha: float,
+) -> list[float]:
+    """
+    Compute per-source sampling probabilities, respecting pinned sampling_prob values.
+
+    Sources with an explicit `sampling_prob` field get that probability directly.
+    The remaining probability budget is distributed among unpinned sources using
+    alpha-based temperature scaling: p_i = (size_i)^alpha / Z, scaled to fill the budget.
+
+    Args:
+        sources: List of source config dicts (may contain 'sampling_prob' field)
+        train_sizes: Number of training examples per source (after dev split)
+        alpha: Temperature parameter for unpinned source reweighting
+
+    Returns:
+        List of sampling probabilities (one per source, sums to 1.0)
+    """
+    num_sources = len(sources)
+    pinned_probs = {}
+    for idx, source in enumerate(sources):
+        prob = source.get('sampling_prob')
+        if prob is not None:
+            if prob <= 0 or prob >= 1.0:
+                source_id = _get_source_id(DictConfig(source), fallback=f"source_{idx}")
+                raise ValueError(
+                    f"Source '{source_id}': sampling_prob must be between 0 and 1 exclusive, "
+                    f"got {prob}"
+                )
+            pinned_probs[idx] = prob
+
+    pinned_total = sum(pinned_probs.values())
+
+    # If every source is pinned, they must sum to exactly 1.0
+    if len(pinned_probs) == num_sources:
+        if abs(pinned_total - 1.0) > 1e-9:
+            raise ValueError(
+                f"All sources have sampling_prob but they sum to {pinned_total:.6f}, not 1.0"
+            )
+        return [pinned_probs[i] for i in range(num_sources)]
+
+    # With unpinned sources present, pinned probs must leave room for them
+    if pinned_total >= 1.0:
+        raise ValueError(
+            f"Sum of pinned sampling_prob values is {pinned_total:.4f}, "
+            "must be less than 1.0 to leave budget for remaining sources"
+        )
+
+    # Distribute remaining budget among unpinned sources using alpha-based weighting
+    remaining_budget = 1.0 - pinned_total
+    unpinned_indices = [i for i in range(num_sources) if i not in pinned_probs]
+
+    unpinned_sizes = [train_sizes[i] for i in unpinned_indices]
+    if all(s == 0 for s in unpinned_sizes):
+        raise ValueError("Cannot compute sampling probabilities: all unpinned sources are empty")
+
+    weights = [size ** alpha for size in unpinned_sizes]
+    total_weight = sum(weights)
+    unpinned_probs = {
+        idx: (weights[j] / total_weight) * remaining_budget
+        for j, idx in enumerate(unpinned_indices)
+    }
+
+    return [pinned_probs.get(i, unpinned_probs.get(i)) for i in range(num_sources)]
 
 
 def _load_and_split_source(
