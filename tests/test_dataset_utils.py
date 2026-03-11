@@ -44,6 +44,7 @@ from dataset_utils import (
     _load_plaintext_dataset,
     _load_plaintext_dir_dataset,
     _load_concat_dataset,
+    _compute_sampling_probs,
     load_untokenized_dataset,
     load_external_eval_set,
     _tokenize_instruction_examples,
@@ -1328,3 +1329,182 @@ class TestMixedInstructionPlaintextDatasets:
         # Plaintext examples should have no -100 (all labels are actual tokens)
         has_unmasked = any(-100 not in labels for labels in all_labels)
         assert has_unmasked, "Plaintext examples should have unmasked labels"
+
+
+class TestComputeSamplingProbs:
+    """
+    Tests for _compute_sampling_probs, which computes per-source sampling probabilities
+    for multinomial dataset sampling.
+
+    Sources can optionally pin their probability via `sampling_prob`. Unpinned sources
+    share the remaining budget using alpha-based temperature scaling.
+    """
+
+    def test_no_pinned_sources(self):
+        """All sources use alpha-based reweighting (original behavior)."""
+        sources = [
+            {'id': 'a'},
+            {'id': 'b'},
+            {'id': 'c'},
+        ]
+        train_sizes = [1000, 2000, 7000]
+        alpha = 1.0
+
+        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+
+        assert len(probs) == 3
+        assert abs(sum(probs) - 1.0) < 1e-9
+        # With alpha=1.0, probabilities should be proportional to sizes
+        assert abs(probs[0] - 0.1) < 1e-9
+        assert abs(probs[1] - 0.2) < 1e-9
+        assert abs(probs[2] - 0.7) < 1e-9
+
+    def test_one_pinned_source(self):
+        """One source pinned, rest distributed by alpha."""
+        sources = [
+            {'id': 'got'},
+            {'id': 'non'},
+            {'id': 'eng', 'sampling_prob': 0.7},
+        ]
+        train_sizes = [1000, 3000, 500000]
+        alpha = 1.0
+
+        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+
+        assert len(probs) == 3
+        assert abs(sum(probs) - 1.0) < 1e-9
+        # eng is pinned at 0.7
+        assert abs(probs[2] - 0.7) < 1e-9
+        # Remaining 0.3 distributed proportionally (alpha=1) among got and non
+        # got: 1000/(1000+3000) * 0.3 = 0.075
+        # non: 3000/(1000+3000) * 0.3 = 0.225
+        assert abs(probs[0] - 0.075) < 1e-9
+        assert abs(probs[1] - 0.225) < 1e-9
+
+    def test_multiple_pinned_sources(self):
+        """Multiple sources pinned, rest distributed by alpha."""
+        sources = [
+            {'id': 'got', 'sampling_prob': 0.1},
+            {'id': 'non'},
+            {'id': 'ang'},
+            {'id': 'eng', 'sampling_prob': 0.6},
+        ]
+        train_sizes = [1000, 2000, 2000, 500000]
+        alpha = 1.0
+
+        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+
+        assert abs(sum(probs) - 1.0) < 1e-9
+        assert abs(probs[0] - 0.1) < 1e-9
+        assert abs(probs[3] - 0.6) < 1e-9
+        # Remaining 0.3 split equally (same size, alpha=1)
+        assert abs(probs[1] - 0.15) < 1e-9
+        assert abs(probs[2] - 0.15) < 1e-9
+
+    def test_all_pinned_sources_sum_to_one(self):
+        """All sources pinned with probs summing to 1.0."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 0.3},
+            {'id': 'b', 'sampling_prob': 0.7},
+        ]
+        train_sizes = [1000, 2000]
+        alpha = 0.5
+
+        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+
+        assert abs(probs[0] - 0.3) < 1e-9
+        assert abs(probs[1] - 0.7) < 1e-9
+
+    def test_all_pinned_sources_not_summing_to_one(self):
+        """All sources pinned but not summing to 1.0 raises error."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 0.3},
+            {'id': 'b', 'sampling_prob': 0.5},
+        ]
+        train_sizes = [1000, 2000]
+
+        with pytest.raises(ValueError, match="sum to"):
+            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+
+    def test_pinned_prob_at_one_raises_error(self):
+        """sampling_prob=1.0 on a single source is an error."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 1.0},
+            {'id': 'b'},
+        ]
+        train_sizes = [1000, 2000]
+
+        with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
+            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+
+    def test_pinned_prob_zero_raises_error(self):
+        """sampling_prob=0 is an error."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 0},
+            {'id': 'b'},
+        ]
+        train_sizes = [1000, 2000]
+
+        with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
+            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+
+    def test_pinned_prob_negative_raises_error(self):
+        """Negative sampling_prob is an error."""
+        sources = [
+            {'id': 'a', 'sampling_prob': -0.5},
+            {'id': 'b'},
+        ]
+        train_sizes = [1000, 2000]
+
+        with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
+            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+
+    def test_pinned_sum_exceeds_one_raises_error(self):
+        """Pinned probs summing to >= 1.0 raises error."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 0.6},
+            {'id': 'b', 'sampling_prob': 0.5},
+            {'id': 'c'},
+        ]
+        train_sizes = [1000, 2000, 3000]
+
+        with pytest.raises(ValueError, match="must be less than 1.0"):
+            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+
+    def test_alpha_affects_unpinned_distribution(self):
+        """Alpha reweighting applies only to unpinned sources."""
+        sources = [
+            {'id': 'small'},
+            {'id': 'large'},
+            {'id': 'pinned', 'sampling_prob': 0.5},
+        ]
+        train_sizes = [100, 10000, 999999]
+
+        # With alpha=1.0, large source dominates unpinned budget
+        probs_a1 = _compute_sampling_probs(sources, train_sizes, alpha=1.0)
+        # With alpha=0.0001 (near 0), unpinned sources nearly equal
+        probs_a0 = _compute_sampling_probs(sources, train_sizes, alpha=0.0001)
+
+        # Pinned source unchanged in both
+        assert abs(probs_a1[2] - 0.5) < 1e-9
+        assert abs(probs_a0[2] - 0.5) < 1e-9
+
+        # With alpha=1, large source gets most of the 0.5 budget
+        assert probs_a1[1] > probs_a1[0]
+        assert probs_a1[1] > 0.45
+
+        # With alpha~0, both unpinned sources get ~0.25 each
+        assert abs(probs_a0[0] - 0.25) < 0.01
+        assert abs(probs_a0[1] - 0.25) < 0.01
+
+    def test_unpinned_empty_source_raises_error(self):
+        """All unpinned sources being empty raises error."""
+        sources = [
+            {'id': 'empty1'},
+            {'id': 'empty2'},
+            {'id': 'pinned', 'sampling_prob': 0.5},
+        ]
+        train_sizes = [0, 0, 1000]
+
+        with pytest.raises(ValueError, match="unpinned sources are empty"):
+            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
