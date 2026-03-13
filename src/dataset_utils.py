@@ -723,8 +723,8 @@ def _compute_sampling_probs(
     """
     Compute per-source sampling probabilities, respecting pinned sampling_prob values.
 
-    Sources with an explicit `sampling_prob` field get that probability directly.
-    The remaining probability budget is distributed among unpinned sources using
+    Sources with an explicit `sampling_prob` or `upsampling_factor field get that probability
+    directly. The remaining probability budget is distributed among unpinned sources using
     alpha-based temperature scaling: p_i = (size_i)^alpha / Z, scaled to fill the budget.
 
     Args:
@@ -736,9 +736,13 @@ def _compute_sampling_probs(
         List of sampling probabilities (one per source, sums to 1.0)
     """
     num_sources = len(sources)
+    total_size = sum(train_sizes)
     pinned_probs = {}
     for idx, source in enumerate(sources):
         prob = source.get('sampling_prob')
+        upsampling_factor = source.get('upsampling_factor')
+        if upsampling_factor is not None and prob is None:
+            pinned_probs[idx] = train_sizes[idx] * upsampling_factor / total_size
         if prob is not None:
             if prob <= 0 or prob >= 1.0:
                 source_id = _get_source_id(DictConfig(source), fallback=f"source_{idx}")
