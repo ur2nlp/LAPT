@@ -9,6 +9,7 @@ dataset:
   - type: concat
     id: got
     dev_size: -1
+    sampling_prob: 0.1
     sources:
     - type: plaintext
       path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
@@ -24,6 +25,7 @@ dataset:
   - type: plaintext
     id: got-eng
     dev_size: -1
+    sampling_prob: 0.04
     path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_train.txt
   - type: huggingface
     id: eng
@@ -90,5 +92,5 @@ external_eval:
   - name: got-eng_holdout
     path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_test.txt
     format: plaintext
-experiment_id: v18L
+experiment_id: v20L
 fresh_dataset: true
