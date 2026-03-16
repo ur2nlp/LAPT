@@ -141,10 +141,13 @@ def transliterate_gothic_to_latin(text):
     latin_to_gothic = get_latin_gothic_mappings()
 
     # Create reverse mapping (Gothic → Latin lowercase only)
+    # Preferred forms for ambiguous mappings: w over v, hw over hv (gotica convention)
+    preferred_reverse = {"𐍅": "w", "𐍈": "hw"}
     gothic_to_latin = {}
     for latin, gothic in latin_to_gothic.items():
-        if gothic not in gothic_to_latin:
-            # Use lowercase version for reverse mapping
+        if gothic in preferred_reverse:
+            gothic_to_latin[gothic] = preferred_reverse[gothic]
+        elif gothic not in gothic_to_latin:
             gothic_to_latin[gothic] = latin.lower()
 
     # Sort by length descending (though all Gothic chars are single code points)
