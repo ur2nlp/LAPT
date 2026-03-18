@@ -1,0 +1,167 @@
+# Gothic Word-Spotting Data Generation Task
+
+## Objective
+
+Extract word-level alignments from parallel Gothic-English Bible verses to create vocabulary learning tasks. These will be used for instruction-tuning a language model to help learners identify Gothic vocabulary.
+
+## Input Format
+
+You will receive parallel sentences with English and Gothic separated by a delimiter (` || `). Each unique English sentence appears **twice in consecutive lines**: once with Gothic in Roman script, and once with Gothic in Gothic script (𐌲𐍉𐍄𐌹𐍃𐌺).
+
+```
+English sentence || Gothic (Roman script)
+English sentence || Gothic (Gothic script)
+```
+
+Example:
+```
+You are the light of the world. || jus sijuþ liuhaþ þis fairhvaus.
+You are the light of the world. || 𐌾𐌿𐍃 𐍃𐌹𐌾𐌿𐌸 𐌻𐌹𐌿𐌷𐌰𐌸 𐌸𐌹𐍃 𐍆𐌰𐌹𐍂𐌷𐍅𐌰𐌿𐍃.
+```
+
+**Important:** For each unique English sentence, you should choose the same target words for both scripts. This creates paired examples showing how the same Gothic word appears in both writing systems.
+
+## Output Format
+
+For each **pair of consecutive lines** (same English with both Gothic scripts), generate a single JSONL entry containing all word alignments for that sentence pair. Choose 1-4 target words and include alignments for both Gothic scripts.
+
+**Example output (one line per sentence pair with 2 target words):**
+
+```jsonl
+{"english_sentence": "You are the light of the world.", "gothic_sentence_roman": "jus sijuþ liuhaþ þis fairhvaus.", "gothic_sentence_gothic": "𐌾𐌿𐍃 𐍃𐌹𐌾𐌿𐌸 𐌻𐌹𐌿𐌷𐌰𐌸 𐌸𐌹𐍃 𐍆𐌰𐌹𐍂𐌷𐍅𐌰𐌿𐍃.", "alignments": [{"target_word": "light", "gothic_word_roman": "liuhaþ", "gothic_word_gothic": "𐌻𐌹𐌿𐌷𐌰𐌸"}, {"target_word": "world", "gothic_word_roman": "fairhvaus", "gothic_word_gothic": "𐍆𐌰𐌹𐍂𐌷𐍅𐌰𐌿𐍃"}]}
+```
+
+**Required fields:**
+- `english_sentence`: Full English sentence (as provided)
+- `gothic_sentence_roman`: Full Gothic sentence in Roman script (as provided)
+- `gothic_sentence_gothic`: Full Gothic sentence in Gothic script (as provided)
+- `alignments`: List of alignment objects, each containing:
+  - `target_word`: The English word to spot
+  - `gothic_word_roman`: The corresponding Gothic word in Roman script
+  - `gothic_word_gothic`: The corresponding Gothic word in Gothic script
+
+## Word Selection Criteria
+
+### DO Select
+
+**Content words with clear alignment:**
+- Nouns (e.g., "world" → "fairhvaus")
+- Verbs (e.g., "see" → "saihwan")
+- Adjectives (e.g., "holy" → "weihs")
+- Adverbs (e.g., "truly" → "bi sunjai")
+
+**Characteristics of good examples:**
+- Unambiguous 1-to-1 correspondence between English and Gothic
+- The word appears exactly once in each sentence (or if multiple times, alignment is clear)
+- Varied difficulty: mix frequent and less frequent words
+- Pedagogically valuable vocabulary
+
+### AVOID
+
+**Words that make poor learning examples:**
+- Function words: articles (the, a), pronouns (it, he), prepositions (in, on)
+  - Exception: If they're the only viable alignment or pedagogically interesting
+- Proper names: Jesus, Matthew, Jerusalem
+  - Exception: If alignment is clear and instructive
+- Ambiguous alignments:
+  - Word appears multiple times in the sentence
+  - Unclear which Gothic word corresponds to the English
+  - Multi-word phrases where alignment is complex
+- Morphological mismatches:
+  - English "brothers" vs Gothic "broþar" (singular vs plural form mismatch)
+  - Unless the alignment is pedagogically clear despite the mismatch
+
+## Gothic Language Considerations
+
+**Gothic uses inflectional morphology:**
+- Words change form based on case (nominative, accusative, genitive, dative)
+- Verbs conjugate for person, number, tense, mood
+- **Always use the word as it appears in the Gothic sentence**, not the dictionary form
+
+**Examples:**
+- "man" (nominative singular) → "guma"
+- "man" (accusative singular) → "guman"
+- "of the man"/"man's" (genitive) → "gumins"
+- "to the man" (dative) → "gumin"
+
+**Handle multi-word expressions carefully:**
+- If English uses one word but Gothic uses a phrase, you may extract if alignment is clear
+
+## Alignment Guidelines
+
+1. **Position-based hints:** Words in similar positions often correspond, but not always
+2. **Cognate recognition:** Some Gothic words resemble English (e.g., "fader" → "father")
+3. **Context clues:** Use sentence meaning to infer likely alignments
+4. **Confidence threshold:** Only extract alignments you're reasonably confident about
+5. **Quantity over quality:** Better to extract 1-2 solid alignments than 4 dubious ones
+
+## Example Generations
+
+### Example 1: Simple Alignment
+
+**Input:**
+```
+The farmer sows the word. || sa saijands waurd saijiþ.
+The farmer sows the word. || 𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸.
+```
+
+**Output (one line with 3 target words):**
+```jsonl
+{"english_sentence": "The farmer sows the word.", "gothic_sentence_roman": "sa saijands waurd saijiþ.", "gothic_sentence_gothic": "𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸.", "alignments": [{"target_word": "farmer", "gothic_word_roman": "saijands", "gothic_word_gothic": "𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃"}, {"target_word": "sows", "gothic_word_roman": "saijiþ", "gothic_word_gothic": "𐍃𐌰𐌹𐌾𐌹𐌸"}, {"target_word": "word", "gothic_word_roman": "waurd", "gothic_word_gothic": "𐍅𐌰𐌿𐍂𐌳"}]}
+```
+
+### Example 2: Verbal Forms
+
+**Input:**
+```
+For they have heard that you teach all the Jews. || hausidedun auk þatei laiseis allans Iudaians.
+For they have heard that you teach all the Jews. || 𐌷𐌰𐌿𐍃𐌹𐌳𐌴𐌳𐌿𐌽 𐌰𐌿𐌺 𐌸𐌰𐍄𐌴𐌹 𐌻𐌰𐌹𐍃𐌴𐌹𐍃 𐌰𐌻𐌻𐌰𐌽𐍃 𐌹𐌿𐌳𐌰𐌹𐌰𐌽𐍃.
+```
+
+**Output (one line with 2 target words):**
+```jsonl
+{"english_sentence": "For they have heard that you teach all the Jews.", "gothic_sentence_roman": "hausidedun auk þatei laiseis allans Iudaians.", "gothic_sentence_gothic": "𐌷𐌰𐌿𐍃𐌹𐌳𐌴𐌳𐌿𐌽 𐌰𐌿𐌺 𐌸𐌰𐍄𐌴𐌹 𐌻𐌰𐌹𐍃𐌴𐌹𐍃 𐌰𐌻𐌻𐌰𐌽𐍃 𐌹𐌿𐌳𐌰𐌹𐌰𐌽𐍃.", "alignments": [{"target_word": "heard", "gothic_word_roman": "hausidedun", "gothic_word_gothic": "𐌷𐌰𐌿𐍃𐌹𐌳𐌴𐌳𐌿𐌽"}, {"target_word": "teach", "gothic_word_roman": "laiseis", "gothic_word_gothic": "𐌻𐌰𐌹𐍃𐌴𐌹𐍃"}]}
+```
+
+### Example 3: Conservative Selection (Ambiguity)
+
+**Input:**
+```
+Jesus said to them, "Come after me, and I will make you into fishers for men." || jah qaþ im Iesus: hirjats afar mis, jah gatauja igqis wairþan nutans manne.
+Jesus said to them, "Come after me, and I will make you into fishers for men." || 𐌾𐌰𐌷 𐌵𐌰𐌸 𐌹𐌼 𐌹𐌴𐍃𐌿𐍃: 𐌷𐌹𐍂𐌾𐌰𐍄𐍃 𐌰𐍆𐌰𐍂 𐌼𐌹𐍃, 𐌾𐌰𐌷 𐌲𐌰𐍄𐌰𐌿𐌾𐌰 𐌹𐌲𐌵𐌹𐍃 𐍅𐌰𐌹𐍂𐌸𐌰𐌽 𐌽𐌿𐍄𐌰𐌽𐍃 𐌼𐌰𐌽𐌽𐌴.
+```
+
+**Output (one line with 2 target words):**
+```jsonl
+{"english_sentence": "Jesus said to them, \"Come after me, and I will make you into fishers for men.\"", "gothic_sentence_roman": "jah qaþ im Iesus: hirjats afar mis, jah gatauja igqis wairþan nutans manne.", "gothic_sentence_gothic": "𐌾𐌰𐌷 𐌵𐌰𐌸 𐌹𐌼 𐌹𐌴𐍃𐌿𐍃: 𐌷𐌹𐍂𐌾𐌰𐍄𐍃 𐌰𐍆𐌰𐍂 𐌼𐌹𐍃, 𐌾𐌰𐌷 𐌲𐌰𐍄𐌰𐌿𐌾𐌰 𐌹𐌲𐌵𐌹𐍃 𐍅𐌰𐌹𐍂𐌸𐌰𐌽 𐌽𐌿𐍄𐌰𐌽𐍃 𐌼𐌰𐌽𐌽𐌴.", "alignments": [{"target_word": "said", "gothic_word_roman": "qaþ", "gothic_word_gothic": "𐌵𐌰𐌸"}, {"target_word": "fishers", "gothic_word_roman": "nutans", "gothic_word_gothic": "𐌽𐌿𐍄𐌰𐌽𐍃"}]}
+```
+
+**Note:** Avoided "come" (could be "hirjats"), "make" (could be "gatauja" but complex with "you" and "into"), pronouns ("me" → "mis", "you" → "igqis" - function words). "Jesus" is a proper name so avoided.
+
+## Processing Strategy
+
+**Work in pairs:** Read two consecutive lines (same English, both Gothic scripts), choose target words, then output alignments for both scripts before moving to the next pair.
+
+**Pattern:**
+1. Read line N (English || Roman Gothic)
+2. Read line N+1 (English || Gothic script)
+3. Choose 1-4 target words based on the English-Gothic alignment
+4. Output one JSON line containing all alignments for both scripts
+5. Move to line N+2 and repeat
+
+## Output Format Reminders
+
+- **One JSON object per line** (JSONL format)
+- **No additional text or commentary** - just the JSON objects
+- **Preserve punctuation** in the sentence fields as provided
+- **No trailing commas** in JSON objects
+- **Escape quotes** if they appear in sentences (use `\"`)
+
+## Quality Control
+
+Before outputting an alignment, ask yourself:
+1. Am I confident this English word corresponds to this Gothic word?
+2. Would this example help a learner identify Gothic vocabulary?
+3. Is the alignment clear enough for manual verification with a dictionary?
+
+When in doubt, skip the alignment. Quality matters more than quantity.

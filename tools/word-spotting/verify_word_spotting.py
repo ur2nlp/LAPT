@@ -35,8 +35,8 @@ import sys
 from collections import OrderedDict
 from pathlib import Path
 
-# Allow importing transliterate from the same directory
-sys.path.insert(0, str(Path(__file__).parent))
+# Allow importing transliterate from the parent tools/ directory
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from transliterate import transliterate_gothic_to_latin
 
 
@@ -417,7 +417,7 @@ def main():
     parser.add_argument(
         "--sort",
         choices=["worst-first", "best-first"],
-        default="worst-first",
+        default="best-first",
         help="Sort order: worst-first (tier 3 first) or best-first (tier 1 first).",
     )
     parser.add_argument(
@@ -456,11 +456,11 @@ def main():
         rows.sort(key=lambda r: (r["tier"], r.get("dist_1", 0)))
 
     # Build fieldnames
-    fieldnames = ["tier", "english_word", "gothic_surface", "gothic_surface_gothic", "script_ok"]
+    fieldnames = ["status", "tier", "english_word", "gothic_surface", "gothic_surface_gothic", "script_ok"]
     for i in range(1, args.top_n + 1):
         fieldnames.extend([f"dist_{i}", f"match_{i}"])
     fieldnames.extend([
-        "english_sentence", "gothic_sentence_roman", "gothic_sentence_gothic", "status",
+        "english_sentence", "gothic_sentence_roman", "gothic_sentence_gothic",
     ])
 
     # Write TSV
