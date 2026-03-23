@@ -238,6 +238,9 @@ class TokenizerConfig(ArtifactConfig):
     # Model identifier (optional override for local model paths)
     init_model_id: Optional[str] = None
 
+    # Pre-built tokenizer path (bypasses training, e.g. PTEx tokenizer)
+    tokenizer_path: Optional[str] = None
+
     # Data source (one of these will be set)
     train_dataset_cache: Optional[str] = None
     focus_dataset: Optional[dict] = field(default=None)
@@ -265,6 +268,7 @@ class TokenizerConfig(ArtifactConfig):
             train_dataset_cache = args.dataset.cache_dir
 
         init_model_id = getattr(args, 'init_model_id', None) or None
+        tokenizer_path = getattr(args.focus, 'tokenizer_path', None) or None
 
         return cls(
             hf_model=args.hf_model,
@@ -283,6 +287,7 @@ class TokenizerConfig(ArtifactConfig):
             fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4),
             seed=args.seed,
             init_model_id=init_model_id,
+            tokenizer_path=tokenizer_path,
             train_dataset_cache=train_dataset_cache,
             focus_dataset=focus_dataset,
         )
@@ -355,10 +360,19 @@ class TokenizerConfig(ArtifactConfig):
         Used as a path component in tokenizer cache, tokenized dataset,
         model output, and FOCUS training data directories.
 
+        When tokenizer_path is set (pre-built tokenizer, e.g. PTEx), the ID
+        is derived from the directory name and num_samples rather than from
+        tokenizer training parameters that don't apply.
+
         Returns:
             String like "xglm564m_focus-v16k-s100k_seeded-5.0x-lambda0.5"
+            or "xglm564m_ptex_test-s5m" for pre-built tokenizers
         """
         model_short = self._model_shortname()
+        if self.tokenizer_path:
+            tokenizer_name = os.path.basename(os.path.normpath(self.tokenizer_path))
+            samples_str = format_number(self.num_samples)
+            return f"{model_short}_{tokenizer_name}-s{samples_str}"
         suffix = self._build_suffix()
         return f"{model_short}_{suffix}"
 
