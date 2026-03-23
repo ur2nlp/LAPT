@@ -109,6 +109,33 @@ def _is_scalar(value: object) -> bool:
     return isinstance(value, (int, float, bool, str)) and not isinstance(value, dict)
 
 
+def _extract_source_sampling_params(sources: list) -> dict:
+    """Extract per-source sampling_prob and upsampling_factor from dataset sources list.
+
+    For each source with an `id`, produces keys like `sampling_prob_got` and
+    `upsampling_factor_got-eng` so these can be tracked and diffed across runs.
+
+    Args:
+        sources: The `dataset.sources` list from a training config.
+
+    Returns:
+        Dict of flattened per-source sampling parameters.
+    """
+    params = {}
+    if not isinstance(sources, list):
+        return params
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        source_id = source.get("id")
+        if not source_id:
+            continue
+        for key in ("sampling_prob", "upsampling_factor"):
+            if key in source and _is_scalar(source[key]):
+                params[f"{key}_{source_id}"] = source[key]
+    return params
+
+
 def extract_params(config: dict) -> tuple[str, dict]:
     """Extract all scalar parameters from a training_config.yaml dict.
 
@@ -144,6 +171,11 @@ def extract_params(config: dict) -> tuple[str, dict]:
             if isinstance(value, str) and value.startswith("${"):
                 continue
             params[key] = value
+
+    # extract per-source sampling params from dataset.sources
+    dataset_section = config.get("dataset", {})
+    sources = dataset_section.get("sources", [])
+    params.update(_extract_source_sampling_params(sources))
 
     # compute synthetic params
     training = config.get("training", {})
