@@ -377,7 +377,24 @@ class TokenizerConfig(ArtifactConfig):
         return f"{model_short}_{suffix}"
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for saving to YAML."""
+        """Convert to dictionary for saving to YAML.
+
+        When tokenizer_path is set (pre-built tokenizer), only fields that
+        actually affect the downstream artifacts are included. Tokenizer
+        training params (vocab_size, character_coverage, seed vocab settings,
+        etc.) are excluded since they were bypassed.
+        """
+        if self.tokenizer_path:
+            return {
+                'hf_model': self.hf_model,
+                'init_model_id': self.init_model_id,
+                'tokenizer_path': self.tokenizer_path,
+                'num_samples': self.num_samples,
+                'fasttext_model_min_count': self.fasttext_model_min_count,
+                'seed': self.seed,
+                'train_dataset_cache': self.train_dataset_cache,
+                'focus_dataset': self.focus_dataset,
+            }
         from dataclasses import asdict
         return asdict(self)
 
