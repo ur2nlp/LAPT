@@ -22,6 +22,9 @@ Usage:
     # Show runs in a group with metrics
     python tools/registry.py show --group dropout-sweep --metrics
 
+    # Show runs hiding specific params (in addition to defaults)
+    python tools/registry.py show v29L v30L --hide save_total_limit
+
     # What differs between these three runs?
     python tools/registry.py diff v81 v82 v83
 
@@ -37,6 +40,9 @@ import yaml
 
 
 REGISTRY_PATH = Path("outputs/registry.yaml")
+
+# params hidden from display by default (usually redundant with max_steps)
+DEFAULT_HIDDEN_PARAMS = {"eval_steps", "logging_steps", "save_steps"}
 
 # preferred display order for well-known params (others sorted alphabetically after)
 PREFERRED_ORDER = [
@@ -391,9 +397,10 @@ def cmd_show(args: argparse.Namespace) -> None:
         print(f"--- {rid} ---")
 
         # params — preferred order first, then remaining alphabetically
+        hidden = DEFAULT_HIDDEN_PARAMS | set(args.hide)
         preferred_set = set(PREFERRED_ORDER)
-        ordered_keys = [k for k in PREFERRED_ORDER if k in params]
-        ordered_keys += sorted(k for k in params if k not in preferred_set)
+        ordered_keys = [k for k in PREFERRED_ORDER if k in params and k not in hidden]
+        ordered_keys += sorted(k for k in params if k not in preferred_set and k not in hidden)
         for key in ordered_keys:
             print(f"  {key}: {format_param_value(params[key])}")
 
@@ -432,6 +439,10 @@ def cmd_diff(args: argparse.Namespace) -> None:
         return
 
     varying, constant = diff_runs(registry, run_ids)
+
+    hidden = DEFAULT_HIDDEN_PARAMS | set(args.hide)
+    varying = {k: v for k, v in varying.items() if k not in hidden}
+    constant = {k: v for k, v in constant.items() if k not in hidden}
 
     if not varying:
         print(f"All key params are identical across {', '.join(run_ids)}.")
@@ -641,6 +652,16 @@ def main():
         action="store_true",
         help="Join with metrics from outputs/trainer_states/*.json",
     )
+    show_parser.add_argument(
+        "--hide",
+        nargs="*",
+        default=[],
+        metavar="PARAM",
+        help=(
+            "Additional params to hide from display "
+            f"(always hides: {sorted(DEFAULT_HIDDEN_PARAMS)})"
+        ),
+    )
 
     # diff
     diff_parser = subparsers.add_parser(
@@ -651,6 +672,16 @@ def main():
         "runs",
         nargs="+",
         help="Run IDs to compare",
+    )
+    diff_parser.add_argument(
+        "--hide",
+        nargs="*",
+        default=[],
+        metavar="PARAM",
+        help=(
+            "Additional params to hide from display "
+            f"(always hides: {sorted(DEFAULT_HIDDEN_PARAMS)})"
+        ),
     )
 
     # verify
