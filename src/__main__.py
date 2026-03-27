@@ -8,6 +8,7 @@ from transformers import (
     DataCollatorForLanguageModeling, EarlyStoppingCallback,
     Trainer, TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 )
+from transformers.trainer_utils import get_last_checkpoint
 
 from dataset_utils import (
     load_untokenized_dataset, load_tokenized_dataset,
@@ -507,6 +508,12 @@ def lapt(args: DictConfig):
 
     # start training (resume from checkpoint if specified)
     resume_checkpoint = args.get('resume_from_checkpoint', None)
+    if resume_checkpoint is None and args.get('preempt_resume', False):
+        resume_checkpoint = get_last_checkpoint(output_dir)
+        if resume_checkpoint:
+            print(f"Preempt resume: resuming from {resume_checkpoint}", file=sys.stderr)
+        else:
+            print("Preempt resume: no checkpoint found, starting fresh", file=sys.stderr)
     trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     # save the best model (loaded by trainer at end) to a known location
