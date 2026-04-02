@@ -85,7 +85,7 @@ _SKIP_KEYS = {
     "external_eval_sets",
 }
 
-HUMAN_FIELDS = ["era", "group", "note", "observation"]
+HUMAN_FIELDS = ["era", "group", "note", "observation", "status"]
 
 
 def load_registry(path: Path = REGISTRY_PATH) -> dict:
@@ -708,6 +708,10 @@ def main():
     annotate_parser.add_argument("--group", help="Set group tag")
     annotate_parser.add_argument("--note", help="Set note")
     annotate_parser.add_argument("--observation", help="Set observation")
+    annotate_parser.add_argument(
+        "--status",
+        help="Set run status (e.g. 'manually_closed' to prevent re-fetching)",
+    )
 
     args = parser.parse_args()
 

@@ -17,9 +17,12 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 
 TRAINER_STATES_DIR = Path("outputs/trainer_states")
 CONFIGS_DIR = Path("outputs/configs")
+REGISTRY_PATH = Path("outputs/registry.yaml")
 
 
 def normalize_exp_id(exp_id: str) -> str:
@@ -50,6 +53,15 @@ def get_local_status(filepath: Path) -> str:
     return "training"
 
 
+def load_manually_closed(path: Path) -> set[str]:
+    """Return the set of experiment IDs manually marked as closed in the registry."""
+    if not path.exists():
+        return set()
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    return {exp_id for exp_id, entry in data.items() if entry.get("status") == "manually_closed"}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Diff remote runs against local outputs and emit scp commands",
@@ -60,6 +72,8 @@ def main():
         help="Show what would be fetched without emitting scp commands",
     )
     args = parser.parse_args()
+
+    manually_closed = load_manually_closed(REGISTRY_PATH)
 
     # build local inventory from outputs/trainer_states/
     local_runs: dict[str, str] = {}
@@ -92,7 +106,7 @@ def main():
         remote_config = parts[3] if len(parts) >= 4 else None
 
         local_status = local_runs.get(exp_id)
-        if local_status in ("complete", "early_stopped"):
+        if local_status in ("complete", "early_stopped") or exp_id in manually_closed:
             skipped += 1
             continue
 
@@ -106,7 +120,7 @@ def main():
             to_fetch.append((exp_id, remote_trainer_state, need_config, "new"))
 
     # report to stderr
-    print(f"# {skipped} skipped (complete/early_stopped)", file=sys.stderr)
+    print(f"# {skipped} skipped (complete/early_stopped/manually_closed)", file=sys.stderr)
     print(f"# {len(to_fetch)} to fetch", file=sys.stderr)
 
     if not to_fetch:
