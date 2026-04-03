@@ -24,6 +24,13 @@ Usage:
         --output tokenizers/ptex_test \\
         --target-vocab-size 32768
 
+    # Specify novel token budget directly instead of total target size
+    python tools/prune_then_extend_vocab.py \\
+        --base-text data/english_sample.txt \\
+        --novel-text data/gothic_prepared/monolingual_train.txt \\
+        --output tokenizers/ptex_test \\
+        --novel-vocab-budget 4096
+
     # Multiple novel-language files (concatenated internally)
     python tools/prune_then_extend_vocab.py \\
         --base-text data/english_sample_1m.txt \\
@@ -513,8 +520,22 @@ def main():
     parser.add_argument(
         '--target-vocab-size',
         type=int,
-        default=32768,
-        help='Total combined vocabulary size (default: 32768)',
+        default=None,
+        help=(
+            'Total combined vocabulary size. If neither this nor '
+            '--novel-vocab-budget is provided, defaults to 32768. '
+            'If both are given, this takes precedence.'
+        ),
+    )
+    parser.add_argument(
+        '--novel-vocab-budget',
+        type=int,
+        default=None,
+        help=(
+            'Number of novel-language token slots in the combined vocabulary. '
+            'Mutually usable with --target-vocab-size; if both are given, '
+            '--target-vocab-size takes precedence and this value is ignored.'
+        ),
     )
     parser.add_argument(
         '--base-coverage',
@@ -551,6 +572,10 @@ def main():
         help='Random seed (default: 1)',
     )
     args = parser.parse_args()
+
+    # Default to historical target size when neither sizing argument is given
+    if args.target_vocab_size is None and args.novel_vocab_budget is None:
+        args.target_vocab_size = 32768
 
     # Validate inputs
     if not os.path.isfile(args.base_text):
@@ -605,13 +630,30 @@ def main():
         if token_id is not None:
             selected_ids.discard(token_id)
 
-    novel_vocab_budget = args.target_vocab_size - len(selected_ids) - num_special
+    # Resolve novel_vocab_budget and target_vocab_size from the arguments.
+    # --target-vocab-size takes precedence when both are given; if only
+    # --novel-vocab-budget is given, the target size is derived from it.
+    if args.target_vocab_size is not None:
+        target_vocab_size = args.target_vocab_size
+        novel_vocab_budget = target_vocab_size - len(selected_ids) - num_special
+        if args.novel_vocab_budget is not None:
+            implied_total = num_special + len(selected_ids) + args.novel_vocab_budget
+            if implied_total != target_vocab_size:
+                print(
+                    f"NOTE: --novel-vocab-budget implies total size {implied_total:,}, "
+                    f"but --target-vocab-size={target_vocab_size:,} takes precedence.",
+                    file=sys.stderr,
+                )
+    else:
+        novel_vocab_budget = args.novel_vocab_budget
+        target_vocab_size = num_special + len(selected_ids) + novel_vocab_budget
+
     if novel_vocab_budget <= 0:
         print(
             f"Error: No vocabulary budget left for novel languages. "
             f"Base selected {len(selected_ids)} + {num_special} special = "
             f"{len(selected_ids) + num_special}, "
-            f"but target is {args.target_vocab_size}.",
+            f"but target is {target_vocab_size}.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -620,7 +662,7 @@ def main():
         f"\nVocabulary budget:",
         file=sys.stderr,
     )
-    print(f"  Target total: {args.target_vocab_size:,}", file=sys.stderr)
+    print(f"  Target total: {target_vocab_size:,}", file=sys.stderr)
     print(f"  Special tokens: {num_special}", file=sys.stderr)
     print(f"  Base tokens (retained): {len(selected_ids):,}", file=sys.stderr)
     print(f"  Novel language budget: {novel_vocab_budget:,}", file=sys.stderr)
@@ -669,7 +711,7 @@ def main():
 
     # If we don't have enough novel tokens to fill the budget, backfill with
     # additional base tokens (next most frequent ones not yet selected)
-    slots_for_novel = args.target_vocab_size - len(selected_ids) - num_special
+    slots_for_novel = target_vocab_size - len(selected_ids) - num_special
     if len(novel_unique) < slots_for_novel:
         shortfall = slots_for_novel - len(novel_unique)
         print(
@@ -696,7 +738,7 @@ def main():
         base_vocab_scores=base_vocab_scores,
         selected_base_ids=selected_ids,
         novel_tokens=novel_tokens,
-        target_vocab_size=args.target_vocab_size,
+        target_vocab_size=target_vocab_size,
     )
 
     # Optional: re-estimate scores from corpus token frequencies
@@ -751,10 +793,10 @@ def main():
 
     # Validate and save
     actual_size = len(new_tokenizer)
-    if actual_size != args.target_vocab_size:
+    if actual_size != target_vocab_size:
         print(
             f"\nWARNING: Final vocab size {actual_size:,} != "
-            f"target {args.target_vocab_size:,}",
+            f"target {target_vocab_size:,}",
             file=sys.stderr,
         )
     _validate_tokenizer(new_tokenizer, actual_size)
