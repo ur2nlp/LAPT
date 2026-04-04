@@ -865,6 +865,72 @@ def _extract_special_tokens(tokenizer: PreTrainedTokenizerBase, inherit_addition
     return config
 
 
+def _copy_embeddings_directly(
+    source_model,
+    source_token_strings: set[str],
+    source_tokenizer: PreTrainedTokenizerBase,
+    target_token_strings: list[str],
+    has_separate_output: bool,
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    """
+    Build new embedding matrices by copying source embeddings for each target token.
+
+    Used when all target tokens exist in the source vocabulary (e.g., prune-only PTEx),
+    where FOCUS would crash because its novel-token matrix is empty.
+
+    Args:
+        source_model: Source pretrained model
+        source_token_strings: Set of all token strings in the source vocabulary
+        source_tokenizer: Tokenizer for the source model
+        target_token_strings: Ordered list of token strings in the target vocabulary
+        has_separate_output: Whether the model uses separate input/output embeddings
+
+    Returns:
+        Tuple of (input_embeddings, output_embeddings); output_embeddings is None
+        if the model uses tied embeddings.
+    """
+    # Build source string → id lookup
+    source_string_to_id = {
+        source_tokenizer.convert_ids_to_tokens(i): i
+        for i in range(len(source_tokenizer))
+    }
+
+    source_input_embeddings = source_model.get_input_embeddings().weight.detach()
+    hidden_dim = source_input_embeddings.shape[1]
+    target_vocab_size = len(target_token_strings)
+
+    new_input_embeddings = torch.zeros(target_vocab_size, hidden_dim)
+    missing_count = 0
+    for target_id, token_str in enumerate(target_token_strings):
+        source_id = source_string_to_id.get(token_str)
+        if source_id is not None:
+            new_input_embeddings[target_id] = source_input_embeddings[source_id]
+        else:
+            # Fallback to mean initialization; caller already verified this shouldn't happen
+            new_input_embeddings[target_id] = source_input_embeddings.mean(dim=0)
+            missing_count += 1
+
+    if missing_count > 0:
+        print(
+            f"Warning: {missing_count} target tokens not found in source vocabulary; "
+            f"initialized from embedding mean.",
+            file=sys.stderr,
+        )
+
+    new_output_embeddings = None
+    if has_separate_output:
+        source_output_embeddings = source_model.get_output_embeddings().weight.detach()
+        new_output_embeddings = torch.zeros(target_vocab_size, hidden_dim)
+        for target_id, token_str in enumerate(target_token_strings):
+            source_id = source_string_to_id.get(token_str)
+            if source_id is not None:
+                new_output_embeddings[target_id] = source_output_embeddings[source_id]
+            else:
+                new_output_embeddings[target_id] = source_output_embeddings.mean(dim=0)
+
+    return new_input_embeddings, new_output_embeddings
+
+
 def apply_focus_initialization(
     source_model,
     source_tokenizer: PreTrainedTokenizerBase,
@@ -923,38 +989,75 @@ def apply_focus_initialization(
             print(f"FOCUS embeddings loaded from cache. Vocab size: {len(target_tokenizer)}", file=sys.stderr)
             return new_input_embeddings, new_output_embeddings
 
-    print("Applying FOCUS to initialize embeddings", file=sys.stderr)
+    # Check whether any target tokens are absent from the source vocabulary.
+    # FOCUS crashes (fastdist TypingError) when the novel-token set is empty,
+    # because the cosine similarity matrix degenerates to a scalar.
+    # In that case (pure prune-only tokenizer) skip FOCUS and copy directly.
+    source_token_strings = {
+        source_tokenizer.convert_ids_to_tokens(i)
+        for i in range(len(source_tokenizer))
+    }
+    target_token_strings = [
+        target_tokenizer.convert_ids_to_tokens(i)
+        for i in range(len(target_tokenizer))
+    ]
+    novel_token_count = sum(1 for t in target_token_strings if t not in source_token_strings)
 
-    try:
-        from deepfocus import FOCUS
-    except ImportError:
-        raise ImportError(
-            "deepfocus package not found. Please install it with: pip install deepfocus"
-        )
-
-    source_embeddings = source_model.get_input_embeddings().weight
-
-    new_input_embeddings = FOCUS(
-        source_embeddings=source_embeddings,
-        source_tokenizer=source_tokenizer,
-        target_tokenizer=target_tokenizer,
-        target_training_data_path=training_data_path,
-        fasttext_model_min_count=fasttext_model_min_count
+    has_separate_output = (
+        hasattr(source_model.config, 'tie_word_embeddings')
+        and not source_model.config.tie_word_embeddings
     )
 
-    new_output_embeddings = None
-    if hasattr(source_model.config, 'tie_word_embeddings') and not source_model.config.tie_word_embeddings:
-        print("Model uses separate output embeddings, applying FOCUS to output embeddings", file=sys.stderr)
-        source_output_embeddings = source_model.get_output_embeddings().weight
-        new_output_embeddings = FOCUS(
-            source_embeddings=source_output_embeddings,
+    if novel_token_count == 0:
+        print(
+            "All target tokens exist in source vocabulary — skipping FOCUS, "
+            "copying embeddings directly.",
+            file=sys.stderr,
+        )
+        new_input_embeddings, new_output_embeddings = _copy_embeddings_directly(
+            source_model=source_model,
+            source_token_strings=source_token_strings,
+            source_tokenizer=source_tokenizer,
+            target_token_strings=target_token_strings,
+            has_separate_output=has_separate_output,
+        )
+    else:
+        print(
+            f"Applying FOCUS to initialize embeddings "
+            f"({novel_token_count} novel tokens)",
+            file=sys.stderr,
+        )
+
+        try:
+            from deepfocus import FOCUS
+        except ImportError:
+            raise ImportError(
+                "deepfocus package not found. Please install it with: pip install deepfocus"
+            )
+
+        source_embeddings = source_model.get_input_embeddings().weight
+
+        new_input_embeddings = FOCUS(
+            source_embeddings=source_embeddings,
             source_tokenizer=source_tokenizer,
             target_tokenizer=target_tokenizer,
             target_training_data_path=training_data_path,
             fasttext_model_min_count=fasttext_model_min_count
         )
 
-    print(f"FOCUS initialization complete. New vocab size: {len(target_tokenizer)}", file=sys.stderr)
+        new_output_embeddings = None
+        if has_separate_output:
+            print("Model uses separate output embeddings, applying FOCUS to output embeddings", file=sys.stderr)
+            source_output_embeddings = source_model.get_output_embeddings().weight
+            new_output_embeddings = FOCUS(
+                source_embeddings=source_output_embeddings,
+                source_tokenizer=source_tokenizer,
+                target_tokenizer=target_tokenizer,
+                target_training_data_path=training_data_path,
+                fasttext_model_min_count=fasttext_model_min_count
+            )
+
+    print(f"Embedding initialization complete. New vocab size: {len(target_tokenizer)}", file=sys.stderr)
 
     # Cache the embeddings if cache_dir provided
     if cache_dir is not None:
