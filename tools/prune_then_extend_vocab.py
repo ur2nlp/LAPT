@@ -31,6 +31,12 @@ Usage:
         --output tokenizers/ptex_test \\
         --novel-vocab-budget 4096
 
+    # Prune-only mode: no novel tokens added (sanity-check baseline)
+    python tools/prune_then_extend_vocab.py \\
+        --base-text data/english_sample.txt \\
+        --output tokenizers/ptex_pruned_only \\
+        --novel-vocab-budget 0
+
     # Multiple novel-language files (concatenated internally)
     python tools/prune_then_extend_vocab.py \\
         --base-text data/english_sample_1m.txt \\
@@ -508,9 +514,13 @@ def main():
     )
     parser.add_argument(
         '--novel-text',
-        required=True,
+        required=False,
         nargs='+',
-        help='Path(s) to novel-language text file(s) (one line per example)',
+        default=None,
+        help=(
+            'Path(s) to novel-language text file(s) (one line per example). '
+            'Required unless --novel-vocab-budget 0 is used (prune-only mode).'
+        ),
     )
     parser.add_argument(
         '--base-tokenizer',
@@ -581,10 +591,19 @@ def main():
     if not os.path.isfile(args.base_text):
         print(f"Error: Base text file not found: {args.base_text}", file=sys.stderr)
         sys.exit(1)
-    for novel_path in args.novel_text:
-        if not os.path.isfile(novel_path):
-            print(f"Error: Novel text file not found: {novel_path}", file=sys.stderr)
-            sys.exit(1)
+    prune_only = args.novel_vocab_budget == 0
+    if not prune_only and args.novel_text is None:
+        print(
+            "Error: --novel-text is required unless --novel-vocab-budget 0 "
+            "(prune-only mode) is specified.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.novel_text is not None:
+        for novel_path in args.novel_text:
+            if not os.path.isfile(novel_path):
+                print(f"Error: Novel text file not found: {novel_path}", file=sys.stderr)
+                sys.exit(1)
 
     # Load base tokenizer and verify it's Unigram
     print(f"Loading base tokenizer: {args.base_tokenizer}", file=sys.stderr)
@@ -648,7 +667,7 @@ def main():
         novel_vocab_budget = args.novel_vocab_budget
         target_vocab_size = num_special + len(selected_ids) + novel_vocab_budget
 
-    if novel_vocab_budget <= 0:
+    if novel_vocab_budget < 0:
         print(
             f"Error: No vocabulary budget left for novel languages. "
             f"Base selected {len(selected_ids)} + {num_special} special = "
@@ -667,71 +686,78 @@ def main():
     print(f"  Base tokens (retained): {len(selected_ids):,}", file=sys.stderr)
     print(f"  Novel language budget: {novel_vocab_budget:,}", file=sys.stderr)
 
-    # Step 2: Train novel-language SPM
-    # Train with extra headroom (1.5x budget) because some novel tokens will
-    # overlap with base selection and get dropped. After combining, we truncate
-    # or fill to reach the exact target size.
-    spm_vocab_size = int(novel_vocab_budget * 1.5) + num_special
-    novel_spm_dir = os.path.join(args.output, 'novel_spm')
-
-    # Concatenate multiple novel text files if needed
-    novel_text_path = concatenate_novel_texts(args.novel_text, novel_spm_dir)
-
-    sp_model = train_novel_spm(
-        text_path=novel_text_path,
-        vocab_size=spm_vocab_size,
-        output_dir=novel_spm_dir,
-        base_tokenizer=base_tokenizer,
-        character_coverage=args.character_coverage,
-    )
-
-    # Extract non-special tokens from novel SPM
-    novel_tokens = extract_novel_tokens(sp_model)
-    print(
-        f"  Novel tokens extracted: {len(novel_tokens):,} "
-        f"(excluding special tokens)",
-        file=sys.stderr,
-    )
-
-    # Step 3: Combine into final tokenizer
-    # Build the base token string set for overlap detection
-    base_token_strings = set()
-    for attr in ('bos_token', 'eos_token', 'unk_token', 'pad_token'):
-        token_str = getattr(base_tokenizer, attr, None)
-        if token_str:
-            base_token_strings.add(token_str)
-    for token_id in selected_ids:
-        base_token_strings.add(base_vocab_scores[token_id][0])
-
-    # Count how many novel tokens overlap with base selection
-    novel_unique = [(t, s) for t, s in novel_tokens if t not in base_token_strings]
-    overlap_count = len(novel_tokens) - len(novel_unique)
-    print(f"  Novel-base overlap: {overlap_count:,} tokens", file=sys.stderr)
-    print(f"  Novel unique tokens available: {len(novel_unique):,}", file=sys.stderr)
-
-    # If we don't have enough novel tokens to fill the budget, backfill with
-    # additional base tokens (next most frequent ones not yet selected)
-    slots_for_novel = target_vocab_size - len(selected_ids) - num_special
-    if len(novel_unique) < slots_for_novel:
-        shortfall = slots_for_novel - len(novel_unique)
+    # Step 2: Train novel-language SPM (skipped in prune-only mode)
+    if novel_vocab_budget == 0:
         print(
-            f"  Shortfall: {shortfall} slots to fill with additional base tokens",
+            "\nPrune-only mode: skipping novel-language SPM training.",
             file=sys.stderr,
         )
-        # Add more base tokens by frequency order
-        all_base_by_freq = sorted(
-            token_counts.items(), key=lambda x: x[1], reverse=True,
+        novel_tokens = []
+    else:
+        # Train with extra headroom (1.5x budget) because some novel tokens will
+        # overlap with base selection and get dropped. After combining, we truncate
+        # or fill to reach the exact target size.
+        spm_vocab_size = int(novel_vocab_budget * 1.5) + num_special
+        novel_spm_dir = os.path.join(args.output, 'novel_spm')
+
+        # Concatenate multiple novel text files if needed
+        novel_text_path = concatenate_novel_texts(args.novel_text, novel_spm_dir)
+
+        sp_model = train_novel_spm(
+            text_path=novel_text_path,
+            vocab_size=spm_vocab_size,
+            output_dir=novel_spm_dir,
+            base_tokenizer=base_tokenizer,
+            character_coverage=args.character_coverage,
         )
-        added = 0
-        for token_id, _ in all_base_by_freq:
-            if added >= shortfall:
-                break
-            token_str = base_vocab_scores[token_id][0]
-            if token_id not in selected_ids and token_str not in base_token_strings:
-                selected_ids.add(token_id)
+
+        # Extract non-special tokens from novel SPM
+        novel_tokens = extract_novel_tokens(sp_model)
+        print(
+            f"  Novel tokens extracted: {len(novel_tokens):,} "
+            f"(excluding special tokens)",
+            file=sys.stderr,
+        )
+
+        # Step 3: Combine into final tokenizer
+        # Build the base token string set for overlap detection
+        base_token_strings = set()
+        for attr in ('bos_token', 'eos_token', 'unk_token', 'pad_token'):
+            token_str = getattr(base_tokenizer, attr, None)
+            if token_str:
                 base_token_strings.add(token_str)
-                added += 1
-        print(f"  Added {added} additional base tokens", file=sys.stderr)
+        for token_id in selected_ids:
+            base_token_strings.add(base_vocab_scores[token_id][0])
+
+        # Count how many novel tokens overlap with base selection
+        novel_unique = [(t, s) for t, s in novel_tokens if t not in base_token_strings]
+        overlap_count = len(novel_tokens) - len(novel_unique)
+        print(f"  Novel-base overlap: {overlap_count:,} tokens", file=sys.stderr)
+        print(f"  Novel unique tokens available: {len(novel_unique):,}", file=sys.stderr)
+
+        # If we don't have enough novel tokens to fill the budget, backfill with
+        # additional base tokens (next most frequent ones not yet selected)
+        slots_for_novel = target_vocab_size - len(selected_ids) - num_special
+        if len(novel_unique) < slots_for_novel:
+            shortfall = slots_for_novel - len(novel_unique)
+            print(
+                f"  Shortfall: {shortfall} slots to fill with additional base tokens",
+                file=sys.stderr,
+            )
+            # Add more base tokens by frequency order
+            all_base_by_freq = sorted(
+                token_counts.items(), key=lambda x: x[1], reverse=True,
+            )
+            added = 0
+            for token_id, _ in all_base_by_freq:
+                if added >= shortfall:
+                    break
+                token_str = base_vocab_scores[token_id][0]
+                if token_id not in selected_ids and token_str not in base_token_strings:
+                    selected_ids.add(token_id)
+                    base_token_strings.add(token_str)
+                    added += 1
+            print(f"  Added {added} additional base tokens", file=sys.stderr)
 
     new_tokenizer = build_combined_tokenizer(
         base_tokenizer=base_tokenizer,
