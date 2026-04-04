@@ -235,6 +235,13 @@ def _initialize_focus_model(args: DictConfig):
         # Tie weights for models that use tied embeddings
         model.tie_weights()
 
+    # Sync model config with the new tokenizer's special token IDs.
+    # The PTEx tokenizer reorders pad/eos/unk relative to XGLM, so without
+    # this update model.config.pad_token_id would point to the wrong token.
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.bos_token_id = tokenizer.bos_token_id
+    model.config.eos_token_id = tokenizer.eos_token_id
+
     del source_tokenizer
     print("FOCUS initialization complete", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
