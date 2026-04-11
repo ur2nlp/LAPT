@@ -19,6 +19,9 @@ from model_utils import (
     initialize_model_and_tokenizer, set_random_seeds,
     get_tokenized_path, is_local_model_path, get_init_model_identifier
 )
+from gradient_correction import (
+    install_gradient_correction, load_z_estimate, GradientCorrectionLogCallback
+)
 from artifact_configs import (
     TokenizerConfig, DatasetConfig, TokenizedDatasetConfig, ModelConfig,
     resolve_dev_size,
@@ -360,6 +363,26 @@ def lapt(args: DictConfig):
     # Initialize model and tokenizer (with optional FOCUS)
     model, tokenizer, tokenized_path = initialize_model_and_tokenizer(args)
 
+    # Install gradient correction for vocabulary-pruned continued training.
+    # Gated on BOTH an explicit training flag (non-standard feature, off by
+    # default) and the presence of z_estimate.json next to the tokenizer.
+    # See src/gradient_correction.py.
+    gradient_correction_enabled = False
+    if args.training.get('correct_pruned_gradients', False):
+        z_estimate_source = (
+            args.focus.tokenizer_path if args.focus.tokenizer_path
+            else _get_tokenizer_path(args)
+        )
+        mean_log_z = load_z_estimate(z_estimate_source) if z_estimate_source else None
+        if mean_log_z is None:
+            raise FileNotFoundError(
+                f"training.correct_pruned_gradients=true but no z_estimate.json "
+                f"found in tokenizer directory: {z_estimate_source}. "
+                f"Run tools/estimate_partition_function.py first."
+            )
+        install_gradient_correction(model, mean_log_z)
+        gradient_correction_enabled = True
+
     # Determine output directory for checkpoints
     output_dir = _get_output_dir(args)
 
@@ -485,6 +508,9 @@ def lapt(args: DictConfig):
 
     bpc_callback = BPCCallback(chars_per_token_ratios)
     trainer.add_callback(bpc_callback)
+
+    if gradient_correction_enabled:
+        trainer.add_callback(GradientCorrectionLogCallback(model))
 
     if args.training.get('early_stopping_patience', None):
         delay_ratio = args.training.get('early_stopping_delay_ratio', 0.0)
