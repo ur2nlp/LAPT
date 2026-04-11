@@ -33,3 +33,10 @@ early_stopping_delay_ratio: 0.0  # Don't allow early stopping until X% of traini
 freeze_main_model: false  # Set to true to freeze transformer layers initially
 model_freeze_prefix: "model.layer"  # Prefix for parameters to freeze (XGLM transformer layers)
 unfreeze_step_ratio: 0.05  # Ratio of max_steps at which to unfreeze (e.g., 0.1 = unfreeze after 10%)
+
+# Gradient correction for vocabulary-pruned continued training (non-standard).
+# When true AND z_estimate.json exists alongside the tokenizer, installs hooks
+# on lm_head that rescale logit gradients by Z_S/Z to undo pruning distortion.
+# See src/gradient_correction.py.
+correct_pruned_gradients: false
+
