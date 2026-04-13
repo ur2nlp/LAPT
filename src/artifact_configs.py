@@ -372,6 +372,11 @@ class TokenizerConfig(ArtifactConfig):
         if self.tokenizer_path:
             tokenizer_name = os.path.basename(os.path.normpath(self.tokenizer_path))
             samples_str = format_number(self.num_samples)
+            # Avoid doubling the base-model prefix (e.g. xglm564m_xglm564m_...)
+            # when the supplied tokenizer name already encodes the same base model.
+            prefix = f"{model_short}_"
+            if tokenizer_name.startswith(prefix):
+                return f"{tokenizer_name}-s{samples_str}"
             return f"{model_short}_{tokenizer_name}-s{samples_str}"
         suffix = self._build_suffix()
         return f"{model_short}_{suffix}"
@@ -580,7 +585,31 @@ class ModelConfig(ArtifactConfig):
         Returns:
             ModelConfig instance containing the full resolved config
         """
-        return cls(OmegaConf.to_container(args, resolve=True))
+        config = OmegaConf.to_container(args, resolve=True)
+
+        # When a pre-built tokenizer is plugged in, FOCUS bypasses SentencePiece
+        # training entirely — vocab_size, character_coverage, and the various
+        # seed-vocab / inherit-additional-special-tokens knobs are never
+        # consulted. Null them out in the saved config so they don't appear to
+        # document how the plugged-in tokenizer was trained (they don't).
+        focus_cfg = config.get('focus') if isinstance(config, dict) else None
+        if focus_cfg and focus_cfg.get('tokenizer_path'):
+            unused_focus_keys = [
+                'vocab_size',
+                'character_coverage',
+                'inherit_additional_special_tokens',
+                'use_seed_vocabulary',
+                'seed_vocab_multiplier',
+                'seed_lambda',
+                'seed_min_frequency',
+                'seed_round_mode',
+                'seed_score_mode',
+            ]
+            for key in unused_focus_keys:
+                if key in focus_cfg:
+                    focus_cfg[key] = None
+
+        return cls(config)
 
     def to_dict(self) -> dict:
         """Return config dictionary for saving to YAML."""
