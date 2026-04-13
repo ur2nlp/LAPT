@@ -12,9 +12,67 @@ import random
 import sys
 from itertools import chain
 
+import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedTokenizer
+
+from artifact_configs import _dict_diff, multinomial_mix_slug
+
+
+SOURCE_CONFIG_FILENAME = "source_config.yaml"
+
+
+def _validate_source_cache(untokenized_path: str, current: dict) -> None:
+    """
+    Validate that a cached source dataset was built with the same parameters
+    currently requested. Raises on mismatch so stale per-source caches can't
+    silently propagate into downstream mixes.
+
+    Pre-refactor caches without tracking are allowed through with a warning
+    so existing data isn't invalidated on upgrade; mismatches from that point
+    on require an explicit regeneration (e.g. fresh_dataset=true).
+    """
+    config_path = os.path.join(untokenized_path, SOURCE_CONFIG_FILENAME)
+    if not os.path.exists(config_path):
+        print(
+            f"Note: cached source at {untokenized_path} has no source-level "
+            "config tracking (pre-dates tracking support). If you recently "
+            "changed source parameters, pass fresh_dataset=true to regenerate.",
+            file=sys.stderr,
+        )
+        return
+
+    with open(config_path, 'r') as f:
+        cached = yaml.safe_load(f) or {}
+
+    diffs = _dict_diff(cached, current)
+    if not diffs:
+        return
+
+    raise ValueError(
+        f"\n{'=' * 70}\n"
+        f"SOURCE CACHE MISMATCH: {untokenized_path}\n"
+        f"{'=' * 70}\n"
+        f"This cached source dataset was built with different parameters:\n\n"
+        + "\n".join(f"  {diff}" for diff in diffs)
+        + "\n\n"
+        f"This matters because the same source cache is reused across every\n"
+        f"mix that references this source id, so stale data would silently\n"
+        f"feed downstream sampling.\n\n"
+        f"To proceed, either:\n\n"
+        f"  1. Regenerate this source by passing fresh_dataset=true\n"
+        f"     (this will clear the cache dir and rebuild).\n\n"
+        f"  2. Change the source id so it resolves to a different cache dir.\n"
+        f"{'=' * 70}\n"
+    )
+
+
+def _save_source_cache_config(untokenized_path: str, current: dict) -> None:
+    """Write the source-level tracked config alongside a freshly built cache."""
+    config_path = os.path.join(untokenized_path, SOURCE_CONFIG_FILENAME)
+    with open(config_path, 'w') as f:
+        yaml.dump(current, f, default_flow_style=False, sort_keys=False)
 
 
 def _get_source_id(config: DictConfig, fallback: str = None) -> str:
@@ -137,7 +195,9 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         sources = dataset_config.sources
         alpha = dataset_config.alpha
         total_samples = dataset_config.total_samples
-        return _load_multinomial_dataset(cache_dir, sources, alpha, total_samples, dev_size)
+        return _load_multinomial_dataset(
+            cache_dir, sources, alpha, total_samples, dev_size,
+        )
     elif dataset_type == 'instruction_jsonl':
         file_path = dataset_config.path
         return _load_instruction_jsonl_dataset(cache_dir, file_path)
@@ -157,21 +217,26 @@ def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
         Path to the untokenized dataset
     """
     untokenized_path = os.path.join(cache_dir, "untokenized")
+    tracked = {'type': 'oscar', 'language': language_code}
 
-    if not os.path.exists(untokenized_path):
-        print("Downloading and preparing OSCAR dataset", file=sys.stderr)
-        dataset = load_dataset(
-            "oscar-corpus/OSCAR-2201",
-            token=True,
-            language=language_code
-        )
-        dataset = dataset.map(
-            docs_to_lines,
-            batched=True,
-            remove_columns=dataset['train'].column_names # type: ignore
-        )
-        dataset.save_to_disk(untokenized_path)
-        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
+    if os.path.exists(untokenized_path):
+        _validate_source_cache(untokenized_path, tracked)
+        return untokenized_path
+
+    print("Downloading and preparing OSCAR dataset", file=sys.stderr)
+    dataset = load_dataset(
+        "oscar-corpus/OSCAR-2201",
+        token=True,
+        language=language_code
+    )
+    dataset = dataset.map(
+        docs_to_lines,
+        batched=True,
+        remove_columns=dataset['train'].column_names # type: ignore
+    )
+    dataset.save_to_disk(untokenized_path)
+    _save_source_cache_config(untokenized_path, tracked)
+    print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
 
     return untokenized_path
 
@@ -207,8 +272,20 @@ def _load_huggingface_dataset(
         Path to the untokenized dataset
     """
     untokenized_path = os.path.join(cache_dir, "untokenized")
+    tracked = {
+        'type': 'huggingface',
+        'name': name,
+        'config': config,
+        'split': split,
+        'text_column': text_column,
+        'max_samples': max_samples,
+        'min_words_per_line': min_words_per_line,
+        'oversampling_factor': oversampling_factor,
+    }
 
-    if not os.path.exists(untokenized_path):
+    if os.path.exists(untokenized_path):
+        _validate_source_cache(untokenized_path, tracked)
+    else:
         print(f"Downloading and preparing HuggingFace dataset: {name}", file=sys.stderr)
         if config:
             print(f"  Config: {config}", file=sys.stderr)
@@ -321,6 +398,7 @@ def _load_huggingface_dataset(
         # Wrap in DatasetDict for consistency with other loaders
         dataset_dict = DatasetDict({'train': dataset})
         dataset_dict.save_to_disk(untokenized_path)
+        _save_source_cache_config(untokenized_path, tracked)
         print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
 
     return untokenized_path
@@ -377,25 +455,30 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
         Path to the untokenized dataset
     """
     untokenized_path = os.path.join(cache_dir, "untokenized")
+    tracked = {'type': 'plaintext', 'path': file_path}
 
-    if not os.path.exists(untokenized_path):
-        print(f"Loading plaintext data from {file_path}", file=sys.stderr)
+    if os.path.exists(untokenized_path):
+        _validate_source_cache(untokenized_path, tracked)
+        return untokenized_path
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Plaintext file not found: {file_path}")
+    print(f"Loading plaintext data from {file_path}", file=sys.stderr)
 
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = [line.strip() for line in f if line.strip()]
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Plaintext file not found: {file_path}")
 
-        if not lines:
-            raise ValueError(f"Plaintext file {file_path} contains no non-empty lines")
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = [line.strip() for line in f if line.strip()]
 
-        print(f"Loaded {len(lines)} lines from plaintext file", file=sys.stderr)
+    if not lines:
+        raise ValueError(f"Plaintext file {file_path} contains no non-empty lines")
 
-        dataset = Dataset.from_dict({'text': lines})
-        dataset_dict = DatasetDict({'train': dataset})
-        dataset_dict.save_to_disk(untokenized_path)
-        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
+    print(f"Loaded {len(lines)} lines from plaintext file", file=sys.stderr)
+
+    dataset = Dataset.from_dict({'text': lines})
+    dataset_dict = DatasetDict({'train': dataset})
+    dataset_dict.save_to_disk(untokenized_path)
+    _save_source_cache_config(untokenized_path, tracked)
+    print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
 
     return untokenized_path
 
@@ -496,18 +579,23 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
         Path to the untokenized dataset (with 'prompt' and 'response' columns)
     """
     untokenized_path = os.path.join(cache_dir, "untokenized")
+    tracked = {'type': 'instruction_jsonl', 'path': file_path}
 
-    if not os.path.exists(untokenized_path):
-        print(f"Loading instruction data from {file_path}", file=sys.stderr)
+    if os.path.exists(untokenized_path):
+        _validate_source_cache(untokenized_path, tracked)
+        return untokenized_path
 
-        prompts, responses = _load_instruction_jsonl_file(file_path)
+    print(f"Loading instruction data from {file_path}", file=sys.stderr)
 
-        print(f"Loaded {len(prompts)} instruction examples from JSONL file", file=sys.stderr)
+    prompts, responses = _load_instruction_jsonl_file(file_path)
 
-        dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
-        dataset_dict = DatasetDict({'train': dataset})
-        dataset_dict.save_to_disk(untokenized_path)
-        print(f"Untokenized instruction dataset saved to {untokenized_path}", file=sys.stderr)
+    print(f"Loaded {len(prompts)} instruction examples from JSONL file", file=sys.stderr)
+
+    dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
+    dataset_dict = DatasetDict({'train': dataset})
+    dataset_dict.save_to_disk(untokenized_path)
+    _save_source_cache_config(untokenized_path, tracked)
+    print(f"Untokenized instruction dataset saved to {untokenized_path}", file=sys.stderr)
 
     return untokenized_path
 
@@ -529,43 +617,52 @@ def _load_concat_dataset(cache_dir: str, sources: list, parent_id: str = None) -
 
     untokenized_path = os.path.join(cache_dir, "untokenized")
 
-    if not os.path.exists(untokenized_path):
-        print(f"Concatenating {len(sources)} dataset sources", file=sys.stderr)
+    normalized_sources = [
+        OmegaConf.to_container(DictConfig(s), resolve=True) for s in sources
+    ]
+    tracked = {'type': 'concat', 'sources': normalized_sources}
 
-        datasets_to_concat = []
-        for idx, source_config in enumerate(sources):
-            # Wrap in DictConfig for recursive dispatching
-            source_dict_config = DictConfig(source_config)
+    if os.path.exists(untokenized_path):
+        _validate_source_cache(untokenized_path, tracked)
+        return untokenized_path
 
-            # Determine source cache name:
-            # 1. Use source's id field if present (or deprecated 'language')
-            # 2. Use parent_id_{idx} if parent has id
-            # 3. Fall back to source_{idx}
-            default_id = f"{parent_id}_{idx}" if parent_id else f"source_{idx}"
-            source_id = _get_source_id(source_dict_config, fallback=default_id)
+    print(f"Concatenating {len(sources)} dataset sources", file=sys.stderr)
 
-            source_cache = os.path.join(cache_dir, source_id)
+    datasets_to_concat = []
+    for idx, source_config in enumerate(sources):
+        # Wrap in DictConfig for recursive dispatching
+        source_dict_config = DictConfig(source_config)
 
-            # Recursively load each source (supports nested concat/multinomial)
-            source_path = load_untokenized_dataset(
-                dataset_config=source_dict_config,
-                cache_dir=source_cache
-            )
+        # Determine source cache name:
+        # 1. Use source's id field if present (or deprecated 'language')
+        # 2. Use parent_id_{idx} if parent has id
+        # 3. Fall back to source_{idx}
+        default_id = f"{parent_id}_{idx}" if parent_id else f"source_{idx}"
+        source_id = _get_source_id(source_dict_config, fallback=default_id)
 
-            source_dataset = load_from_disk(source_path)
-            datasets_to_concat.append(source_dataset['train'])
-            print(
-                f"  Source {idx} ({source_id}): {len(source_dataset['train'])} examples",
-                file=sys.stderr
-            )
+        source_cache = os.path.join(cache_dir, source_id)
 
-        concatenated = concatenate_datasets(datasets_to_concat)
-        dataset_dict = DatasetDict({'train': concatenated})
-        dataset_dict.save_to_disk(untokenized_path)
+        # Recursively load each source (supports nested concat/multinomial)
+        source_path = load_untokenized_dataset(
+            dataset_config=source_dict_config,
+            cache_dir=source_cache
+        )
+
+        source_dataset = load_from_disk(source_path)
+        datasets_to_concat.append(source_dataset['train'])
         print(
-            f"Concatenated dataset saved to {untokenized_path} ({len(concatenated)} total examples)",
+            f"  Source {idx} ({source_id}): {len(source_dataset['train'])} examples",
             file=sys.stderr
         )
+
+    concatenated = concatenate_datasets(datasets_to_concat)
+    dataset_dict = DatasetDict({'train': concatenated})
+    dataset_dict.save_to_disk(untokenized_path)
+    print(
+        f"Concatenated dataset saved to {untokenized_path} ({len(concatenated)} total examples)",
+        file=sys.stderr
+    )
+    _save_source_cache_config(untokenized_path, tracked)
 
     return untokenized_path
 
@@ -627,12 +724,27 @@ def _load_multinomial_dataset(
             file=sys.stderr
         )
 
-    untokenized_path = os.path.join(cache_dir, "untokenized")
+    # Place the upsampled output inside a mix-keyed subdirectory so that
+    # changing alpha / total_samples / sampling_prob / upsampling_factor does
+    # not clobber the previous mix. Source subdirs stay at the parent level
+    # (untouched below) so they remain shared across mixes.
+    mix_config = {
+        'alpha': alpha,
+        'total_samples': total_samples,
+        'dev_size': dev_size,
+        'sources': [
+            OmegaConf.to_container(DictConfig(s), resolve=True) for s in sources
+        ],
+    }
+    mix_dir = os.path.join(cache_dir, multinomial_mix_slug(mix_config))
+    os.makedirs(mix_dir, exist_ok=True)
+    untokenized_path = os.path.join(mix_dir, "untokenized")
 
     if not os.path.exists(untokenized_path):
         print(
             f"Multinomial sampling from {len(sources)} sources with alpha={alpha}", file=sys.stderr
         )
+        print(f"Mix cache directory: {mix_dir}", file=sys.stderr)
         if not skip_dev_split:
             print(f"Dev split: {dev_size:.1%} of each source (before upsampling)", file=sys.stderr)
         else:
