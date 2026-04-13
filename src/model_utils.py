@@ -19,7 +19,9 @@ from tokenizer_utils import (
     prepare_focus_training_data,
     train_new_tokenizer
 )
-from artifact_configs import TokenizerConfig, get_model_shortname, format_number
+from artifact_configs import (
+    TokenizerConfig, get_model_shortname, format_number, effective_dataset_cache_dir,
+)
 
 
 def is_local_model_path(hf_model: str) -> bool:
@@ -73,12 +75,13 @@ def get_tokenized_path(args: DictConfig) -> str:
         Path to tokenized dataset directory
     """
     tokenizer_config = TokenizerConfig.from_args(args)
+    cache_dir = effective_dataset_cache_dir(args)
 
     if tokenizer_config is not None:
-        return f"{args.dataset.cache_dir}/tokenized_{tokenizer_config.tokenizer_id()}"
+        return f"{cache_dir}/tokenized_{tokenizer_config.tokenizer_id()}"
     else:
         init_model_identifier = get_init_model_identifier(args)
-        return f"{args.dataset.cache_dir}/tokenized_{init_model_identifier}"
+        return f"{cache_dir}/tokenized_{init_model_identifier}"
 
 
 
@@ -148,12 +151,15 @@ def _initialize_focus_model(args: DictConfig):
             dataset_config=args.focus.dataset
         )
     else:
-        # Using training dataset - store in training dataset's cache dir
+        # Using training dataset - store in the effective cache dir so the
+        # subset sits alongside the mix-specific untokenized split it is
+        # sampled from, and is shared across FOCUS runs on that same mix.
+        training_cache_dir = effective_dataset_cache_dir(args)
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{args.dataset.cache_dir}/{subset_filename}",
+            output_jsonl_path=f"{training_cache_dir}/{subset_filename}",
             seed=args.seed,
-            train_dataset_cache=args.dataset.cache_dir
+            train_dataset_cache=training_cache_dir
         )
 
     # Load existing tokenizer or train a new one

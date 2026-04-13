@@ -456,10 +456,9 @@ class TestPlaintextDirLoader:
 
     def test_load_plaintext_dir_caching(self, tmp_path):
         """
-        Test that calling twice doesn't reload - uses cached version.
-
-        Strategy: Load once, add new file to directory, load again.
-        Second load should still have original data (from cache).
+        Re-loading with the same file set returns cached data; adding a new
+        file changes the concat source list and is caught as a source-cache
+        mismatch rather than silently serving stale data.
         """
         data_dir = tmp_path / "texts"
         data_dir.mkdir()
@@ -468,7 +467,6 @@ class TestPlaintextDirLoader:
 
         cache_dir = tmp_path / "cache"
 
-        # First load
         result_path1 = _load_plaintext_dir_dataset(
             cache_dir=str(cache_dir),
             directory=str(data_dir),
@@ -478,20 +476,22 @@ class TestPlaintextDirLoader:
         assert len(dataset1['train']) == 1
         assert dataset1['train']['text'][0] == "Original line"
 
-        # Add new file to directory
-        (data_dir / "file2.txt").write_text("New line")
-
-        # Second load - should use cache, not see new file
         result_path2 = _load_plaintext_dir_dataset(
             cache_dir=str(cache_dir),
             directory=str(data_dir),
             pattern="*.txt"
         )
         dataset2 = load_from_disk(result_path2)
-
-        # Should still have only 1 line (cached)
         assert len(dataset2['train']) == 1
         assert dataset2['train']['text'][0] == "Original line"
+
+        (data_dir / "file2.txt").write_text("New line")
+        with pytest.raises(ValueError, match="source cache"):
+            _load_plaintext_dir_dataset(
+                cache_dir=str(cache_dir),
+                directory=str(data_dir),
+                pattern="*.txt"
+            )
 
     def test_load_plaintext_dir_all_files_empty(self, tmp_path):
         """

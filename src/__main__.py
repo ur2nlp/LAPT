@@ -291,21 +291,10 @@ def _handle_cache_cleanup(args: DictConfig):
             print(f"  Removing {output_dir}", file=sys.stderr)
             shutil.rmtree(output_dir)
 
-        # Also clear FOCUS training data if applicable
-        tokenizer_config = TokenizerConfig.from_args(args)
-        if tokenizer_config is not None:
-            tokenizer_id = tokenizer_config.tokenizer_id()
-            # FOCUS data is stored in the cache_dir of the dataset it was sampled from
-            if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
-                # Using separate FOCUS dataset
-                focus_data_dir = f"{args.focus.dataset.cache_dir}/{tokenizer_id}"
-            else:
-                # Using training dataset
-                focus_data_dir = f"{args.dataset.cache_dir}/{tokenizer_id}"
-
-            if os.path.exists(focus_data_dir):
-                print(f"  Removing {focus_data_dir}", file=sys.stderr)
-                shutil.rmtree(focus_data_dir)
+        # Note: the FOCUS training_subset_*.jsonl file is now shared across
+        # FOCUS runs on the same dataset mix, so fresh_tokenizer does NOT
+        # delete it. Rebuilding the tokenizer from the same subset is fine;
+        # use fresh_dataset to regenerate the subset itself.
 
     elif fresh_model:
         # Clear only model outputs
@@ -330,12 +319,16 @@ def lapt(args: DictConfig):
     # Build dataset config for tracking
     dev_size = resolve_dev_size(args)
 
-    # Build dataset config for tracking
+    # Build dataset config for tracking. For multinomial datasets, the
+    # untokenized split lives in a mix-keyed subfolder of the parent cache_dir;
+    # DatasetConfig.effective_cache_dir() resolves to that subfolder so config
+    # tracking points at the mix-specific artifact.
     dataset_config = DatasetConfig.from_args(args)
-    dataset_config_path = f"{args.dataset.cache_dir}/untokenized/config.yaml"
+    effective_cache_dir = dataset_config.effective_cache_dir(args.dataset.cache_dir)
+    dataset_config_path = f"{effective_cache_dir}/untokenized/config.yaml"
 
     # Check if dataset cache exists
-    dataset_cache_exists = os.path.exists(f"{args.dataset.cache_dir}/untokenized")
+    dataset_cache_exists = os.path.exists(f"{effective_cache_dir}/untokenized")
 
     # Verify config matches if cache exists
     if dataset_cache_exists:
@@ -343,13 +336,16 @@ def lapt(args: DictConfig):
             dataset_config.check_cached(dataset_config_path)
         else:
             print(
-                f"Note: Using cached dataset at {args.dataset.cache_dir}/untokenized"
+                f"Note: Using cached dataset at {effective_cache_dir}/untokenized"
                 f" without config tracking\n"
                 f"      (artifact was created before config tracking was implemented)",
                 file=sys.stderr
             )
 
-    # Load or download untokenized dataset first (needed for FOCUS or standard training)
+    # Load or download untokenized dataset first (needed for FOCUS or standard training).
+    # For multinomial, load_untokenized_dataset internally routes the output
+    # to the mix subfolder; we still pass the parent cache_dir here so source
+    # subdirs remain shared at the parent level.
     untokenized_path = load_untokenized_dataset(
         dataset_config=args.dataset,
         cache_dir=args.dataset.cache_dir,

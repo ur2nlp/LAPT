@@ -8,6 +8,8 @@ Each artifact (tokenizer, dataset, model) has a config class that:
 4. Provides save() / check_cached() for config tracking
 """
 
+import hashlib
+import json
 import os
 import sys
 import warnings
@@ -180,6 +182,48 @@ def get_model_shortname(hf_model: str) -> str:
     """
     model_name = hf_model.split('/')[-1]
     return model_name.lower().replace('-', '').replace('.', '')
+
+
+def multinomial_mix_slug(dataset_config: dict) -> str:
+    """
+    Build a deterministic subdirectory name for a multinomial dataset mix.
+
+    The upsampled training split produced by multinomial sampling depends on
+    alpha, total_samples, dev_size, and per-source sampling_prob /
+    upsampling_factor / dev_size overrides, but NOT on the underlying source
+    datasets (which live in parent-level subdirectories and can be shared
+    across mixes). Caching mix-dependent artifacts inside {cache_dir}/{slug}/
+    instead of directly under {cache_dir}/ means sweeping alpha or sample
+    counts no longer clobbers the previous mix and source caches are
+    transparently shared.
+
+    Args:
+        dataset_config: Dict with at least 'alpha', 'total_samples', 'sources'.
+            Must correspond to a multinomial dataset.
+
+    Returns:
+        Slug like "mix_a0.5_s5m_ab12cd34".
+    """
+    alpha = dataset_config['alpha']
+    total_samples = dataset_config['total_samples']
+
+    mix_keys = {
+        'alpha': alpha,
+        'total_samples': total_samples,
+        'dev_size': dataset_config.get('dev_size'),
+        'sources': [
+            {
+                'id': source.get('id') or source.get('language'),
+                'sampling_prob': source.get('sampling_prob'),
+                'upsampling_factor': source.get('upsampling_factor'),
+                'dev_size': source.get('dev_size'),
+            }
+            for source in dataset_config.get('sources', [])
+        ],
+    }
+    canonical = json.dumps(mix_keys, sort_keys=True, default=str)
+    digest = hashlib.sha256(canonical.encode()).hexdigest()[:8]
+    return f"mix_a{alpha}_s{format_number(total_samples)}_{digest}"
 
 
 def format_number(n: int) -> str:
@@ -462,6 +506,42 @@ class DatasetConfig(ArtifactConfig):
     def to_dict(self) -> dict:
         """Return config dictionary for saving to YAML."""
         return dict(self._config)
+
+    def effective_cache_dir(self, base_cache_dir: str) -> str:
+        """
+        Resolve the cache directory for mix-dependent artifacts.
+
+        For multinomial datasets, returns a subdirectory keyed on the mix
+        parameters so untokenized/tokenized caches don't clobber each other
+        across alpha/sample sweeps, while the per-source subdirs remain at
+        the parent level and are transparently shared. For other dataset
+        types, returns the base cache dir unchanged.
+
+        Args:
+            base_cache_dir: The cache_dir as specified in the dataset config.
+
+        Returns:
+            Effective cache directory (possibly a mix subfolder of base).
+        """
+        if self._config.get('type') == 'multinomial':
+            return os.path.join(base_cache_dir, multinomial_mix_slug(self._config))
+        return base_cache_dir
+
+
+def effective_dataset_cache_dir(args: DictConfig) -> str:
+    """
+    Convenience wrapper: resolve the effective dataset cache dir from full args.
+
+    Computed from `args.dataset` without loading the dataset, so it can be
+    used in path-construction helpers that run before the dataset is built.
+    For non-multinomial datasets this returns `args.dataset.cache_dir`
+    unchanged without requiring that every dataset field be populated.
+    """
+    base_cache_dir = args.dataset.cache_dir
+    dataset_type = getattr(args.dataset, 'type', None)
+    if dataset_type != 'multinomial':
+        return base_cache_dir
+    return DatasetConfig.from_args(args).effective_cache_dir(base_cache_dir)
 
 
 class TokenizedDatasetConfig(ArtifactConfig):
