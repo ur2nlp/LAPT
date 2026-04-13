@@ -217,20 +217,34 @@ def _initialize_focus_model(args: DictConfig):
         cache_dir=embedding_cache_dir
     )
 
-    # Resize model vocabulary and replace embeddings
+    # Resize the existing embedding module in place, then overwrite its weight
+    # data with the new rows. Replacing the module via set_input_embeddings
+    # would drop the XGLMScaledWordEmbedding subclass (with its sqrt(d_model)
+    # forward-time scale), silently shrinking hidden states by ~32x.
     model.resize_token_embeddings(len(tokenizer))
 
-    # Set new input embeddings
-    new_input_embedding_layer = torch.nn.Embedding.from_pretrained(
-        new_input_embeddings,
-        padding_idx=tokenizer.pad_token_id
-    )
-    model.set_input_embeddings(new_input_embedding_layer)
+    current_input_embed = model.get_input_embeddings()
+    with torch.no_grad():
+        current_input_embed.weight.data.copy_(
+            new_input_embeddings.to(
+                device=current_input_embed.weight.device,
+                dtype=current_input_embed.weight.dtype,
+            )
+        )
+    if tokenizer.pad_token_id is not None:
+        current_input_embed.padding_idx = tokenizer.pad_token_id
 
     # Set new output embeddings if model doesn't tie weights
     if hasattr(model.config, 'tie_word_embeddings') and not model.config.tie_word_embeddings:
         if new_output_embeddings is not None:
-            model.get_output_embeddings().weight.data = new_output_embeddings  # type: ignore
+            current_output_embed = model.get_output_embeddings()
+            with torch.no_grad():
+                current_output_embed.weight.data.copy_(
+                    new_output_embeddings.to(
+                        device=current_output_embed.weight.device,
+                        dtype=current_output_embed.weight.dtype,
+                    )
+                )
     else:
         # Tie weights for models that use tied embeddings
         model.tie_weights()
