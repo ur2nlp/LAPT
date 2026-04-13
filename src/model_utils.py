@@ -131,14 +131,19 @@ def _initialize_focus_model(args: DictConfig):
     tokenizer_config = TokenizerConfig.from_args(args)
     tokenizer_id = tokenizer_config.tokenizer_id()
 
-    # Prepare JSONL training data for FOCUS
-    # Store FOCUS training data alongside the dataset it's sampled from
+    # Prepare JSONL training data for FOCUS. The subset only depends on the
+    # source dataset, num_samples, and seed, so it is shared across FOCUS runs
+    # that differ only in tokenizer hyperparameters.
+    subset_filename = (
+        f"training_subset_s{format_number(args.focus.num_samples)}"
+        f"_seed{args.seed}.jsonl"
+    )
     if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
         # Using separate FOCUS dataset - store in that dataset's cache dir
         focus_data_cache = args.focus.dataset.cache_dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{focus_data_cache}/{tokenizer_id}/training_subset.jsonl",
+            output_jsonl_path=f"{focus_data_cache}/{subset_filename}",
             seed=args.seed,
             dataset_config=args.focus.dataset
         )
@@ -146,7 +151,7 @@ def _initialize_focus_model(args: DictConfig):
         # Using training dataset - store in training dataset's cache dir
         jsonl_path = prepare_focus_training_data(
             num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{args.dataset.cache_dir}/{tokenizer_id}/training_subset.jsonl",
+            output_jsonl_path=f"{args.dataset.cache_dir}/{subset_filename}",
             seed=args.seed,
             train_dataset_cache=args.dataset.cache_dir
         )
