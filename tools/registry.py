@@ -46,6 +46,8 @@ DEFAULT_HIDDEN_PARAMS = {"eval_steps", "logging_steps", "save_steps"}
 
 # preferred display order for well-known params (others sorted alphabetically after)
 PREFERRED_ORDER = [
+    "hf_model",
+    "tokenizer",
     "lr",
     "effective_batch",
     "dropout",
@@ -165,6 +167,16 @@ def extract_params(config: dict) -> tuple[str, dict]:
     experiment_id = str(experiment_id)
 
     params = {}
+
+    # base model lives at the top level of the training config
+    hf_model = config.get("hf_model")
+    if isinstance(hf_model, str):
+        params["hf_model"] = hf_model
+
+    # record only the basename of the provided tokenizer to keep displays compact
+    tokenizer_path = config.get("focus", {}).get("tokenizer_path")
+    if isinstance(tokenizer_path, str) and tokenizer_path:
+        params["tokenizer"] = Path(tokenizer_path).name
 
     for section_name, _ in _EXTRACT_SECTIONS:
         section = config.get(section_name, {})
