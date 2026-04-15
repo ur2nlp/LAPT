@@ -7086,10 +7086,11 @@ v111:
     effective_batch: 120
     lr: 2.5e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: bsz-120
+  note: bsz up to 120, same dropout, lr 2.5-3.5e-5
+  observation: lr >= 3.0e-5 overfits, no improvement in dev loss; probably would need
+    higher dropout
 v112:
   params:
     hf_model: facebook/xglm-564M
@@ -7136,10 +7137,11 @@ v112:
     effective_batch: 120
     lr: 3.0e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: bsz-120
+  note: bsz up to 120, same dropout, lr 2.5-3.5e-5
+  observation: lr >= 3.0e-5 overfits, no improvement in dev loss; probably would need
+    higher dropout
 v113:
   params:
     hf_model: facebook/xglm-564M
@@ -7186,10 +7188,11 @@ v113:
     effective_batch: 120
     lr: 3.5e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: bsz-120
+  note: bsz up to 120, same dropout, lr 2.5-3.5e-5
+  observation: lr >= 3.0e-5 overfits, no improvement in dev loss; probably would need
+    higher dropout
 v115:
   params:
     hf_model: facebook/xglm-564M
@@ -7236,10 +7239,11 @@ v115:
     effective_batch: 60
     lr: 2.5e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: model-and-vocab-size
+  note: xglm-564m, 10k novel tokens; lr 2.5e-5 for comparability to v114/v116; see
+    v105 for comparable lr
+  observation: larger vocab starts with better loss but then flips (except for Norse)
 v116:
   params:
     hf_model: facebook/xglm-1.7B
@@ -7286,10 +7290,12 @@ v116:
     effective_batch: 60
     lr: 2.5e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: model-and-vocab-size
+  note: xglm-1.7b, 10k novel tokens; lr 2.5e-5, dropout 0.05 based on previous 1.7b
+    experiments
+  observation: severe overfit, probably needs higher dropout; larger vocab starts
+    with better loss but then flips
 v114:
   params:
     hf_model: facebook/xglm-1.7B
@@ -7336,10 +7342,12 @@ v114:
     effective_batch: 60
     lr: 2.5e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: model-and-vocab-size
+  note: xglm-1.7b, 5k novel tokens; lr 2.5e-5, dropout 0.05 based on previous 1.7b
+    experiments
+  observation: severe overfit, probably needs higher dropout; larger vocab starts
+    with better loss but then flips
 v117:
   params:
     hf_model: facebook/xglm-564M
@@ -7382,10 +7390,10 @@ v117:
     effective_batch: 60
     lr: 2.5e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x15, got-eng x10, non x15, lr2.5e-5
+  observation: comparable to v110 by virtue of upsampling, despite lower lr
 v118:
   params:
     hf_model: facebook/xglm-564M
@@ -7428,10 +7436,11 @@ v118:
     effective_batch: 60
     lr: 4.0e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x15, got-eng x10, non x15, lr4e-5
+  observation: overfits on all but Norse, indicating higher dropout needed (or lower
+    lr)
 v98:
   params:
     hf_model: facebook/xglm-564M
@@ -7572,10 +7581,10 @@ v119:
     effective_batch: 60
     lr: 4.0e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x15, got-eng x5, non x15, lr4e-5
+  observation: lowering got-eng does not solve overfitting
 v120:
   params:
     hf_model: facebook/xglm-564M
@@ -7618,10 +7627,11 @@ v120:
     effective_batch: 60
     lr: 4.0e-05
     focus_enabled: true
-  era: ''
-  group: ''
-  note: ''
-  observation: ''
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x20, got-eng x10, non x20, dropout 0.15, lr4e-5
+  observation: higher dropout doesn't make up for aggressive upsampling (except for
+    Norse)
 v121:
   params:
     hf_model: facebook/xglm-564M
@@ -7660,6 +7670,283 @@ v121:
     fasttext_model_min_count: 1
     upsampling_factor_got: 15.0
     upsampling_factor_non: 15.0
+    upsampling_factor_got-eng: 10.0
+    effective_batch: 60
+    lr: 4.0e-05
+    focus_enabled: true
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x15, got-eng x10, non x15, dropout 0.15, lr4e-5
+  observation: lowering got and non slightly hurts best loss for both, but training
+    nearly 100k steps beneficial to got-eng
+v122:
+  params:
+    hf_model: facebook/xglm-564M
+    tokenizer: xglm564m_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 10
+    gradient_accumulation_steps: 6
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.15
+    attention_dropout: 0.15
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 20
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 10.0
+    upsampling_factor_non: 10.0
+    upsampling_factor_got-eng: 10.0
+    effective_batch: 60
+    lr: 4.0e-05
+    focus_enabled: true
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x10, got-eng x10, non x10, dropout 0.15, lr4e-5
+  observation: probably overly conservative for got and non, but trains to completion
+v123:
+  params:
+    hf_model: facebook/xglm-564M
+    tokenizer: xglm564m_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 10
+    gradient_accumulation_steps: 6
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.15
+    attention_dropout: 0.15
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 20
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 5
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 15.0
+    upsampling_factor_non: 15.0
+    upsampling_factor_got-eng: 15.0
+    effective_batch: 60
+    lr: 4.0e-05
+    focus_enabled: true
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x15, got-eng x15, non x15, dropout 0.15, lr4e-5
+  observation: got/got-eng at x15 leads to plateau/early-stop, non continues improving
+v124:
+  params:
+    hf_model: facebook/xglm-564M
+    tokenizer: xglm564m_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 10
+    gradient_accumulation_steps: 6
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.15
+    attention_dropout: 0.15
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 20
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 5
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 15.0
+    upsampling_factor_non: 20.0
+    upsampling_factor_got-eng: 15.0
+    effective_batch: 60
+    lr: 4.0e-05
+    focus_enabled: true
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x15, got-eng x15, non x20, dropout 0.15, lr4e-5
+  observation: got/got-eng at x15 leads to plateau/early-stop, non continues improving
+v125:
+  params:
+    hf_model: facebook/xglm-564M
+    tokenizer: xglm564m_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 10
+    gradient_accumulation_steps: 6
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.15
+    attention_dropout: 0.15
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 20
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 5
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 15.0
+    upsampling_factor_non: 25.0
+    upsampling_factor_got-eng: 15.0
+    effective_batch: 60
+    lr: 4.0e-05
+    focus_enabled: true
+  era: embedding-scale-fix
+  group: mixture-tuning
+  note: got x15, got-eng x15, non x25, dropout 0.15, lr4e-5
+  observation: got/got-eng at x15 leads to plateau/early-stop, non continues improving
+v126:
+  params:
+    hf_model: facebook/xglm-564M
+    tokenizer: xglm564m_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 10
+    gradient_accumulation_steps: 6
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.15
+    attention_dropout: 0.15
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 20
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 5
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 15.0
+    upsampling_factor_non: 25.0
+    upsampling_factor_got-eng: 10.0
+    effective_batch: 60
+    lr: 4.0e-05
+    focus_enabled: true
+  era: ''
+  group: ''
+  note: ''
+  observation: ''
+v127:
+  params:
+    hf_model: facebook/xglm-564M
+    tokenizer: xglm564m_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 10
+    gradient_accumulation_steps: 6
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.15
+    attention_dropout: 0.15
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 20
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 5
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 15.0
+    upsampling_factor_non: 30.0
     upsampling_factor_got-eng: 10.0
     effective_batch: 60
     lr: 4.0e-05
