@@ -325,11 +325,11 @@ def finalize(tsv_path: str, output_path: str | None):
     pair, and writes one JSONL line per sentence pair.
     """
     with open(tsv_path, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+        reader = csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
         rows = list(reader)
 
-    # Filter: keep everything except explicitly deleted rows
-    delete_statuses = {"delete", "deleted", "drop", "remove", "x", "✗"}
+    # Filter: keep everything except explicitly deleted and unchecked rows
+    delete_statuses = {"unchecked", "delete", "deleted", "drop", "remove", "x", "✗"}
     kept = []
     dropped = 0
     for row in rows:
@@ -472,6 +472,7 @@ def main():
     try:
         writer = csv.DictWriter(
             out_file, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore",
+            quotechar=None, quoting=csv.QUOTE_NONE,
         )
         writer.writeheader()
         writer.writerows(rows)
