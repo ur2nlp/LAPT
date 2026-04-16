@@ -15,6 +15,7 @@ from dataset_utils import (
     prepare_eval_datasets,
     DataCollatorForInstructionTuning, is_instruction_dataset
 )
+from custom_trainer import FlooredPerExampleLossTrainer
 from model_utils import (
     initialize_model_and_tokenizer, set_random_seeds,
     get_tokenized_path, is_local_model_path, get_init_model_identifier
@@ -497,7 +498,25 @@ def lapt(args: DictConfig):
         trainer_kwargs['compute_metrics'] = compute_ttr_metrics
         trainer_kwargs['preprocess_logits_for_metrics'] = preprocess_logits_for_metrics
 
-    trainer = Trainer(**trainer_kwargs)
+    loss_type = args.training.get('loss_type', 'token_mean')
+    if loss_type == 'token_mean':
+        trainer = Trainer(**trainer_kwargs)
+    elif loss_type == 'per_example':
+        per_example_loss_floor = args.training.get('per_example_loss_floor', 1)
+        trainer = FlooredPerExampleLossTrainer(
+            per_example_loss_floor=per_example_loss_floor,
+            **trainer_kwargs,
+        )
+        print(
+            f"Using floored per-example training loss "
+            f"(per_example_loss_floor={per_example_loss_floor})",
+            file=sys.stderr,
+        )
+    else:
+        raise ValueError(
+            f"Unknown training.loss_type: {loss_type!r}. "
+            f"Expected 'token_mean' or 'per_example'."
+        )
 
     broken_loss_callback = DetectBrokenLossCallback(trainer)
     trainer.add_callback(broken_loss_callback)
