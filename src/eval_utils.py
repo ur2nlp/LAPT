@@ -138,15 +138,19 @@ def compute_chars_per_token(
 
         for i in range(len(split_ds)):
             input_ids = input_ids_list[i]
-            decoded = tokenizer.decode(input_ids, skip_special_tokens=True)
-            total_chars += len(decoded)
 
             if labels_list is not None:
                 labels = labels_list[i]
-                # Count non-masked labels, minus 1 for CLM shift
-                non_masked = sum(1 for label in labels if label != -100)
+                # Decode only the response tokens (non-masked positions) so that
+                # instruction prefix characters don't inflate chars_per_token.
+                response_ids = [input_ids[j] for j, label in enumerate(labels) if label != -100]
+                decoded = tokenizer.decode(response_ids, skip_special_tokens=True)
+                non_masked = len(response_ids)
             else:
+                decoded = tokenizer.decode(input_ids, skip_special_tokens=True)
                 non_masked = len(input_ids)
+
+            total_chars += len(decoded)
 
             # CLM shift: model predicts next token, so loss tokens = non_masked - 1
             loss_tokens = max(non_masked - 1, 0)
