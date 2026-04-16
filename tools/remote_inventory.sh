@@ -11,7 +11,10 @@
 
 set -euo pipefail
 
-BASE_DIR="/scratch/cdowney4/LAPT/models/old_germanic"
+BASE_DIRS=(
+    "/scratch/cdowney4/LAPT/models/old_germanic"
+    "/scratch/cdowney4/LAPT/models/gothic_instruct"
+)
 DAYS=7
 FILTER=""
 
@@ -23,11 +26,15 @@ while getopts "d:f:" opt; do
     esac
 done
 
-if [ "$DAYS" -eq 0 ]; then
-    dirs=$(find "$BASE_DIR" -maxdepth 1 -mindepth 1 -type d)
-else
-    dirs=$(find "$BASE_DIR" -maxdepth 1 -mindepth 1 -type d -mtime "-${DAYS}")
-fi
+dirs=""
+for BASE_DIR in "${BASE_DIRS[@]}"; do
+    [ -d "$BASE_DIR" ] || continue
+    if [ "$DAYS" -eq 0 ]; then
+        dirs="$dirs $(find "$BASE_DIR" -maxdepth 1 -mindepth 1 -type d)"
+    else
+        dirs="$dirs $(find "$BASE_DIR" -maxdepth 1 -mindepth 1 -type d -mtime "-${DAYS}")"
+    fi
+done
 
 for dir in $dirs; do
     dir_name=$(basename "$dir")
