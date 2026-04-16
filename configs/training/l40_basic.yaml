@@ -18,6 +18,16 @@ attention_dropout: 0.1
 activation_dropout: 0.0
 weight_decay: 0.01
 
+# Loss formulation
+# "token_mean" (default): HuggingFace default — mean CE over all non-masked tokens
+#   in the batch. Long examples dominate the gradient.
+# "per_example": mean over examples of (sum of response token CE) / max(t_i, k),
+#   where t_i is the example's non-masked label count and k is per_example_loss_floor.
+#   Evens out heterogeneous response lengths. Eval loss stays at token_mean so BPC
+#   remains comparable across runs.
+loss_type: token_mean
+per_example_loss_floor: 1  # k; used only when loss_type=per_example
+
 logging_steps: ${divide:${training.max_steps},400}
 eval_strategy: steps
 metric_for_best_model: loss
