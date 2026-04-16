@@ -1264,7 +1264,8 @@ def load_tokenized_dataset(
 def load_external_eval_set(
     eval_config: dict,
     tokenizer: PreTrainedTokenizer,
-    max_length: int
+    max_length: int,
+    add_labels: bool = False,
 ) -> Dataset:
     """
     Load and tokenize an external evaluation dataset.
@@ -1277,6 +1278,9 @@ def load_external_eval_set(
             - text_column: Column name for jsonl format (default: 'text')
         tokenizer: Tokenizer to use for tokenization
         max_length: Maximum sequence length for tokenization
+        add_labels: If True, add a 'labels' column (=input_ids) for plaintext/jsonl
+            formats so the set is compatible with DataCollatorForInstructionTuning.
+            instruction_jsonl format always includes masked labels regardless.
 
     Returns:
         Tokenized Dataset ready for evaluation
@@ -1340,10 +1344,16 @@ def load_external_eval_set(
         )
     else:
         # Plain text format: standard tokenization
-        dataset = dataset.map(
-            lambda examples: tokenizer(
+        if add_labels:
+            tokenize_fn = lambda examples: _tokenize_plaintext_with_labels(
+                examples, tokenizer, max_length
+            )
+        else:
+            tokenize_fn = lambda examples: tokenizer(
                 examples['text'], max_length=max_length, truncation=True
-            ),
+            )
+        dataset = dataset.map(
+            tokenize_fn,
             batched=True,
             remove_columns=['text'],
             desc=f"Tokenizing external eval set '{name}'"
@@ -1397,6 +1407,13 @@ def prepare_eval_datasets(
             eval_dataset = {'dev': eval_dataset}
             print("Converted single eval dataset to dict for external eval sets", file=sys.stderr)
 
+        # If the existing eval sets carry labels (instruction-tuning run), plaintext
+        # external eval sets must also have labels to be compatible with
+        # DataCollatorForInstructionTuning.
+        existing_has_labels = any(
+            'labels' in ds.column_names for ds in eval_dataset.values()
+        )
+
         # Load and add each external eval set
         for eval_config in external_eval_sets:
             name = eval_config['name']
@@ -1411,7 +1428,8 @@ def prepare_eval_datasets(
             external_dataset = load_external_eval_set(
                 eval_config=eval_config,
                 tokenizer=tokenizer,
-                max_length=max_length
+                max_length=max_length,
+                add_labels=existing_has_labels,
             )
             eval_dataset[name] = external_dataset
             print(
