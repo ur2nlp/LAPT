@@ -1086,14 +1086,18 @@ def _tokenize_instruction_examples(
                 truncation=False
             )
 
+            # Append EOS so the model learns to terminate responses
+            response_ids = response_tokens['input_ids'] + [tokenizer.eos_token_id]
+            response_mask = response_tokens['attention_mask'] + [1]
+
             # Concatenate
             # TODO: fix linting issue here
-            input_ids = prompt_tokens['input_ids'] + response_tokens['input_ids']
-            attention_mask = prompt_tokens['attention_mask'] + response_tokens['attention_mask']
+            input_ids = prompt_tokens['input_ids'] + response_ids
+            attention_mask = prompt_tokens['attention_mask'] + response_mask
 
             # Create labels: -100 for prompt (masked), actual tokens for response
             prompt_length = len(prompt_tokens['input_ids'])
-            labels = [-100] * prompt_length + response_tokens['input_ids']
+            labels = [-100] * prompt_length + response_ids
         else:
             # Plaintext example: standard tokenization, labels = input_ids
             if text is None:
