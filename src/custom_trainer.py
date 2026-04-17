@@ -116,6 +116,13 @@ class FlooredPerExampleLossTrainer(Trainer):
             )
         self.per_example_loss_floor = per_example_loss_floor
 
+        # Our compute_loss returns a mean over the micro-batch, not a
+        # num_items_in_batch-normalized sum. Force HF's training_step to divide
+        # by gradient_accumulation_steps so the accumulated gradient and logged
+        # loss match the true mean over the effective batch. Without this, both
+        # are inflated by a factor of gradient_accumulation_steps.
+        self.model_accepts_loss_kwargs = False
+
     def compute_loss(
         self,
         model,
