@@ -30,16 +30,16 @@ Output format (instruction_jsonl, one line per example):
     {"prompt": "...\\nResponse:", "response": " answer"}
 
 Usage:
-    python tools/word-spotting/expand_to_instruction.py \
+    python -m gothic.word_spotting.expand_to_instruction \
         --input data/gothic_word_spotting/train_verified_a.jsonl \
         --output data/gothic_word_spotting/train_word_spotting.jsonl
 
     # Original forward-only behaviour
-    python tools/word-spotting/expand_to_instruction.py \
+    python -m gothic.word_spotting.expand_to_instruction \
         --input finalized.jsonl --projections forward
 
     # Roman script only, random script per alignment
-    python tools/word-spotting/expand_to_instruction.py \
+    python -m gothic.word_spotting.expand_to_instruction \
         --input finalized.jsonl --script roman
 """
 

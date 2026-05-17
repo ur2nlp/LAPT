@@ -1,32 +1,18 @@
 """
-Tests for tools/word-spotting/expand_to_instruction.py.
+Tests for gothic.word_spotting.expand_to_instruction.
 
 Coverage:
 - blank_gothic_word: token match, punctuation preservation, no-match
 - make_example: each projection's response and prompt content
 - expand_entry: script fan-out, cloze skipping, discrimination distractor source
 - forward projection backward compatibility
-
-The script lives under tools/word-spotting/ (a non-package directory with a
-hyphen), so it is loaded by path with importlib rather than imported normally.
 """
 
-import importlib.util
 import random
-from pathlib import Path
 
 import pytest
 
-
-_MODULE_PATH = (
-    Path(__file__).parent.parent
-    / "tools"
-    / "word-spotting"
-    / "expand_to_instruction.py"
-)
-_spec = importlib.util.spec_from_file_location("expand_to_instruction", _MODULE_PATH)
-expand = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(expand)
+from gothic.word_spotting import expand_to_instruction as expand
 
 
 @pytest.fixture

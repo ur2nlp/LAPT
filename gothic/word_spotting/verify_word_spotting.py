@@ -33,11 +33,8 @@ import json
 import re
 import sys
 from collections import OrderedDict
-from pathlib import Path
 
-# Allow importing transliterate from the parent tools/ directory
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from transliterate import transliterate_gothic_to_latin
+from gothic.transliterate import transliterate_gothic_to_latin
 
 
 # Normalize Koebler orthographic conventions to match gotica surface forms.

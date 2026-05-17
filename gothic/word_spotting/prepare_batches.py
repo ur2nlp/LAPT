@@ -2,7 +2,7 @@
 """
 Prepare batch request JSONL for Gothic word-spotting annotation via the Claude API.
 
-Reads a prepared translation file (produced by tools/prepare_gothic_data.py with
+Reads a prepared translation file (produced by gothic/data/prepare_gothic_data.py with
 --translation-script both --translation-direction eng_to_gothic --delimiter ' || ')
 containing consecutive pairs of lines:
     English || Gothic (Roman script)
@@ -12,12 +12,12 @@ Groups these pairs into batches and writes Anthropic Batch API request objects a
 
 Usage:
     # First, prepare the input file:
-    python tools/prepare_gothic_data.py --data-types translation \\
+    python -m gothic.data.prepare_gothic_data --data-types translation \\
         --translation-script both --translation-direction eng_to_gothic \\
         --delimiter ' || ' --splits train
 
     # Then, create batch requests:
-    python -m tools.word_spotting.prepare_batches \\
+    python -m gothic.word_spotting.prepare_batches \\
         --input data/gothic_prepared/translation_all-codices_both-scripts_eng-to-gothic.txt
 """
 
@@ -140,7 +140,7 @@ def main():
     parser.add_argument(
         "--prompt",
         default=str(Path(__file__).resolve().parent / "prompt.txt"),
-        help="Path to system prompt file (default: tools/word_spotting/prompt.txt)",
+        help="Path to system prompt file (default: gothic/word_spotting/prompt.txt)",
     )
     parser.add_argument(
         "--output",

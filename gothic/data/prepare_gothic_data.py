@@ -19,12 +19,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# Import transliteration function
-try:
-    from transliterate import transliterate_latin_to_gothic
-except ImportError:
-    print("Error: transliterate module not found. Make sure transliterate.py is in the same directory.", file=sys.stderr)
-    sys.exit(1)
+from gothic.transliterate import transliterate_latin_to_gothic
 
 # Mapping from Gothic abbreviations to WEB book names (for translation alignment)
 GOTHIC_TO_WEB_BOOKS = {
@@ -469,28 +464,28 @@ def main():
         epilog="""
 Examples:
   # Generate train + test splits (90/10) with all data types
-  python prepare_gothic_data.py --splits train test --train-ratio 0.9 --test-ratio 0.1
+  python -m gothic.data.prepare_gothic_data --splits train test --train-ratio 0.9 --test-ratio 0.1
   # Output: monolingual_all-codices_both-scripts_train.txt, etc.
 
   # Generate only training data (no split suffix in filenames)
-  python prepare_gothic_data.py --splits train
+  python -m gothic.data.prepare_gothic_data --splits train
   # Output: monolingual_all-codices_both-scripts.txt, etc.
 
   # Generate translation data with delimiter for LLM processing
-  python prepare_gothic_data.py --data-types translation --translation-direction eng_to_gothic --delimiter ' | '
+  python -m gothic.data.prepare_gothic_data --data-types translation --translation-direction eng_to_gothic --delimiter ' | '
   # Output: English text | Gothic text (one per line)
 
   # Generate only Roman script monolingual with one codex per verse
-  python prepare_gothic_data.py --data-types monolingual --monolingual-script roman --sample-one-codex
+  python -m gothic.data.prepare_gothic_data --data-types monolingual --monolingual-script roman --sample-one-codex
   # Output: monolingual_one-codex_roman.txt
 
   # Generate transliteration data with instruction format (plaintext)
-  python prepare_gothic_data.py --data-types transliteration --instruction-format
+  python -m gothic.data.prepare_gothic_data --data-types transliteration --instruction-format
   # Output: transliteration_all-codices_both-directions.txt
   # Format: Transliterate to Gothic script: {roman} Response: {gothic}
 
   # Generate translation data with JSONL format for instruction tuning with loss masking
-  python prepare_gothic_data.py --data-types translation --instruction-format --output-format jsonl
+  python -m gothic.data.prepare_gothic_data --data-types translation --instruction-format --output-format jsonl
   # Output: translation_all-codices_both-scripts_both-directions.jsonl
   # Format: {"prompt": "Translate to Gothic: {english} Response:", "response": " {gothic_script}"}
   #     or: {"prompt": "Translate to Romanized Gothic: {english} Response:", "response": " {roman}"}

@@ -14,10 +14,10 @@ verify_word_spotting.py.
 
 Usage:
     # Test on first batch
-    python -m tools.word_spotting.run_annotation --input batch_requests.jsonl --range 0:1
+    python -m gothic.word_spotting.run_annotation --input batch_requests.jsonl --range 0:1
 
     # Full run with Batch API
-    python -m tools.word_spotting.run_annotation --mode batch --input batch_requests.jsonl
+    python -m gothic.word_spotting.run_annotation --mode batch --input batch_requests.jsonl
 """
 
 import argparse
