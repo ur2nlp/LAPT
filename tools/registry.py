@@ -11,6 +11,7 @@ Subcommands:
     diff      - Show only parameters that vary between selected runs
     verify    - Check registry params match local config files in outputs/configs/
     annotate  - Set era/group/note/observation for a run
+    sort      - Rewrite registry.yaml ordered by experiment ID or timestamp
 
 Usage:
     # Extract from local file
@@ -21,6 +22,12 @@ Usage:
 
     # Show runs in a group with metrics
     python tools/registry.py show --group dropout-sweep --metrics
+
+    # Show all runs ordered by when they were extracted
+    python tools/registry.py show --sort timestamp
+
+    # Permanently reorder the registry file by extraction timestamp
+    python tools/registry.py sort --by timestamp
 
     # Show runs hiding specific params (in addition to defaults)
     python tools/registry.py show v29L v30L --hide save_total_limit
@@ -34,6 +41,7 @@ Usage:
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -215,6 +223,11 @@ def extract_params(config: dict) -> tuple[str, dict]:
 def upsert_entry(registry: dict, experiment_id: str, params: dict) -> None:
     """Insert or update a registry entry's params without touching human fields.
 
+    The first time an experiment is extracted, an `extracted_at` UTC timestamp
+    is recorded. Re-extracting an existing run preserves whatever timestamp is
+    already stored (and does not add one if absent — entries predating this
+    field are left untouched for manual backfilling).
+
     Args:
         registry: The full registry dict (modified in place).
         experiment_id: Run identifier (e.g. "v81").
@@ -223,6 +236,7 @@ def upsert_entry(registry: dict, experiment_id: str, params: dict) -> None:
     if experiment_id not in registry:
         registry[experiment_id] = {
             "params": params,
+            "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "era": "",
             "group": "",
             "note": "",
@@ -376,8 +390,12 @@ def cmd_show(args: argparse.Namespace) -> None:
         print("No matching runs found.", file=sys.stderr)
         return
 
-    # sort by experiment id (natural sort: v1, v2, ..., v10, v81)
-    run_ids.sort(key=_natural_sort_key)
+    # sort by experiment id (natural sort: v1, v2, ..., v10, v81) or by
+    # extraction timestamp; runs missing a timestamp sort first
+    if args.sort == "timestamp":
+        run_ids.sort(key=lambda rid: (registry[rid].get("extracted_at", ""), _natural_sort_key(rid)))
+    else:
+        run_ids.sort(key=_natural_sort_key)
 
     # load metrics if requested
     metrics = {}
@@ -415,6 +433,11 @@ def cmd_show(args: argparse.Namespace) -> None:
         ordered_keys += sorted(k for k in params if k not in preferred_set and k not in hidden)
         for key in ordered_keys:
             print(f"  {key}: {format_param_value(params[key])}")
+
+        # extraction timestamp
+        extracted_at = entry.get("extracted_at", "")
+        if extracted_at:
+            print(f"  extracted_at: {extracted_at}")
 
         # human fields
         for field_name in HUMAN_FIELDS:
@@ -599,6 +622,42 @@ def cmd_verify(args: argparse.Namespace) -> None:
     )
 
 
+def sort_registry(registry: dict, by: str) -> dict:
+    """Return a new registry dict with entries ordered by ID or timestamp.
+
+    Args:
+        registry: The full registry dict.
+        by: Either "id" (natural sort of experiment IDs) or "timestamp"
+            (extraction timestamp; entries lacking one sort first).
+
+    Returns:
+        A new dict with the same entries inserted in the requested order.
+    """
+    if by == "timestamp":
+        ordered_ids = sorted(
+            registry,
+            key=lambda rid: (registry[rid].get("extracted_at", ""), _natural_sort_key(rid)),
+        )
+    else:
+        ordered_ids = sorted(registry, key=_natural_sort_key)
+    return {rid: registry[rid] for rid in ordered_ids}
+
+
+def cmd_sort(args: argparse.Namespace) -> None:
+    """Handle the 'sort' subcommand."""
+    registry = load_registry()
+    if not registry:
+        print("Registry is empty.", file=sys.stderr)
+        return
+
+    sorted_registry = sort_registry(registry, args.by)
+    save_registry(sorted_registry)
+    print(
+        f"Reordered {REGISTRY_PATH} by {args.by} ({len(sorted_registry)} run(s))",
+        file=sys.stderr,
+    )
+
+
 def _natural_sort_key(run_id: str) -> tuple:
     """Sort key that handles 'v81' style IDs numerically."""
     import re
@@ -674,6 +733,12 @@ def main():
             f"(always hides: {sorted(DEFAULT_HIDDEN_PARAMS)})"
         ),
     )
+    show_parser.add_argument(
+        "--sort",
+        choices=["id", "timestamp"],
+        default="id",
+        help="Sort order: experiment ID (default) or extraction timestamp",
+    )
 
     # diff
     diff_parser = subparsers.add_parser(
@@ -725,6 +790,18 @@ def main():
         help="Set run status (e.g. 'manually_closed' to prevent re-fetching)",
     )
 
+    # sort
+    sort_parser = subparsers.add_parser(
+        "sort",
+        help="Rewrite registry.yaml ordered by experiment ID or timestamp",
+    )
+    sort_parser.add_argument(
+        "--by",
+        choices=["id", "timestamp"],
+        default="id",
+        help="Sort key: experiment ID (default) or extraction timestamp",
+    )
+
     args = parser.parse_args()
 
     commands = {
@@ -733,6 +810,7 @@ def main():
         "diff": cmd_diff,
         "verify": cmd_verify,
         "annotate": cmd_annotate,
+        "sort": cmd_sort,
     }
     commands[args.command](args)
 
