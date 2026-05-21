@@ -210,6 +210,12 @@ def run_batch(
 def extract_annotations(results: list[dict]) -> list[str]:
     """Extract JSONL annotation lines from model response texts.
 
+    Accepts both original-task responses (with an "alignments" key) and
+    diversification-task responses (with a "new_alignments" key). For
+    diversification responses, the source request's custom_id is attached as
+    "_custom_id" so downstream merge logic can map responses back to records
+    via the diversify manifest.
+
     Uses raw_decode to robustly find JSON objects in the response, handling
     multiple objects per line, markdown code fences, commentary text, and
     truncated objects.
@@ -222,15 +228,20 @@ def extract_annotations(results: list[dict]) -> list[str]:
 
     for result in results:
         text = result["response_text"]
+        custom_id = result["custom_id"]
         pos = 0
         while pos < len(text):
-            # Find next opening brace
+            # find next opening brace
             idx = text.find("{", pos)
             if idx == -1:
                 break
             try:
                 obj, end = decoder.raw_decode(text, idx)
-                if "english_sentence" in obj and "alignments" in obj:
+                has_alignments = "alignments" in obj
+                has_new_alignments = "new_alignments" in obj
+                if "english_sentence" in obj and (has_alignments or has_new_alignments):
+                    if has_new_alignments:
+                        obj["_custom_id"] = custom_id
                     jsonl_lines.append(json.dumps(obj, ensure_ascii=False))
                 pos = end
             except json.JSONDecodeError:
@@ -256,8 +267,11 @@ def main():
     )
     parser.add_argument(
         "--output",
-        default="data/gothic_word_spotting/annotation_results.jsonl",
-        help="Output path for raw results JSONL (default: data/gothic_word_spotting/annotation_results.jsonl)",
+        default="data/gothic_word_spotting/raw_llm/annotation_results.jsonl",
+        help=(
+            "Output path for raw results JSONL "
+            "(default: data/gothic_word_spotting/raw_llm/annotation_results.jsonl)"
+        ),
     )
     parser.add_argument(
         "--annotations-output",

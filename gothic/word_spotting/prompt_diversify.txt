@@ -1,0 +1,181 @@
+# Gothic Word-Spotting Alignment Diversification Task
+
+## Background
+
+We previously generated word-level alignments for parallel Gothic-English Bible
+verses (see the original word-spotting task). Because that generation processed
+sentences in small batches without a global view, the model defaulted to the
+same "easy" alignment over and over again for common Gothic words. For example,
+the pair `qaþ` ↔ `said` was selected 45 times, `frauja` ↔ `lord` 27 times, and
+so on.
+
+These alignments are not *wrong* — `qaþ` does mean `said`. The problem is
+**training-signal redundancy**: a model fine-tuned on this data will see the
+same alignment repeatedly and learn very little new vocabulary from those
+sentences. Your job is to **diversify** the alignments for sentences containing
+over-used pairs by picking *different* target words from the same sentence.
+
+This is **not** a correction task. The existing alignments are mostly correct.
+You are asked to replace one over-used alignment with a more pedagogically
+varied alternative drawn from elsewhere in the same sentence.
+
+## Input Format
+
+Each request is focused on a single **over-used pair**, e.g.
+`qaþ ↔ said`. The request contains:
+
+1. The over-used pair (Gothic surface form ↔ English surface form) to diversify
+   away from.
+2. A list of **other globally over-used pairs** to also avoid creating new
+   instances of. These are pairs that are *already* over-represented across
+   the rest of the dataset — avoid producing more of them here.
+3. A batch of sentence pairs in which the focal over-used pair currently
+   appears. For each sentence pair you will see:
+   - The English sentence
+   - The Gothic sentence in Roman script
+   - The Gothic sentence in Gothic script
+   - The existing alignments for that sentence (the over-used one will be
+     marked `<TO REPLACE>`; any others are kept and shown as `<KEEP>`)
+
+Example input block:
+
+```
+OVER-USED PAIR (focal): qaþ ↔ said
+
+ALSO AVOID CREATING NEW INSTANCES OF (already over-represented globally):
+  frauja ↔ lord
+  garda ↔ house
+  sunus ↔ son
+  siponjos ↔ disciples
+  ... [full list]
+
+SENTENCE 1
+  english: Jesus said to them, "Come after me, and I will make you into fishers for men."
+  gothic_roman: jah qaþ im Iesus: hirjats afar mis, jah gatauja igqis wairþan nutans manne.
+  gothic_gothic: 𐌾𐌰𐌷 𐌵𐌰𐌸 𐌹𐌼 𐌹𐌴𐍃𐌿𐍃: 𐌷𐌹𐍂𐌾𐌰𐍄𐍃 𐌰𐍆𐌰𐍂 𐌼𐌹𐍃, 𐌾𐌰𐌷 𐌲𐌰𐍄𐌰𐌿𐌾𐌰 𐌹𐌲𐌵𐌹𐍃 𐍅𐌰𐌹𐍂𐌸𐌰𐌽 𐌽𐌿𐍄𐌰𐌽𐍃 𐌼𐌰𐌽𐌽𐌴.
+  existing alignments:
+    <TO REPLACE> said ↔ qaþ
+    <KEEP> fishers ↔ nutans
+
+SENTENCE 2
+  ...
+```
+
+## Task
+
+For **each sentence in the batch**, choose **1 or 2 new alignments** drawn from
+the same sentence, subject to the following rules:
+
+1. **Must not duplicate the focal over-used pair.** Do not realign
+   `qaþ ↔ said` (or whichever pair is named at the top of the input).
+2. **Must not duplicate any `<KEEP>` alignment** already listed for that
+   sentence.
+3. **Strongly avoid creating new instances of the globally over-represented
+   pairs** listed in the input header. These are exactly the alignments we are
+   trying to *reduce* the frequency of across the dataset — picking them here
+   defeats the purpose of the rerun.
+4. **Prioritize variety across the batch.** Try to choose different new
+   alignments for different sentences in the batch — do not simply pick the
+   same next-most-common word every time. If two sentences happen to share a
+   good alternative, that is acceptable, but actively look for diversity.
+5. **Apply the same quality bar as the original task** (see Word Selection
+   Criteria below). It is better to return *zero* new alignments for a
+   sentence than to return a forced or low-confidence one.
+6. **A "no alternative" answer is acceptable.** If the sentence genuinely has
+   no other alignment that meets the quality bar, return an empty
+   `new_alignments` list for that sentence. Do not invent alignments.
+
+## Word Selection Criteria
+
+This is a diversification pass, so the selection criteria differ from the
+original task in a few important ways. Read these carefully.
+
+**DO select:**
+- Content words with clear alignment: nouns, verbs, adjectives, adverbs.
+- **Morphologically interesting function words** — this is a change from the
+  original task. Gothic, unlike English, marks case on pronouns, articles,
+  and demonstratives, and these are genuinely pedagogically valuable. For
+  example:
+  - dative/accusative/genitive pronouns (`mis`, `mik`, `meina`; `imma`, `ina`,
+    `is`)
+  - inflected demonstratives and articles (`þamma`, `þana`, `þis`, `þaim`)
+  - prepositions used with a specific case
+
+  **Caveat — they are also high-frequency.** Many parallel diversification
+  requests are running in parallel, each seeing this same list. If you pick
+  the most obvious function-word alignment ("him" ↔ `ina`) every time, those
+  pairs will become the next round of over-represented offenders. Only select
+  function-word alignments when there is something **specifically interesting**
+  about the form in this sentence — a less-common case, an unusual inflected
+  form, a pedagogically illustrative contrast. Otherwise prefer a content word.
+
+- A mix of frequent and less frequent vocabulary; varied across the batch.
+
+**Multi-word alignments are permitted** when the correspondence is genuinely
+multi-word, in either direction:
+- Gothic case-marked noun ↔ English prepositional phrase
+  (e.g. `imma` ↔ "through him" / "with him" / "in him", when the dative form
+  is what carries the prepositional meaning in Gothic).
+- English multi-word verb / idiom ↔ single Gothic verb (e.g. "press in on" ↔
+  some single Gothic verb), or vice versa.
+
+**Be confident before including a multi-word alignment.** If you are unsure
+which English words exactly map onto the Gothic form, skip it. Multi-word
+alignments are pedagogically valuable but only when accurate.
+
+**AVOID:**
+- The focal over-used pair named at the top of the input.
+- Any `<KEEP>` alignment already shown for the sentence.
+- The globally over-represented pairs listed in the input header.
+- **Low-effort function-word alignments** where the Gothic form is not
+  morphologically interesting in this sentence (see caveat above).
+- Proper names (Jesus, Jerusalem) unless alignment is clear and instructive.
+- Ambiguous alignments (word appears multiple times in the sentence; unclear
+  correspondence; multi-word alignments you are not confident about).
+
+**Gothic morphology:**
+- Always use the Gothic word as it appears in the sentence, not the dictionary
+  citation form.
+- Inflected forms (`gumins`, `gumin`, etc.) are fine as long as the alignment
+  is unambiguous.
+
+## Output Format
+
+Output **one JSON object per sentence in the batch**, in input order, one per
+line (JSONL format). No commentary, no surrounding text.
+
+Each output object must contain:
+- `english_sentence`: the English sentence (verbatim from input)
+- `gothic_sentence_roman`: the Roman Gothic sentence (verbatim from input)
+- `gothic_sentence_gothic`: the Gothic-script Gothic sentence (verbatim from
+  input)
+- `new_alignments`: a list of 0–2 alignment objects, each containing:
+  - `target_word`: the English word/phrase to spot
+  - `gothic_word_roman`: the Gothic word in Roman script
+  - `gothic_word_gothic`: the Gothic word in Gothic script
+
+Note: You are returning **only the new alignments**. The `<KEEP>` alignments
+will be merged in by post-processing — do not repeat them in the output.
+
+### Example output (corresponding to the example input above)
+
+```jsonl
+{"english_sentence": "Jesus said to them, \"Come after me, and I will make you into fishers for men.\"", "gothic_sentence_roman": "jah qaþ im Iesus: hirjats afar mis, jah gatauja igqis wairþan nutans manne.", "gothic_sentence_gothic": "𐌾𐌰𐌷 𐌵𐌰𐌸 𐌹𐌼 𐌹𐌴𐍃𐌿𐍃: 𐌷𐌹𐍂𐌾𐌰𐍄𐍃 𐌰𐍆𐌰𐍂 𐌼𐌹𐍃, 𐌾𐌰𐌷 𐌲𐌰𐍄𐌰𐌿𐌾𐌰 𐌹𐌲𐌵𐌹𐍃 𐍅𐌰𐌹𐍂𐌸𐌰𐌽 𐌽𐌿𐍄𐌰𐌽𐍃 𐌼𐌰𐌽𐌽𐌴.", "new_alignments": [{"target_word": "men", "gothic_word_roman": "manne", "gothic_word_gothic": "𐌼𐌰𐌽𐌽𐌴"}]}
+```
+
+If a sentence has no good alternative:
+
+```jsonl
+{"english_sentence": "...", "gothic_sentence_roman": "...", "gothic_sentence_gothic": "...", "new_alignments": []}
+```
+
+## Reminders
+
+- **One JSON object per input sentence, in order.** Do not skip sentences;
+  return `new_alignments: []` if you cannot diversify.
+- **No additional text or commentary** — just JSONL.
+- **Preserve punctuation and escaping** in the sentence fields exactly as in
+  the input.
+- **Prioritize variety across the batch.** Different sentences should, where
+  possible, yield different new alignments. This is the whole point of the
+  task.
