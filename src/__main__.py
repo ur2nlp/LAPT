@@ -12,6 +12,7 @@ from transformers.trainer_utils import get_last_checkpoint
 
 from dataset_utils import (
     load_untokenized_dataset, load_tokenized_dataset,
+    load_tokenized_multinomial_dataset,
     prepare_eval_datasets,
     DataCollatorForInstructionTuning, is_instruction_dataset
 )
@@ -383,37 +384,54 @@ def lapt(args: DictConfig):
     # Determine output directory for checkpoints
     output_dir = _get_output_dir(args)
 
-    # Build tokenized dataset config for tracking
-    tokenized_dataset_config = TokenizedDatasetConfig.from_args(args)
-    tokenized_config_path = os.path.join(tokenized_path, "config.yaml")
+    # Multinomial training mixes go through a plan-based path that tokenizes
+    # each source's unique rows exactly once and represents the upsampled training
+    # split as a shuffled index array into the concatenation of per-source
+    # tokenized datasets. Other dataset types use the legacy single-artifact path.
+    if args.dataset.type == 'multinomial':
+        tokenizer_id = os.path.basename(tokenized_path).replace("tokenized_", "", 1)
+        dataset = load_tokenized_multinomial_dataset(
+            sources=OmegaConf.to_container(args.dataset.sources, resolve=True),
+            alpha=args.dataset.alpha,
+            total_samples=args.dataset.total_samples,
+            dev_size=dev_size,
+            base_cache_dir=args.dataset.cache_dir,
+            tokenizer=tokenizer,
+            tokenizer_id=tokenizer_id,
+            max_length=args.training.max_length,
+        )
+    else:
+        # Build tokenized dataset config for tracking
+        tokenized_dataset_config = TokenizedDatasetConfig.from_args(args)
+        tokenized_config_path = os.path.join(tokenized_path, "config.yaml")
 
-    # Check if tokenized dataset cache exists
-    tokenized_cache_exists = os.path.exists(tokenized_path)
+        # Check if tokenized dataset cache exists
+        tokenized_cache_exists = os.path.exists(tokenized_path)
 
-    # Verify config matches if cache exists
-    if tokenized_cache_exists:
-        if os.path.exists(tokenized_config_path):
-            tokenized_dataset_config.check_cached(tokenized_config_path)
-        else:
-            print(
-                f"Note: Using cached tokenized dataset at {tokenized_path}"
-                f" without config tracking\n"
-                f"      (artifact was created before config tracking was implemented)",
-                file=sys.stderr
-            )
+        # Verify config matches if cache exists
+        if tokenized_cache_exists:
+            if os.path.exists(tokenized_config_path):
+                tokenized_dataset_config.check_cached(tokenized_config_path)
+            else:
+                print(
+                    f"Note: Using cached tokenized dataset at {tokenized_path}"
+                    f" without config tracking\n"
+                    f"      (artifact was created before config tracking was implemented)",
+                    file=sys.stderr
+                )
 
-    # Tokenize dataset with appropriate tokenizer
-    dataset = load_tokenized_dataset(
-        untokenized_path=untokenized_path,
-        tokenized_path=tokenized_path,
-        tokenizer=tokenizer,
-        max_length=args.training.max_length,
-        dev_size=dev_size
-    )
+        # Tokenize dataset with appropriate tokenizer
+        dataset = load_tokenized_dataset(
+            untokenized_path=untokenized_path,
+            tokenized_path=tokenized_path,
+            tokenizer=tokenizer,
+            max_length=args.training.max_length,
+            dev_size=dev_size
+        )
 
-    # Save config if we just created the tokenized dataset
-    if not tokenized_cache_exists:
-        tokenized_dataset_config.save(tokenized_config_path)
+        # Save config if we just created the tokenized dataset
+        if not tokenized_cache_exists:
+            tokenized_dataset_config.save(tokenized_config_path)
 
     # Prepare eval datasets (handles per-language dev splits and external eval sets)
     # Check both direct override and config group for external eval sets

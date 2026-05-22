@@ -12,6 +12,7 @@ import random
 import sys
 from itertools import chain
 
+import numpy as np
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from omegaconf import DictConfig, OmegaConf
@@ -1132,6 +1133,436 @@ def _tokenize_instruction_examples(
         'attention_mask': all_attention_masks,
         'labels': all_labels
     }
+
+
+# Plan / per-source tokenization for multinomial mixes.
+# The training-time multinomial pipeline upsamples by repeating row indices
+# rather than duplicating tokenized rows. The pieces below implement that:
+#
+#   <cache_dir>/<source_id>/untokenized/                      (text, mix-agnostic)
+#   <cache_dir>/<source_id>/tokenized_<tok>_ml<L>_{labels,nolabels}/  (mix-agnostic)
+#   <mix_dir>/train_plan.npz                                  (shuffled global indices)
+#   <mix_dir>/dev/                                            (per-source tokenized dev)
+#
+# The training Dataset is built as
+# `concatenate_datasets(per_source_tokenized).select(global_indices)`,
+# which produces an Arrow indices-mapped view; no rows are duplicated.
+
+TOKENIZED_SOURCE_CONFIG_FILENAME = "tokenized_config.yaml"
+TRAIN_PLAN_FILENAME = "train_plan.npz"
+DEV_SUBDIR = "dev"
+
+
+def _tokenized_source_dirname(tokenizer_id: str, max_length: int, add_labels: bool) -> str:
+    """Build the per-source tokenized cache directory name."""
+    label_suffix = "labels" if add_labels else "nolabels"
+    return f"tokenized_{tokenizer_id}_ml{max_length}_{label_suffix}"
+
+
+def _source_has_instruction_columns(untokenized_path: str) -> bool:
+    """Return True if the source's untokenized 'train' split has prompt/response columns."""
+    data = load_from_disk(untokenized_path)
+    if isinstance(data, DatasetDict):
+        split = data['train'] if 'train' in data else data[list(data.keys())[0]]
+    else:
+        split = data
+    cols = split.column_names
+    return 'prompt' in cols and 'response' in cols
+
+
+def tokenize_source(
+    source_cache_dir: str,
+    tokenizer: PreTrainedTokenizer,
+    tokenizer_id: str,
+    max_length: int,
+    add_labels: bool,
+) -> str:
+    """
+    Tokenize a single source's untokenized rows once and cache them.
+
+    Detects instruction vs plaintext from the source's column schema:
+    - Instruction sources (prompt/response columns) always produce masked labels.
+    - Plaintext sources produce labels=input_ids when add_labels is True, otherwise
+      only input_ids and attention_mask.
+
+    The tokenized cache holds ALL rows of the source as a single (non-split) Dataset.
+    Train/dev partitioning is a mix-time concern and does not affect this cache.
+
+    Args:
+        source_cache_dir: Directory holding the source's 'untokenized/' subdirectory.
+            The tokenized output is written as a sibling directory.
+        tokenizer: Tokenizer to use.
+        tokenizer_id: Stable identifier embedded in the cache directory name.
+        max_length: Truncation length for tokenization.
+        add_labels: Whether to materialize a labels column for plaintext sources.
+            Required when the source will be mixed alongside an instruction source so
+            that the data collator sees a uniform schema.
+
+    Returns:
+        Path to the tokenized cache directory.
+    """
+    untokenized_path = os.path.join(source_cache_dir, "untokenized")
+    if not os.path.exists(untokenized_path):
+        raise FileNotFoundError(
+            f"Source untokenized cache missing at {untokenized_path}; "
+            "load the source via load_untokenized_dataset first."
+        )
+
+    dirname = _tokenized_source_dirname(tokenizer_id, max_length, add_labels)
+    tokenized_path = os.path.join(source_cache_dir, dirname)
+
+    tracked = {
+        'tokenizer_id': tokenizer_id,
+        'max_length': max_length,
+        'add_labels': add_labels,
+    }
+    if os.path.exists(tokenized_path):
+        _validate_tokenized_source_cache(tokenized_path, tracked)
+        return tokenized_path
+
+    print(
+        f"Tokenizing source at {source_cache_dir} -> {dirname} "
+        f"(tokenizer={tokenizer_id}, max_length={max_length}, add_labels={add_labels})",
+        file=sys.stderr,
+    )
+
+    ds = load_from_disk(untokenized_path)
+    # Per-source untokenized caches are stored as DatasetDict with a single 'train' split.
+    if isinstance(ds, DatasetDict):
+        if 'train' not in ds:
+            raise ValueError(
+                f"Source untokenized cache at {untokenized_path} has no 'train' split "
+                f"(found splits: {list(ds.keys())})"
+            )
+        data = ds['train']
+    else:
+        data = ds
+
+    cols = data.column_names
+    has_instruction = 'prompt' in cols and 'response' in cols
+    has_text = 'text' in cols
+
+    if has_instruction:
+        cols_to_remove = ['prompt', 'response'] + (['text'] if has_text else [])
+        tokenized = data.map(
+            lambda examples: _tokenize_instruction_examples(
+                examples, tokenizer, max_length
+            ),
+            batched=True,
+            remove_columns=cols_to_remove,
+        )
+    elif has_text:
+        if add_labels:
+            tokenized = data.map(
+                lambda examples: _tokenize_plaintext_with_labels(
+                    examples, tokenizer, max_length
+                ),
+                batched=True,
+                remove_columns='text',
+            )
+        else:
+            tokenized = data.map(
+                lambda examples: tokenizer(
+                    examples['text'], max_length=max_length, truncation=True
+                ),
+                batched=True,
+                remove_columns='text',
+            )
+    else:
+        raise ValueError(
+            f"Source at {untokenized_path} has neither instruction columns "
+            f"(prompt/response) nor a 'text' column. Found: {cols}"
+        )
+
+    tokenized.save_to_disk(tokenized_path)
+    _save_tokenized_source_cache_config(tokenized_path, tracked)
+    print(
+        f"  Tokenized {len(tokenized)} rows -> {tokenized_path}",
+        file=sys.stderr,
+    )
+    return tokenized_path
+
+
+def _validate_tokenized_source_cache(tokenized_path: str, current: dict) -> None:
+    """Validate that a cached per-source tokenized dataset matches current params."""
+    config_path = os.path.join(tokenized_path, TOKENIZED_SOURCE_CONFIG_FILENAME)
+    if not os.path.exists(config_path):
+        print(
+            f"Note: tokenized source cache at {tokenized_path} has no config "
+            "tracking file; assuming it matches current parameters.",
+            file=sys.stderr,
+        )
+        return
+    with open(config_path, 'r') as f:
+        cached = yaml.safe_load(f) or {}
+    diffs = _dict_diff(cached, current)
+    if not diffs:
+        return
+    raise ValueError(
+        f"\nTOKENIZED SOURCE CACHE MISMATCH: {tokenized_path}\n"
+        + "\n".join(f"  {diff}" for diff in diffs)
+        + "\nRemove this cache directory or change cache parameters to resolve."
+    )
+
+
+def _save_tokenized_source_cache_config(tokenized_path: str, current: dict) -> None:
+    """Write the per-source tokenized cache config file."""
+    config_path = os.path.join(tokenized_path, TOKENIZED_SOURCE_CONFIG_FILENAME)
+    with open(config_path, 'w') as f:
+        yaml.dump(current, f, default_flow_style=False, sort_keys=False)
+
+
+def _partition_source_indices(
+    num_rows: int,
+    dev_size: float,
+    seed: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute the train/dev row partition for a single source.
+
+    Uses a numpy RNG seeded deterministically so the partition is reproducible
+    and independent of HuggingFace's internal split implementation.
+
+    Args:
+        num_rows: Size of the source's tokenized dataset.
+        dev_size: -1 to skip dev split, fractional (0 < x < 1) for proportion,
+            or absolute (>= 1) for an explicit row count.
+        seed: RNG seed for the permutation.
+
+    Returns:
+        (train_indices, dev_indices) as uint32 numpy arrays. dev_indices is empty
+        when dev_size == -1.
+    """
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(num_rows).astype(np.uint32)
+    if dev_size == -1:
+        return perm, np.empty(0, dtype=np.uint32)
+    if dev_size >= 1:
+        dev_count = int(dev_size)
+    elif 0 < dev_size < 1:
+        dev_count = int(round(dev_size * num_rows))
+    else:
+        raise ValueError(f"Invalid dev_size {dev_size}")
+    dev_count = min(dev_count, num_rows)
+    dev_indices = perm[:dev_count]
+    train_indices = perm[dev_count:]
+    return train_indices, dev_indices
+
+
+def load_tokenized_multinomial_dataset(
+    sources: list,
+    alpha: float,
+    total_samples: int,
+    dev_size: float,
+    base_cache_dir: str,
+    tokenizer: PreTrainedTokenizer,
+    tokenizer_id: str,
+    max_length: int,
+    shuffle_seed: int = 1,
+) -> DatasetDict:
+    """
+    Build a tokenized multinomial mix without materializing the upsampled train set.
+
+    Each source's rows are tokenized exactly once and stored in a mix-agnostic
+    cache. The training mix is represented as a tiny plan file of shuffled global
+    indices into the concatenation of per-source tokenized datasets; at load time
+    the train split is realized as an Arrow indices-mapped view (no row duplication).
+    Per-source dev splits are tokenized once and persisted under the mix directory.
+
+    Args:
+        sources: List of source configuration dicts (same schema as the existing
+            multinomial path; supports per-source dev_size, sampling_prob, and
+            upsampling_factor overrides).
+        alpha: Temperature parameter for sampling among unpinned sources.
+        total_samples: Total training rows to sample (with repetition for upsampling).
+        dev_size: Global default dev split fraction (-1 to skip globally).
+        base_cache_dir: Parent cache directory holding per-source subdirs.
+        tokenizer: Tokenizer used to materialize the tokenized caches.
+        tokenizer_id: Stable identifier for the tokenizer (drives cache directory naming).
+        max_length: Truncation length.
+        shuffle_seed: Seed for shuffling the global training plan.
+
+    Returns:
+        DatasetDict with:
+            - 'train': indices-mapped virtual view of the upsampled training mix.
+            - One entry per source-with-dev (keyed by source id), holding the
+              tokenized dev split for that source.
+    """
+    if not sources:
+        raise ValueError("Cannot sample from datasets: sources list is empty")
+    if total_samples <= 0:
+        raise ValueError(f"total_samples must be positive, got {total_samples}")
+    if alpha <= 0:
+        raise ValueError(f"alpha must be positive, got {alpha}")
+    if dev_size is None:
+        raise ValueError("dev_size must be provided")
+
+    mix_config = {
+        'alpha': alpha,
+        'total_samples': total_samples,
+        'dev_size': dev_size,
+        'sources': [
+            OmegaConf.to_container(DictConfig(s), resolve=True) for s in sources
+        ],
+    }
+    mix_dir = os.path.join(base_cache_dir, multinomial_mix_slug(mix_config))
+    os.makedirs(mix_dir, exist_ok=True)
+
+    # Step 1: ensure per-source untokenized caches exist.
+    source_ids = []
+    source_untokenized_paths = []
+    source_cache_dirs = []
+    source_dev_sizes = []
+    for idx, source_config in enumerate(sources):
+        source_dict = DictConfig(source_config)
+        source_id = _get_source_id(source_dict, fallback=f"source_{idx}")
+        source_cache = os.path.join(base_cache_dir, source_id)
+        untokenized_path = load_untokenized_dataset(
+            dataset_config=source_dict,
+            cache_dir=source_cache,
+        )
+        source_ids.append(source_id)
+        source_cache_dirs.append(source_cache)
+        source_untokenized_paths.append(untokenized_path)
+        per_source_dev_size = getattr(source_dict, 'dev_size', dev_size)
+        source_dev_sizes.append(per_source_dev_size)
+
+    # Step 2: decide labels schema. Any instruction source forces add_labels for all.
+    any_instruction = any(
+        _source_has_instruction_columns(p) for p in source_untokenized_paths
+    )
+    add_labels = any_instruction
+    if any_instruction:
+        print(
+            "Mix contains instruction data; tokenizing all sources with labels.",
+            file=sys.stderr,
+        )
+
+    # Step 3: tokenize each source (cache-aware).
+    source_tokenized_paths = [
+        tokenize_source(
+            source_cache_dir=cache_dir,
+            tokenizer=tokenizer,
+            tokenizer_id=tokenizer_id,
+            max_length=max_length,
+            add_labels=add_labels,
+        )
+        for cache_dir in source_cache_dirs
+    ]
+    per_source_tokenized = [load_from_disk(p) for p in source_tokenized_paths]
+    source_sizes = [len(d) for d in per_source_tokenized]
+
+    # Step 4: partition each source's rows into train pool and dev rows.
+    train_pools = []
+    dev_indices_per_source = []
+    for size, src_dev in zip(source_sizes, source_dev_sizes):
+        train_idx, dev_idx = _partition_source_indices(size, src_dev, seed=1)
+        train_pools.append(train_idx)
+        dev_indices_per_source.append(dev_idx)
+
+    # Step 5: compute per-source training sample counts using existing logic.
+    train_pool_sizes = [len(p) for p in train_pools]
+    if all(s == 0 for s in train_pool_sizes):
+        raise ValueError("Cannot sample: every source has an empty train pool")
+    sampling_probs = _compute_sampling_probs(sources, train_pool_sizes, alpha)
+    samples_per_source = [int(p * total_samples) for p in sampling_probs]
+    remaining = total_samples - sum(samples_per_source)
+    for i in range(remaining):
+        samples_per_source[i % len(sources)] += 1
+
+    print("Train sampling distribution (plan-based):", file=sys.stderr)
+    for idx, count in enumerate(samples_per_source):
+        pct = 100 * count / total_samples
+        pinned = sources[idx].get('sampling_prob') is not None
+        marker = " (pinned)" if pinned else ""
+        print(
+            f"  {source_ids[idx]}: {count} samples ({pct:.2f}%){marker}",
+            file=sys.stderr,
+        )
+
+    # Step 6: build the plan if missing.
+    plan_path = os.path.join(mix_dir, TRAIN_PLAN_FILENAME)
+    offsets = np.zeros(len(sources) + 1, dtype=np.int64)
+    for i, sz in enumerate(source_sizes):
+        offsets[i + 1] = offsets[i] + sz
+
+    if not os.path.exists(plan_path):
+        rng = np.random.default_rng(shuffle_seed)
+        global_indices_chunks = []
+        for src_idx, (pool, n_samples) in enumerate(
+            zip(train_pools, samples_per_source)
+        ):
+            if n_samples == 0:
+                continue
+            pool_size = len(pool)
+            if n_samples <= pool_size:
+                # Sample without replacement within the source's train pool.
+                local_indices = rng.choice(pool_size, size=n_samples, replace=False)
+            else:
+                # Exhaust-first: every pool row at least once, then sample remainder.
+                extra = rng.integers(0, pool_size, size=n_samples - pool_size)
+                local_indices = np.concatenate(
+                    [np.arange(pool_size, dtype=np.int64), extra]
+                )
+            global_chunk = pool[local_indices].astype(np.int64) + offsets[src_idx]
+            global_indices_chunks.append(global_chunk)
+
+        global_indices = np.concatenate(global_indices_chunks)
+        rng.shuffle(global_indices)
+        np.savez(
+            plan_path,
+            global_indices=global_indices.astype(np.int64),
+            source_ids=np.array(source_ids, dtype=object),
+            source_sizes=np.array(source_sizes, dtype=np.int64),
+        )
+        print(
+            f"Saved train plan ({len(global_indices)} samples) to {plan_path}",
+            file=sys.stderr,
+        )
+    else:
+        print(f"Loading existing train plan from {plan_path}", file=sys.stderr)
+
+    plan = np.load(plan_path, allow_pickle=True)
+    cached_source_ids = list(plan['source_ids'])
+    cached_source_sizes = list(plan['source_sizes'])
+    if cached_source_ids != source_ids or cached_source_sizes != source_sizes:
+        raise ValueError(
+            f"Train plan at {plan_path} is inconsistent with current per-source "
+            f"tokenized caches (source ids or row counts changed). Delete the plan "
+            f"file and re-run to rebuild."
+        )
+    global_indices = plan['global_indices']
+
+    # Step 7: build or load the dev DatasetDict.
+    dev_path = os.path.join(mix_dir, DEV_SUBDIR)
+    if not os.path.exists(dev_path):
+        dev_dict = {}
+        for src_id, ds, dev_idx in zip(
+            source_ids, per_source_tokenized, dev_indices_per_source
+        ):
+            if len(dev_idx) == 0:
+                continue
+            dev_dict[src_id] = ds.select(dev_idx.tolist()).flatten_indices()
+        if dev_dict:
+            DatasetDict(dev_dict).save_to_disk(dev_path)
+            print(
+                f"Saved tokenized dev splits ({list(dev_dict.keys())}) to {dev_path}",
+                file=sys.stderr,
+            )
+
+    dev_dict = (
+        load_from_disk(dev_path) if os.path.exists(dev_path) else DatasetDict()
+    )
+
+    # Step 8: assemble the virtual training view. concatenate + select store an
+    # Arrow indices map; no row duplication occurs on disk or in memory.
+    concat = concatenate_datasets(per_source_tokenized)
+    train = concat.select(global_indices.tolist())
+
+    result = {'train': train}
+    for k, v in dev_dict.items():
+        result[k] = v
+    return DatasetDict(result)
 
 
 def load_tokenized_dataset(

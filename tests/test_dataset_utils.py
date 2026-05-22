@@ -47,6 +47,9 @@ from dataset_utils import (
     _compute_sampling_probs,
     load_untokenized_dataset,
     load_external_eval_set,
+    load_tokenized_multinomial_dataset,
+    tokenize_source,
+    _partition_source_indices,
     _tokenize_instruction_examples,
     DataCollatorForInstructionTuning,
 )
@@ -1508,3 +1511,149 @@ class TestComputeSamplingProbs:
 
         with pytest.raises(ValueError, match="unpinned sources are empty"):
             _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+
+
+class TestPartitionSourceIndices:
+    """
+    Tests for the deterministic train/dev row partition used by the plan-based
+    multinomial path.
+    """
+
+    def test_fractional_dev_size(self):
+        train, dev = _partition_source_indices(100, dev_size=0.1, seed=1)
+        assert len(train) == 90
+        assert len(dev) == 10
+        # No overlap and full coverage
+        combined = sorted(train.tolist() + dev.tolist())
+        assert combined == list(range(100))
+
+    def test_absolute_dev_size(self):
+        train, dev = _partition_source_indices(100, dev_size=20, seed=1)
+        assert len(train) == 80
+        assert len(dev) == 20
+
+    def test_skip_dev_split(self):
+        train, dev = _partition_source_indices(50, dev_size=-1, seed=1)
+        assert len(train) == 50
+        assert len(dev) == 0
+
+    def test_deterministic_seed(self):
+        a_train, a_dev = _partition_source_indices(100, dev_size=0.2, seed=1)
+        b_train, b_dev = _partition_source_indices(100, dev_size=0.2, seed=1)
+        assert a_train.tolist() == b_train.tolist()
+        assert a_dev.tolist() == b_dev.tolist()
+
+
+class TestLoadTokenizedMultinomialDataset:
+    """
+    End-to-end tests for load_tokenized_multinomial_dataset.
+
+    Verifies that:
+    - Each source is tokenized exactly once (no per-mix re-tokenization).
+    - Upsampling is represented by repeated indices, not duplicated rows.
+    - Changing alpha or total_samples does not invalidate per-source tokenized caches.
+    - Dev splits are persisted under the mix directory.
+    """
+
+    @staticmethod
+    def _write_source(cache_dir: Path, source_id: str, lines: list[str]) -> None:
+        """Persist a tiny plaintext source as an untokenized DatasetDict."""
+        source_dir = cache_dir / source_id
+        source_dir.mkdir(parents=True, exist_ok=True)
+        ds = DatasetDict({'train': Dataset.from_dict({'text': lines})})
+        ds.save_to_disk(str(source_dir / "untokenized"))
+
+    def test_basic_end_to_end(self, tmp_path, base_tokenizer):
+        cache_dir = tmp_path / "cache"
+        # Two sources of different sizes. Small one upsampled.
+        self._write_source(cache_dir, "big", [f"big line {i}" for i in range(20)])
+        self._write_source(cache_dir, "small", [f"small {i}" for i in range(5)])
+
+        sources = [
+            {'id': 'big', 'type': 'plaintext', 'path': 'unused'},
+            {'id': 'small', 'type': 'plaintext', 'path': 'unused'},
+        ]
+        result = load_tokenized_multinomial_dataset(
+            sources=sources,
+            alpha=0.5,
+            total_samples=40,
+            dev_size=0.2,
+            base_cache_dir=str(cache_dir),
+            tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m",
+            max_length=64,
+        )
+
+        assert 'train' in result
+        assert len(result['train']) == 40
+        # Per-source dev splits (sizes after partition: floor(0.2*20)=4, floor(0.2*5)=1)
+        assert 'big' in result and 'small' in result
+        assert len(result['big']) == 4
+        assert len(result['small']) == 1
+
+        # Per-source tokenized caches were created.
+        assert (cache_dir / "big" / "tokenized_xglm564m_ml64_nolabels").exists()
+        assert (cache_dir / "small" / "tokenized_xglm564m_ml64_nolabels").exists()
+
+        # Plan file lives under the mix directory.
+        mix_dirs = [
+            p for p in cache_dir.iterdir()
+            if p.is_dir() and p.name.startswith("mix_")
+        ]
+        assert len(mix_dirs) == 1
+        assert (mix_dirs[0] / "train_plan.npz").exists()
+
+    def test_alpha_change_reuses_tokenized_sources(self, tmp_path, base_tokenizer):
+        """Sweeping alpha must NOT re-tokenize per-source data."""
+        cache_dir = tmp_path / "cache"
+        self._write_source(cache_dir, "a", [f"a {i}" for i in range(10)])
+        self._write_source(cache_dir, "b", [f"b {i}" for i in range(10)])
+
+        sources = [
+            {'id': 'a', 'type': 'plaintext', 'path': 'unused'},
+            {'id': 'b', 'type': 'plaintext', 'path': 'unused'},
+        ]
+
+        load_tokenized_multinomial_dataset(
+            sources=sources, alpha=0.5, total_samples=20, dev_size=0.2,
+            base_cache_dir=str(cache_dir), tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m", max_length=64,
+        )
+        tokenized_dir_a = cache_dir / "a" / "tokenized_xglm564m_ml64_nolabels"
+        mtime_before = tokenized_dir_a.stat().st_mtime
+
+        # Sweep alpha; tokenized source cache should stay untouched.
+        load_tokenized_multinomial_dataset(
+            sources=sources, alpha=1.0, total_samples=20, dev_size=0.2,
+            base_cache_dir=str(cache_dir), tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m", max_length=64,
+        )
+        assert tokenized_dir_a.stat().st_mtime == mtime_before
+
+        # Two distinct mix directories now exist (one per alpha value).
+        mix_dirs = sorted(
+            p for p in cache_dir.iterdir()
+            if p.is_dir() and p.name.startswith("mix_")
+        )
+        assert len(mix_dirs) == 2
+
+    def test_upsampling_uses_repeated_indices(self, tmp_path, base_tokenizer):
+        """
+        Train rows are an indices-mapped view; uniqueness in the underlying
+        per-source caches matches the unique row counts (not the upsampled total).
+        """
+        cache_dir = tmp_path / "cache"
+        self._write_source(cache_dir, "small", [f"line {i}" for i in range(3)])
+
+        sources = [{'id': 'small', 'type': 'plaintext', 'path': 'unused'}]
+        result = load_tokenized_multinomial_dataset(
+            sources=sources, alpha=0.5, total_samples=30, dev_size=-1,
+            base_cache_dir=str(cache_dir), tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m", max_length=64,
+        )
+        # 30 indices into a 3-row source means every row appears ~10 times.
+        assert len(result['train']) == 30
+        underlying = load_from_disk(
+            str(cache_dir / "small" / "tokenized_xglm564m_ml64_nolabels")
+        )
+        assert len(underlying) == 3
