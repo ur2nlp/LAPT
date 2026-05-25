@@ -202,6 +202,24 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
     elif dataset_type == 'instruction_jsonl':
         file_path = dataset_config.path
         return _load_instruction_jsonl_dataset(cache_dir, file_path)
+    elif dataset_type == 'instruction_hf':
+        name = dataset_config.name
+        config = getattr(dataset_config, 'config', None)
+        split = getattr(dataset_config, 'split', 'train')
+        messages_column = getattr(dataset_config, 'messages_column', 'messages')
+        prompt_template = getattr(dataset_config, 'prompt_template', '{user} Response:')
+        response_template = getattr(dataset_config, 'response_template', ' {assistant}')
+        max_samples = getattr(dataset_config, 'max_samples', None)
+        return _load_instruction_hf_dataset(
+            cache_dir,
+            name,
+            config,
+            split,
+            messages_column,
+            prompt_template,
+            response_template,
+            max_samples,
+        )
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
@@ -597,6 +615,118 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     dataset_dict.save_to_disk(untokenized_path)
     _save_source_cache_config(untokenized_path, tracked)
     print(f"Untokenized instruction dataset saved to {untokenized_path}", file=sys.stderr)
+
+    return untokenized_path
+
+
+def _load_instruction_hf_dataset(
+    cache_dir: str,
+    name: str,
+    config: str | None = None,
+    split: str = 'train',
+    messages_column: str = 'messages',
+    prompt_template: str = '{user} Response:',
+    response_template: str = ' {assistant}',
+    max_samples: int | None = None,
+) -> str:
+    """
+    Load an instruction-tuning dataset from HuggingFace.
+
+    Expects a column of chat-formatted messages, where each entry is a list of
+    {role, content} dicts (the OpenAI Chat Completions convention used by
+    no_robots, Tulu, UltraChat, OpenHermes, etc.). Only examples shaped as
+    exactly [user, assistant] are kept; multi-turn and system-prompt examples
+    are dropped to match the framework's single-turn prompt/response schema.
+
+    Each kept example is flattened to {prompt, response} columns by applying
+    prompt_template and response_template, so the downstream tokenizer can
+    consume it identically to instruction_jsonl sources.
+
+    Args:
+        cache_dir: Base directory for caching dataset artifacts
+        name: HuggingFace dataset name (e.g., 'HuggingFaceH4/no_robots')
+        config: Dataset configuration/subset, optional
+        split: Which split to load (default: 'train')
+        messages_column: Column name holding the list of {role, content} dicts
+        prompt_template: Format string with a {user} placeholder, applied to
+            the user message to produce the 'prompt' column
+        response_template: Format string with an {assistant} placeholder,
+            applied to the assistant message to produce the 'response' column
+        max_samples: Optional cap on number of examples (random subsample)
+
+    Returns:
+        Path to the untokenized dataset (with 'prompt' and 'response' columns)
+    """
+    untokenized_path = os.path.join(cache_dir, "untokenized")
+    tracked = {
+        'type': 'instruction_hf',
+        'name': name,
+        'config': config,
+        'split': split,
+        'messages_column': messages_column,
+        'prompt_template': prompt_template,
+        'response_template': response_template,
+        'max_samples': max_samples,
+    }
+
+    if os.path.exists(untokenized_path):
+        _validate_source_cache(untokenized_path, tracked)
+        return untokenized_path
+
+    print(f"Downloading instruction dataset from HuggingFace: {name}", file=sys.stderr)
+    if config:
+        print(f"  Config: {config}", file=sys.stderr)
+    print(f"  Split: {split}", file=sys.stderr)
+
+    raw = load_dataset(name, config, split=split)
+
+    def is_simple_pair(ex):
+        msgs = ex[messages_column]
+        return (
+            len(msgs) == 2
+            and msgs[0]['role'] == 'user'
+            and msgs[1]['role'] == 'assistant'
+        )
+
+    n_before = len(raw)
+    raw = raw.filter(is_simple_pair)
+    n_after = len(raw)
+    print(
+        f"  Kept {n_after}/{n_before} examples after filtering to single-turn "
+        f"[user, assistant] pairs",
+        file=sys.stderr,
+    )
+
+    if n_after == 0:
+        raise ValueError(
+            f"No examples remained after filtering. Check that '{messages_column}' "
+            f"contains [{{'role': 'user', ...}}, {{'role': 'assistant', ...}}] pairs."
+        )
+
+    if max_samples is not None and n_after > max_samples:
+        print(
+            f"  Subsampling to {max_samples} examples from {n_after}",
+            file=sys.stderr,
+        )
+        indices = random.sample(range(n_after), max_samples)
+        raw = raw.select(sorted(indices))
+
+    def to_prompt_response(ex):
+        user = ex[messages_column][0]['content']
+        assistant = ex[messages_column][1]['content']
+        return {
+            'prompt': prompt_template.format(user=user),
+            'response': response_template.format(assistant=assistant),
+        }
+
+    dataset = raw.map(to_prompt_response, remove_columns=raw.column_names)
+    dataset_dict = DatasetDict({'train': dataset})
+    dataset_dict.save_to_disk(untokenized_path)
+    _save_source_cache_config(untokenized_path, tracked)
+    print(
+        f"Untokenized instruction dataset saved to {untokenized_path}",
+        file=sys.stderr,
+    )
 
     return untokenized_path
 
