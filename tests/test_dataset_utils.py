@@ -44,6 +44,7 @@ from dataset_utils import (
     _load_plaintext_dataset,
     _load_plaintext_dir_dataset,
     _load_concat_dataset,
+    _load_instruction_hf_dataset,
     _compute_sampling_probs,
     load_untokenized_dataset,
     load_external_eval_set,
@@ -1657,3 +1658,244 @@ class TestLoadTokenizedMultinomialDataset:
             str(cache_dir / "small" / "tokenized_xglm564m_ml64_nolabels")
         )
         assert len(underlying) == 3
+
+
+def _make_msgs(*pairs):
+    """Build a messages list from (role, content) tuples."""
+    return [{'role': r, 'content': c} for r, c in pairs]
+
+
+def _fake_hf_dataset(messages_list, column='messages'):
+    """Build an in-memory Dataset mimicking an HF instruction dataset."""
+    return Dataset.from_dict({column: messages_list})
+
+
+class TestInstructionHFLoader:
+    """
+    Tests for _load_instruction_hf_dataset.
+
+    Testing strategy:
+    - Mock dataset_utils.load_dataset to avoid network calls
+    - Build in-memory Datasets that mimic the {role, content} messages schema
+    - Verify filtering, template application, subsampling, caching, and errors
+    """
+
+    def test_basic_flatten_single_turn(self, tmp_path):
+        """Single-turn [user, assistant] pairs are flattened with default templates."""
+        messages_list = [
+            _make_msgs(('user', 'What is the capital of France?'),
+                       ('assistant', 'Paris.')),
+            _make_msgs(('user', 'Summarize the article.'),
+                       ('assistant', 'Short summary.')),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = _load_instruction_hf_dataset(
+                cache_dir=str(tmp_path / 'cache'),
+                name='fake/dataset',
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert ds.column_names == ['prompt', 'response']
+        assert len(ds) == 2
+        assert ds[0]['prompt'] == 'What is the capital of France? Response:'
+        assert ds[0]['response'] == ' Paris.'
+        assert ds[1]['prompt'] == 'Summarize the article. Response:'
+        assert ds[1]['response'] == ' Short summary.'
+
+    def test_filters_multi_turn_examples(self, tmp_path):
+        """Multi-turn conversations are dropped."""
+        messages_list = [
+            _make_msgs(('user', 'Hi'), ('assistant', 'Hello.')),
+            _make_msgs(
+                ('user', 'Q1'), ('assistant', 'A1'),
+                ('user', 'Q2'), ('assistant', 'A2'),
+            ),
+            _make_msgs(('user', 'Bye'), ('assistant', 'Goodbye.')),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = _load_instruction_hf_dataset(
+                cache_dir=str(tmp_path / 'cache'),
+                name='fake/dataset',
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert len(ds) == 2
+        prompts = {ex['prompt'] for ex in ds}
+        assert prompts == {'Hi Response:', 'Bye Response:'}
+
+    def test_filters_system_prompt_examples(self, tmp_path):
+        """Examples that start with a system message are dropped."""
+        messages_list = [
+            _make_msgs(('user', 'Hi'), ('assistant', 'Hello.')),
+            _make_msgs(
+                ('system', 'You are a helpful chatbot.'),
+                ('user', 'Hi'),
+                ('assistant', 'Hello!'),
+            ),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = _load_instruction_hf_dataset(
+                cache_dir=str(tmp_path / 'cache'),
+                name='fake/dataset',
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert len(ds) == 1
+        assert ds[0]['prompt'] == 'Hi Response:'
+
+    def test_custom_templates(self, tmp_path):
+        """Custom prompt_template and response_template are honored."""
+        messages_list = [
+            _make_msgs(('user', 'Hi'), ('assistant', 'Hello.')),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = _load_instruction_hf_dataset(
+                cache_dir=str(tmp_path / 'cache'),
+                name='fake/dataset',
+                prompt_template='### Instruction:\n{user}\n### Response:',
+                response_template='\n{assistant}',
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert ds[0]['prompt'] == '### Instruction:\nHi\n### Response:'
+        assert ds[0]['response'] == '\nHello.'
+
+    def test_custom_messages_column(self, tmp_path):
+        """A non-default messages column name works."""
+        messages_list = [
+            _make_msgs(('user', 'Hi'), ('assistant', 'Hello.')),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list, column='conversation')
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = _load_instruction_hf_dataset(
+                cache_dir=str(tmp_path / 'cache'),
+                name='fake/dataset',
+                messages_column='conversation',
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert len(ds) == 1
+        assert ds[0]['prompt'] == 'Hi Response:'
+
+    def test_max_samples_subsamples(self, tmp_path):
+        """max_samples randomly subsamples to the requested count."""
+        messages_list = [
+            _make_msgs(('user', f'Q{i}'), ('assistant', f'A{i}'))
+            for i in range(20)
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = _load_instruction_hf_dataset(
+                cache_dir=str(tmp_path / 'cache'),
+                name='fake/dataset',
+                max_samples=5,
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert len(ds) == 5
+
+    def test_max_samples_larger_than_data_keeps_all(self, tmp_path):
+        """max_samples greater than dataset size is a no-op."""
+        messages_list = [
+            _make_msgs(('user', f'Q{i}'), ('assistant', f'A{i}'))
+            for i in range(3)
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = _load_instruction_hf_dataset(
+                cache_dir=str(tmp_path / 'cache'),
+                name='fake/dataset',
+                max_samples=100,
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert len(ds) == 3
+
+    def test_caching_skips_redownload(self, tmp_path):
+        """Second invocation with same args reads from cache; load_dataset not called."""
+        messages_list = [
+            _make_msgs(('user', 'Hi'), ('assistant', 'Hello.')),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+        cache_dir = str(tmp_path / 'cache')
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+            _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
+            first_calls = mock_load.call_count
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+            _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
+            second_calls = mock_load.call_count
+
+        assert first_calls == 1
+        assert second_calls == 0
+
+    def test_cache_validation_rejects_mismatched_params(self, tmp_path):
+        """Reusing the cache dir with different params is rejected."""
+        messages_list = [
+            _make_msgs(('user', 'Hi'), ('assistant', 'Hello.')),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+        cache_dir = str(tmp_path / 'cache')
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            with pytest.raises(Exception):
+                _load_instruction_hf_dataset(
+                    cache_dir=cache_dir,
+                    name='fake/dataset',
+                    prompt_template='different {user}',
+                )
+
+    def test_empty_after_filtering_raises(self, tmp_path):
+        """If no examples survive filtering, raise a clear error."""
+        messages_list = [
+            _make_msgs(
+                ('user', 'Q1'), ('assistant', 'A1'),
+                ('user', 'Q2'), ('assistant', 'A2'),
+            ),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            with pytest.raises(ValueError, match='No examples remained'):
+                _load_instruction_hf_dataset(
+                    cache_dir=str(tmp_path / 'cache'),
+                    name='fake/dataset',
+                )
+
+    def test_dispatch_via_load_untokenized_dataset(self, tmp_path):
+        """The 'instruction_hf' type dispatches correctly through the main entrypoint."""
+        messages_list = [
+            _make_msgs(('user', 'Hi'), ('assistant', 'Hello.')),
+        ]
+        fake_ds = _fake_hf_dataset(messages_list)
+
+        dataset_config = DictConfig({
+            'type': 'instruction_hf',
+            'name': 'fake/dataset',
+        })
+
+        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+            result_path = load_untokenized_dataset(
+                dataset_config,
+                cache_dir=str(tmp_path / 'cache'),
+            )
+
+        ds = load_from_disk(result_path)['train']
+        assert len(ds) == 1
+        assert ds[0]['prompt'] == 'Hi Response:'
+        assert ds[0]['response'] == ' Hello.'
