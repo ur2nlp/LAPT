@@ -1,4 +1,4 @@
-"""Experiment registry for tracking run parameters and annotations.
+r"""Experiment registry for tracking run parameters and annotations.
 
 Maintains a lightweight YAML registry (outputs/registry.yaml) that maps
 experiment IDs to their key hyperparameters and human-written annotations.
@@ -16,6 +16,9 @@ Subcommands:
 Usage:
     # Extract from local file
     python tools/registry.py extract models/v81/training_config.yaml
+
+    # Extract every config matching a regex (re.search against file paths)
+    python tools/registry.py extract --pattern 'outputs/configs/v139-i[0-9a-z]\.yaml'
 
     # Bulk extract from stdin (multiple YAML docs separated by ---)
     ssh circ '...' | python tools/registry.py extract --stdin --multi
@@ -40,6 +43,7 @@ Usage:
 """
 
 import argparse
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,6 +100,27 @@ _SKIP_KEYS = {
 }
 
 HUMAN_FIELDS = ["era", "group", "note", "observation", "status"]
+
+
+def find_files_by_regex(pattern: str, root: str = ".") -> list[str]:
+    """Walk a directory tree and return files whose paths match the regex.
+
+    Mirrors the convention used in tools/training_plot.py: the pattern is
+    compiled and matched with re.search against the string form of each path.
+
+    Args:
+        pattern: Regex pattern to match against file paths.
+        root: Directory to search recursively (default: current directory).
+
+    Returns:
+        Sorted list of matching file paths as strings.
+    """
+    compiled = re.compile(pattern)
+    matches = []
+    for filepath in Path(root).rglob("*"):
+        if filepath.is_file() and compiled.search(str(filepath)):
+            matches.append(str(filepath))
+    return sorted(matches)
 
 
 def load_registry(path: Path = REGISTRY_PATH) -> dict:
@@ -331,7 +356,17 @@ def cmd_extract(args: argparse.Namespace) -> None:
             except yaml.YAMLError as e:
                 print(f"Warning: failed to parse YAML doc: {e}", file=sys.stderr)
     else:
-        for filepath in args.files:
+        filepaths: list[str] = list(args.files)
+        if args.pattern:
+            matched = find_files_by_regex(args.pattern)
+            if not matched:
+                print(
+                    f"Warning: no files matched pattern: {args.pattern}",
+                    file=sys.stderr,
+                )
+            filepaths.extend(matched)
+
+        for filepath in filepaths:
             path = Path(filepath)
             if not path.exists():
                 print(f"Warning: {path} not found, skipping", file=sys.stderr)
@@ -698,6 +733,14 @@ def main():
         "--multi",
         action="store_true",
         help="Parse multiple YAML documents separated by ---",
+    )
+    extract_parser.add_argument(
+        "--pattern",
+        help=(
+            "Regex pattern matched against file paths under the current directory "
+            "(re.search semantics). Matched files are added to any positional files. "
+            "Example: 'outputs/configs/v139-i1[0-9]\\.yaml'"
+        ),
     )
 
     # show
