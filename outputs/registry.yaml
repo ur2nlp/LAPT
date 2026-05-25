@@ -8740,7 +8740,12 @@ v42L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.20, lr 1e-5
-  observation: 'OVERALL SWEEP: v58L (mix 5/2.5/10/5, dropout 0.20, lr 7.5e-5) is the best 1.7B config across all holdouts, but no run in the sweep beats the 564M got holdout floor. v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'OVERALL SWEEP: v58L (mix 5/2.5/10/5, dropout 0.20, lr 7.5e-5) is the
+    best 1.7B config across all holdouts, but no run in the sweep beats the 564M got
+    holdout floor. v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout
+    0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
   status: manually_closed
 v43L:
   params:
@@ -8790,7 +8795,10 @@ v43L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.10, lr 2e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v44L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8839,7 +8847,10 @@ v44L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.08, lr 2e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v45L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8888,7 +8899,10 @@ v45L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.06, lr 2e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v46L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8937,7 +8951,10 @@ v46L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.10, lr 2.5e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v47L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8986,7 +9003,10 @@ v47L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.08, lr 2.5e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v48L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9035,7 +9055,10 @@ v48L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.10, lr 3e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v49L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9084,7 +9107,10 @@ v49L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.06, lr 4e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v50L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9133,7 +9159,10 @@ v50L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x25, non x40, dropout 0.04, lr 4e-5
-  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10
+    + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng);
+    lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly
+    (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v51L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9182,7 +9211,10 @@ v51L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x10, non x20, dropout 0.15, lr 4e-5
-  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping
+    the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply
+    to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout
+    0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v52L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9231,7 +9263,10 @@ v52L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x10, non x20, dropout 0.15, lr 5e-5
-  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping
+    the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply
+    to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout
+    0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v53L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9280,7 +9315,10 @@ v53L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x15, non x25, dropout 0.15, lr 5e-5
-  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping
+    the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply
+    to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout
+    0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v54L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9329,7 +9367,10 @@ v54L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x15, non x25, dropout 0.16, lr 5e-5
-  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping
+    the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply
+    to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout
+    0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v55L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9378,7 +9419,10 @@ v55L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x10, non x20, dropout 0.20, lr 5e-5
-  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping
+    the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply
+    to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout
+    0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v56L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9427,7 +9471,10 @@ v56L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x10, non x20, dropout 0.20, lr 7.5e-5
-  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping
+    the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply
+    to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout
+    0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v57L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9476,7 +9523,11 @@ v57L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, got-eng x5, got-translit x2.5, dropout 0.20, lr 5e-5
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v58L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9525,7 +9576,11 @@ v58L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.20, lr 7.5e-5
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v59L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9574,7 +9629,11 @@ v59L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.18, lr 5e-5
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v60L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9623,7 +9682,11 @@ v60L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.20, lr 1e-4
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v61L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9672,7 +9735,11 @@ v61L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.16, lr 5e-5
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v62L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9721,7 +9788,11 @@ v62L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.14, lr 5e-5
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v63L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9770,7 +9841,11 @@ v63L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.12, lr 5e-5
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v64L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9819,7 +9894,11 @@ v64L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.10, lr 5e-5
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v65L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9868,7 +9947,11 @@ v65L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.20, lr 2e-5, batch 120
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v66L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9917,7 +10000,11 @@ v66L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.20, lr 4e-5, batch 120
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v67L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9966,7 +10053,11 @@ v67L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.16, lr 1e-4
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v68L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10015,7 +10106,11 @@ v68L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x5, non x10, dropout 0.20, lr 6e-5, batch 120
-  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert
+    across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20,
+    lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps
+    to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely
+    undertrains. got holdout floor ~1.88.'
 v69L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10064,7 +10159,10 @@ v69L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x4, non x8, got-eng x4, got-translit x1, dropout 0.20, lr 2e-5
-  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L,
+    v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor
+    is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds
+    ~0.09).'
 v70L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10113,7 +10211,10 @@ v70L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x4, non x8, dropout 0.20, lr 6e-5
-  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L,
+    v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor
+    is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds
+    ~0.09).'
 v71L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10162,7 +10263,10 @@ v71L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x4, non x8, dropout 0.20, lr 1e-4
-  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L,
+    v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor
+    is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds
+    ~0.09).'
 v72L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10211,7 +10315,10 @@ v72L:
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
   note: got x4, non x8, dropout 0.20, lr 2e-4
-  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L,
+    v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor
+    is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds
+    ~0.09).'
 v139-ic:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10256,9 +10363,9 @@ v139-ic:
     focus_enabled: false
   extracted_at: '2026-05-19T10:46:08+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 1e-5, bsz 60, dropout 0.1, translation x32, alignment x32'
+  observation: 'OVERALL SWEEP v139-ic..is (v0.2 wordspotting, XGLM-564M init from v139 CPT): broad lr / dropout / upsampling scan on the smaller v0.2 wordspotting dataset. Key takeaway: dropout 0.2-0.3 with lr 5e-5 to 1e-4 is needed to pull the task holdouts (translation / transliteration / alignment) off their underfit plateau; lr 1e-5 with dropout 0.1 underfits regardless of batch or upsampling. Best single run on task bpc is io (lr 1e-4, dropout 0.3): translation 1.054, transliteration 0.282, alignment 0.353, with the best natural-Gothic holdout of the sweep (got_holdout 1.908). im (lr 8e-5, dropout 0.25) is the closest runner-up on transliteration (0.279); is (lr 5e-5, alignment x16) edges out on alignment alone (0.331). Lines up with the v0.4 follow-up sweep v139-i1+ where lr 1e-4 / dropout 0.25 became the working baseline. Note: in/io were originally extracted with lr 1e-6 due to a config-fetch mismatch; the trainer-state results jsons reflect the actual lr 1e-4 runs and the registry has been re-extracted accordingly. ic-ii block (lr 1e-5 to 4e-5, dropout 0.1): task holdouts underfit -- translation bpc plateaus at ~1.17-1.18, alignment ~0.37-0.40, transliteration ~0.40-0.52. Doubling batch (id), doubling alignment upsampling (if/ig/ih), and raising lr to 4e-5 (ii) do not move the task losses. eng_bpc holds at ~1.114-1.119.'
 v139-id:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10303,9 +10410,9 @@ v139-id:
     focus_enabled: false
   extracted_at: '2026-05-19T10:46:13+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 1e-5, bsz 120, dropout 0.1, translation x32, alignment x32'
+  observation: 'ic-ii block (lr 1e-5 to 4e-5, dropout 0.1): task holdouts underfit -- translation bpc plateaus at ~1.17-1.18, alignment ~0.37-0.40, transliteration ~0.40-0.52. Doubling batch (id), doubling alignment upsampling (if/ig/ih), and raising lr to 4e-5 (ii) do not move the task losses. eng_bpc holds at ~1.114-1.119.'
 v139-ie:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10350,9 +10457,9 @@ v139-ie:
     focus_enabled: false
   extracted_at: '2026-05-19T10:46:16+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 2e-5, bsz 60, dropout 0.1, translation x32, alignment x32'
+  observation: 'ic-ii block (lr 1e-5 to 4e-5, dropout 0.1): task holdouts underfit -- translation bpc plateaus at ~1.17-1.18, alignment ~0.37-0.40, transliteration ~0.40-0.52. Doubling batch (id), doubling alignment upsampling (if/ig/ih), and raising lr to 4e-5 (ii) do not move the task losses. eng_bpc holds at ~1.114-1.119.'
 v139-if:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10397,9 +10504,9 @@ v139-if:
     focus_enabled: false
   extracted_at: '2026-05-19T10:46:19+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 1e-5, bsz 60, dropout 0.1, translation x32, alignment x64'
+  observation: 'ic-ii block (lr 1e-5 to 4e-5, dropout 0.1): task holdouts underfit -- translation bpc plateaus at ~1.17-1.18, alignment ~0.37-0.40, transliteration ~0.40-0.52. Doubling batch (id), doubling alignment upsampling (if/ig/ih), and raising lr to 4e-5 (ii) do not move the task losses. eng_bpc holds at ~1.114-1.119.'
 v139-ig:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10444,9 +10551,9 @@ v139-ig:
     focus_enabled: false
   extracted_at: '2026-05-19T10:46:23+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 2e-5, bsz 60, dropout 0.1, translation x32, alignment x64'
+  observation: 'ic-ii block (lr 1e-5 to 4e-5, dropout 0.1): task holdouts underfit -- translation bpc plateaus at ~1.17-1.18, alignment ~0.37-0.40, transliteration ~0.40-0.52. Doubling batch (id), doubling alignment upsampling (if/ig/ih), and raising lr to 4e-5 (ii) do not move the task losses. eng_bpc holds at ~1.114-1.119.'
 v139-ih:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10491,9 +10598,9 @@ v139-ih:
     focus_enabled: false
   extracted_at: '2026-05-19T10:46:25+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 1e-5, bsz 60, dropout 0.1, translation x64, alignment x64'
+  observation: 'ic-ii block (lr 1e-5 to 4e-5, dropout 0.1): task holdouts underfit -- translation bpc plateaus at ~1.17-1.18, alignment ~0.37-0.40, transliteration ~0.40-0.52. Doubling batch (id), doubling alignment upsampling (if/ig/ih), and raising lr to 4e-5 (ii) do not move the task losses. eng_bpc holds at ~1.114-1.119.'
 v139-ii:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10538,9 +10645,9 @@ v139-ii:
     focus_enabled: false
   extracted_at: '2026-05-19T13:45:38+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 4e-5, bsz 60, dropout 0.1, translation x32, alignment x32'
+  observation: 'ic-ii block (lr 1e-5 to 4e-5, dropout 0.1): task holdouts underfit -- translation bpc plateaus at ~1.17-1.18, alignment ~0.37-0.40, transliteration ~0.40-0.52. Doubling batch (id), doubling alignment upsampling (if/ig/ih), and raising lr to 4e-5 (ii) do not move the task losses. eng_bpc holds at ~1.114-1.119.'
 v139-ij:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10585,9 +10692,9 @@ v139-ij:
     focus_enabled: false
   extracted_at: '2026-05-19T13:45:40+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 4e-5, bsz 60, dropout 0.2, translation x32, alignment x32'
+  observation: 'ij-io block (lr 4e-5 to 1e-4, dropout 0.2-0.3): task holdouts drop off the underfit plateau -- translation reaches ~1.05-1.10, alignment ~0.34-0.35, transliteration ~0.28-0.34. io (lr 1e-4, dropout 0.3) is the sweep best on translation (1.054) and natural-Gothic holdout (1.908); im (lr 8e-5, dropout 0.25) edges it on transliteration (0.279 vs 0.282). eng_bpc creeps from 1.124 to 1.145 as lr rises -- expected forgetting trade-off.'
 v139-ik:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10632,9 +10739,9 @@ v139-ik:
     focus_enabled: false
   extracted_at: '2026-05-19T13:45:43+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 6e-5, bsz 60, dropout 0.2, translation x32, alignment x32'
+  observation: 'ij-io block (lr 4e-5 to 1e-4, dropout 0.2-0.3): task holdouts drop off the underfit plateau -- translation reaches ~1.05-1.10, alignment ~0.34-0.35, transliteration ~0.28-0.34. io (lr 1e-4, dropout 0.3) is the sweep best on translation (1.054) and natural-Gothic holdout (1.908); im (lr 8e-5, dropout 0.25) edges it on transliteration (0.279 vs 0.282). eng_bpc creeps from 1.124 to 1.145 as lr rises -- expected forgetting trade-off.'
 v139-il:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10679,9 +10786,9 @@ v139-il:
     focus_enabled: false
   extracted_at: '2026-05-19T22:27:04+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 8e-5, bsz 60, dropout 0.2, translation x32, alignment x32'
+  observation: 'ij-io block (lr 4e-5 to 1e-4, dropout 0.2-0.3): task holdouts drop off the underfit plateau -- translation reaches ~1.05-1.10, alignment ~0.34-0.35, transliteration ~0.28-0.34. io (lr 1e-4, dropout 0.3) is the sweep best on translation (1.054) and natural-Gothic holdout (1.908); im (lr 8e-5, dropout 0.25) edges it on transliteration (0.279 vs 0.282). eng_bpc creeps from 1.124 to 1.145 as lr rises -- expected forgetting trade-off.'
 v139-im:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10726,9 +10833,9 @@ v139-im:
     focus_enabled: false
   extracted_at: '2026-05-19T22:27:07+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 8e-5, bsz 60, dropout 0.25, translation x32, alignment x32'
+  observation: 'ij-io block (lr 4e-5 to 1e-4, dropout 0.2-0.3): task holdouts drop off the underfit plateau -- translation reaches ~1.05-1.10, alignment ~0.34-0.35, transliteration ~0.28-0.34. io (lr 1e-4, dropout 0.3) is the sweep best on translation (1.054) and natural-Gothic holdout (1.908); im (lr 8e-5, dropout 0.25) edges it on transliteration (0.279 vs 0.282). eng_bpc creeps from 1.124 to 1.145 as lr rises -- expected forgetting trade-off.'
 v139-in:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10769,13 +10876,13 @@ v139-in:
     upsampling_factor_got-alignment: 32
     upsampling_factor_got: 16
     effective_batch: 60
-    lr: 1.0e-06
+    lr: 0.0001
     focus_enabled: false
   extracted_at: '2026-05-20T16:30:49+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 1e-4, bsz 60, dropout 0.25, translation x32, alignment x32'
+  observation: 'ij-io block (lr 4e-5 to 1e-4, dropout 0.2-0.3): task holdouts drop off the underfit plateau -- translation reaches ~1.05-1.10, alignment ~0.34-0.35, transliteration ~0.28-0.34. io (lr 1e-4, dropout 0.3) is the sweep best on translation (1.054) and natural-Gothic holdout (1.908); im (lr 8e-5, dropout 0.25) edges it on transliteration (0.279 vs 0.282). eng_bpc creeps from 1.124 to 1.145 as lr rises -- expected forgetting trade-off.'
 v139-io:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10816,13 +10923,13 @@ v139-io:
     upsampling_factor_got-alignment: 32
     upsampling_factor_got: 16
     effective_batch: 60
-    lr: 1.0e-06
+    lr: 0.0001
     focus_enabled: false
   extracted_at: '2026-05-20T16:30:52+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 1e-4, bsz 60, dropout 0.3, translation x32, alignment x32'
+  observation: 'ij-io block (lr 4e-5 to 1e-4, dropout 0.2-0.3): task holdouts drop off the underfit plateau -- translation reaches ~1.05-1.10, alignment ~0.34-0.35, transliteration ~0.28-0.34. io (lr 1e-4, dropout 0.3) is the sweep best on translation (1.054) and natural-Gothic holdout (1.908); im (lr 8e-5, dropout 0.25) edges it on transliteration (0.279 vs 0.282). eng_bpc creeps from 1.124 to 1.145 as lr rises -- expected forgetting trade-off.'
 v139-ip:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10867,9 +10974,9 @@ v139-ip:
     focus_enabled: false
   extracted_at: '2026-05-20T16:30:55+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 6e-5, bsz 60, dropout 0.2, got x15, translation x25, alignment x25'
+  observation: 'ip-iq block (reduced upsampling: got x15, translation/alignment x25, lr 6e-5/8e-5, dropout 0.2): matches the im/il neighbourhood; no clear gain or loss from reducing upsampling.'
 v139-iq:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10914,9 +11021,9 @@ v139-iq:
     focus_enabled: false
   extracted_at: '2026-05-20T16:30:59+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 8e-5, bsz 60, dropout 0.2, got x15, translation x25, alignment x25'
+  observation: 'ip-iq block (reduced upsampling: got x15, translation/alignment x25, lr 6e-5/8e-5, dropout 0.2): matches the im/il neighbourhood; no clear gain or loss from reducing upsampling.'
 v139-ir:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -10961,9 +11068,9 @@ v139-ir:
     focus_enabled: false
   extracted_at: '2026-05-21T14:43:36+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 5e-5, bsz 60, dropout 0.2, translation x32, alignment x48'
+  observation: 'ir-is block (lr 5e-5, alignment upsampling x48 vs x16, dropout 0.2): is (x16) reaches the best alignment bpc of the sweep (0.331); ir (x48) does not improve translation. Alignment upsampling shows weak sensitivity in this range.'
 v139-is:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
@@ -11008,9 +11115,9 @@ v139-is:
     focus_enabled: false
   extracted_at: '2026-05-21T14:43:38+00:00'
   era: wordspotting-v0.2
-  group: ''
-  note: ''
-  observation: ''
+  group: 'v0.2-initial-sweep'
+  note: 'lr 5e-5, bsz 60, dropout 0.2, translation x32, alignment x16'
+  observation: 'ir-is block (lr 5e-5, alignment upsampling x48 vs x16, dropout 0.2): is (x16) reaches the best alignment bpc of the sweep (0.331); ir (x48) does not improve translation. Alignment upsampling shows weak sensitivity in this range.'
 v139-i1:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
