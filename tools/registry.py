@@ -118,7 +118,11 @@ def find_files_by_regex(pattern: str, root: str = ".") -> list[str]:
     compiled = re.compile(pattern)
     matches = []
     for filepath in Path(root).rglob("*"):
-        if filepath.is_file() and compiled.search(str(filepath)):
+        if not filepath.is_file():
+            continue
+        if filepath.suffix not in {".yaml", ".yml"}:
+            continue
+        if compiled.search(str(filepath)):
             matches.append(str(filepath))
     return sorted(matches)
 
