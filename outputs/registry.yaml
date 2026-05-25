@@ -8739,9 +8739,8 @@ v42L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.20, lr 1e-5
+  observation: 'OVERALL SWEEP: v58L (mix 5/2.5/10/5, dropout 0.20, lr 7.5e-5) is the best 1.7B config across all holdouts, but no run in the sweep beats the 564M got holdout floor. v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
   status: manually_closed
 v43L:
   params:
@@ -8790,9 +8789,8 @@ v43L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.10, lr 2e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v44L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8840,9 +8838,8 @@ v44L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.08, lr 2e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v45L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8890,9 +8887,8 @@ v45L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.06, lr 2e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v46L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8940,9 +8936,8 @@ v46L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.10, lr 2.5e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v47L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -8990,9 +8985,8 @@ v47L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.08, lr 2.5e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v48L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9040,9 +9034,8 @@ v48L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.10, lr 3e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v49L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9090,9 +9083,8 @@ v49L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.06, lr 4e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v50L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9140,9 +9132,8 @@ v50L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x25, non x40, dropout 0.04, lr 4e-5
+  observation: 'v42L-v50L (mix got/translit/non/got-eng = 25/5/40/10): dropout 0.08-0.10 + lr 2-2.5e-5 is the sweet spot (v43L/v46L/v48L tied for best on got/got-eng); lr 1e-5 (v42L) undertrains; dropout <=0.06 combined with lr >=4e-5 overfits clearly (v49L got rebound ~0.08; v50L got rebound ~0.16, non ~0.12).'
 v51L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9190,9 +9181,8 @@ v51L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x10, non x20, dropout 0.15, lr 4e-5
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v52L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9240,9 +9230,8 @@ v52L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x10, non x20, dropout 0.15, lr 5e-5
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v53L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9290,9 +9279,8 @@ v53L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x15, non x25, dropout 0.15, lr 5e-5
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v54L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9340,9 +9328,8 @@ v54L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x15, non x25, dropout 0.16, lr 5e-5
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v55L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9390,9 +9377,8 @@ v55L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x10, non x20, dropout 0.20, lr 5e-5
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v56L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9440,9 +9426,8 @@ v56L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x10, non x20, dropout 0.20, lr 7.5e-5
+  observation: 'v51L-v56L (mix 10-15/5/20-25/10, lr 4-7.5e-5): vs block 1, dropping the Gothic upsample and raising lr lowers got/got-eng and drops got-translit sharply to ~1.10 (from ~1.65 in block 1); mix 10/20 ~ mix 15/25 at fixed dropout; dropout 0.20 marginally edges 0.15 (v55L block-2 best on got holdout).'
 v57L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9490,9 +9475,8 @@ v57L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, got-eng x5, got-translit x2.5, dropout 0.20, lr 5e-5
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v58L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9540,9 +9524,8 @@ v58L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.20, lr 7.5e-5
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v59L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9590,9 +9573,8 @@ v59L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.18, lr 5e-5
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v60L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9640,9 +9622,8 @@ v60L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.20, lr 1e-4
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v61L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9690,9 +9671,8 @@ v61L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.16, lr 5e-5
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v62L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9740,9 +9720,8 @@ v62L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.14, lr 5e-5
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v63L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9790,9 +9769,8 @@ v63L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.12, lr 5e-5
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v64L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9840,9 +9818,8 @@ v64L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.10, lr 5e-5
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v65L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9890,9 +9867,8 @@ v65L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.20, lr 2e-5, batch 120
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v66L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9940,9 +9916,8 @@ v66L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.20, lr 4e-5, batch 120
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v67L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -9990,9 +9965,8 @@ v67L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.16, lr 1e-4
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v68L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10040,9 +10014,8 @@ v68L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x5, non x10, dropout 0.20, lr 6e-5, batch 120
+  observation: 'v57L-v68L (mix 5/2.5/10/5): dropout in [0.10, 0.20] is nearly inert across all holdouts; lr 5-7.5e-5 at batch 60 optimal, with v58L (dropout 0.20, lr 7.5e-5) the overall sweep best; batch 120 (v66L, v68L) needs ~1.4x more steps to match batch 60 with no quality gain, and v65L (batch 120, lr 2e-5) severely undertrains. got holdout floor ~1.88.'
 v69L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10090,9 +10063,8 @@ v69L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x4, non x8, got-eng x4, got-translit x1, dropout 0.20, lr 2e-5
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
 v70L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10140,9 +10112,8 @@ v70L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x4, non x8, dropout 0.20, lr 6e-5
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
 v71L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10190,9 +10161,8 @@ v71L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x4, non x8, dropout 0.20, lr 1e-4
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
 v72L:
   params:
     hf_model: facebook/xglm-1.7B
@@ -10240,9 +10210,8 @@ v72L:
     focus_enabled: true
   era: separate-translit
   group: 1.7B-hyperparameter-sweep
-  note: ''
-  observation: Across different mixtures, LRs, batch sizes, dropout, 1.7B model does
-    not improve upon got holdout bpc (over 564M)
+  note: got x4, non x8, dropout 0.20, lr 2e-4
+  observation: 'v69L-v72L (mix 4/1/8/4): lr <=6e-5 leaves the model undertrained (v69L, v70L); lr 1e-4 (v71L) matches block 3 on got/got-eng but the got-translit floor is ~0.18 higher (translit x1 too thin); lr 2e-4 (v72L) overfits (got rebounds ~0.09).'
 v139-ic:
   params:
     hf_model: models/old_germanic/xglm564m_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v139/best-checkpoint
