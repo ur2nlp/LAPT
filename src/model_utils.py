@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from tokenizer_utils import (
+    LEGACY_INPUT_NAME,
     apply_focus_initialization,
     prepare_focus_training_data,
     resolve_cached_embedding_paths,
@@ -155,10 +156,25 @@ def _initialize_focus_model(args: DictConfig):
             os.path.join(embedding_cache_dir, "tokenizer.json")
         )
 
-    embeddings_cache_hit = (
-        resolve_cached_embedding_paths(embedding_cache_dir, emb_hash, reuse_policy)
-        is not None
+    resolved_emb_paths = resolve_cached_embedding_paths(
+        embedding_cache_dir, emb_hash, reuse_policy
     )
+    embeddings_cache_hit = resolved_emb_paths is not None
+
+    # When reuse_policy == 'any' resolves to a unique cached set, record the
+    # specific hash back into args so the saved training_config.yaml documents
+    # exactly which embeddings this run used. Legacy unhashed sidecars have no
+    # hash; leave 'any' in place rather than fabricate one.
+    if reuse_policy == 'any' and resolved_emb_paths is not None:
+        input_pt = resolved_emb_paths[0]
+        basename = os.path.basename(input_pt)
+        if basename.endswith('.input.pt') and basename != LEGACY_INPUT_NAME:
+            resolved_hash = basename[: -len('.input.pt')]
+            args.focus.reuse_embeddings = resolved_hash
+            print(
+                f"Resolved focus.reuse_embeddings='any' -> '{resolved_hash}'",
+                file=sys.stderr,
+            )
 
     jsonl_needed = not (tokenizer_cache_exists and embeddings_cache_hit)
     jsonl_path: Optional[str] = None
