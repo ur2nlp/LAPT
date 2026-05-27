@@ -28,8 +28,11 @@ Notes:
     - For tokenizers with no novel tokens (prune-only), embeddings are copied directly
       from the base model without requiring any training data.
     - For tokenizers with novel tokens, pre-computed FOCUS embeddings must be cached
-      in the tokenizer directory (focus_input_embeddings.pt). These are created
-      automatically when running training with focus.tokenizer_path set.
+      in the tokenizer directory (under focus_embs/<hash>.input.pt, or the legacy
+      focus_input_embeddings.pt at the tokenizer root). These are created
+      automatically when running training with focus.tokenizer_path set. This tool
+      passes reuse_policy="any" — it requires that exactly one cached embedding
+      set exist for the tokenizer.
     - Eval perplexity is computed over whole tokenized lines up to --max-length tokens.
       Each line is treated as an independent example with standard causal LM loss.
 """
@@ -59,8 +62,9 @@ def build_vocab_adapted_model(
     Load a base model and apply vocabulary adaptation using a pre-built tokenizer.
 
     Embedding matrices are resized and replaced by copying weights for tokens
-    that appear in both vocabularies. For tokenizers with novel tokens, cached
-    FOCUS embeddings (focus_input_embeddings.pt) must exist in tokenizer_path.
+    that appear in both vocabularies. For tokenizers with novel tokens, exactly
+    one cached FOCUS embedding set must exist under tokenizer_path (either
+    focus_embs/<hash>.input.pt or the legacy focus_input_embeddings.pt).
 
     Args:
         base_model: HuggingFace model ID or local path for the base model.
@@ -97,6 +101,7 @@ def build_vocab_adapted_model(
         training_data_path=dummy_training_data_path,
         fasttext_model_min_count=1,
         cache_dir=tokenizer_path,
+        reuse_policy="any",
     )
 
     # Resize embedding layers and replace weights.

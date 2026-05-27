@@ -7,6 +7,7 @@ This module provides functions to:
 3. Apply FOCUS to initialize embeddings for the new vocabulary
 """
 
+import glob
 import json
 import os
 import random
@@ -15,6 +16,7 @@ from typing import Optional
 
 import sentencepiece as spm
 import torch
+import yaml
 from datasets import load_from_disk
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, PreTrainedTokenizerFast
 
@@ -865,6 +867,103 @@ def _extract_special_tokens(tokenizer: PreTrainedTokenizerBase, inherit_addition
     return config
 
 
+FOCUS_EMBS_SUBDIR = 'focus_embs'
+LEGACY_INPUT_NAME = 'focus_input_embeddings.pt'
+LEGACY_OUTPUT_NAME = 'focus_output_embeddings.pt'
+
+
+def _sidecar_paths(cache_dir: str, embedding_hash: str) -> tuple[str, str, str]:
+    """Return (input_pt, output_pt, meta_yaml) sidecar paths for a hash."""
+    sub = os.path.join(cache_dir, FOCUS_EMBS_SUBDIR)
+    return (
+        os.path.join(sub, f"{embedding_hash}.input.pt"),
+        os.path.join(sub, f"{embedding_hash}.output.pt"),
+        os.path.join(sub, f"{embedding_hash}.meta.yaml"),
+    )
+
+
+def _enumerate_cached_embeddings(cache_dir: str) -> list[tuple[str, Optional[str]]]:
+    """
+    List all cached FOCUS embedding sets under cache_dir.
+
+    Returns a list of (input_pt_path, output_pt_path_or_None) tuples covering
+    both the new focus_embs/<hash>.input.pt layout and the legacy unhashed
+    files at the tokenizer-dir root.
+    """
+    found: list[tuple[str, Optional[str]]] = []
+
+    sub = os.path.join(cache_dir, FOCUS_EMBS_SUBDIR)
+    if os.path.isdir(sub):
+        for input_pt in sorted(glob.glob(os.path.join(sub, '*.input.pt'))):
+            output_pt = input_pt[: -len('.input.pt')] + '.output.pt'
+            found.append((input_pt, output_pt if os.path.exists(output_pt) else None))
+
+    legacy_input = os.path.join(cache_dir, LEGACY_INPUT_NAME)
+    if os.path.exists(legacy_input):
+        legacy_output = os.path.join(cache_dir, LEGACY_OUTPUT_NAME)
+        found.append(
+            (legacy_input, legacy_output if os.path.exists(legacy_output) else None)
+        )
+
+    return found
+
+
+def resolve_cached_embedding_paths(
+    cache_dir: Optional[str],
+    embedding_hash: Optional[str],
+    reuse_policy: Optional[str],
+) -> Optional[tuple[str, Optional[str]]]:
+    """
+    Resolve which cached FOCUS embedding sidecar to load, if any.
+
+    Args:
+        cache_dir: Tokenizer directory containing focus_embs/ and/or legacy
+            unhashed embedding files. None disables caching.
+        embedding_hash: Hash for this run's mix + FOCUS knobs.
+        reuse_policy: One of:
+            - None: only load on exact hash match.
+            - "any": accept any single cached set across both layouts; ambiguous
+              if more than one exists.
+            - "<hash>": load that specific sidecar; error if absent.
+
+    Returns:
+        (input_pt_path, output_pt_path_or_None) if a cache hit, else None.
+    """
+    if cache_dir is None:
+        return None
+
+    if reuse_policy == 'any':
+        candidates = _enumerate_cached_embeddings(cache_dir)
+        if len(candidates) == 0:
+            return None
+        if len(candidates) > 1:
+            listing = "\n  ".join(p for p, _ in candidates)
+            raise ValueError(
+                f"focus.reuse_embeddings='any' but {len(candidates)} cached "
+                f"embedding sets exist under {cache_dir}:\n  {listing}\n"
+                f"Specify focus.reuse_embeddings=<hash> to disambiguate."
+            )
+        return candidates[0]
+
+    if reuse_policy and reuse_policy != 'any':
+        # Explicit hash request.
+        input_pt, output_pt, _ = _sidecar_paths(cache_dir, reuse_policy)
+        if not os.path.exists(input_pt):
+            raise ValueError(
+                f"focus.reuse_embeddings='{reuse_policy}' but no embeddings "
+                f"found at {input_pt}"
+            )
+        return (input_pt, output_pt if os.path.exists(output_pt) else None)
+
+    # Default: exact-hash match only.
+    if embedding_hash is None:
+        return None
+    input_pt, output_pt, _ = _sidecar_paths(cache_dir, embedding_hash)
+    if os.path.exists(input_pt):
+        return (input_pt, output_pt if os.path.exists(output_pt) else None)
+    return None
+
+
 def _copy_embeddings_directly(
     source_model,
     source_token_strings: set[str],
@@ -935,59 +1034,69 @@ def apply_focus_initialization(
     source_model,
     source_tokenizer: PreTrainedTokenizerBase,
     target_tokenizer: PreTrainedTokenizerBase,
-    training_data_path: str,
+    training_data_path: Optional[str],
     fasttext_model_min_count: int = 4,
-    cache_dir: Optional[str] = None
+    cache_dir: Optional[str] = None,
+    embedding_hash: Optional[str] = None,
+    embedding_meta: Optional[dict] = None,
+    reuse_policy: Optional[str] = None,
 ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     """
     Apply FOCUS to generate new input embeddings and optionally output embeddings.
 
-    The embedding tensors are cached alongside the tokenizer to avoid recomputing
-    expensive FastText models on every run.
+    Embedding tensors are cached as sidecars under cache_dir/focus_embs/, keyed
+    by embedding_hash so that the same tokenizer can host multiple cached
+    embedding sets (one per FOCUS-training mix).
 
     Args:
         source_model: Source pretrained model
         source_tokenizer: Tokenizer for the source model
         target_tokenizer: Target language-specific tokenizer
-        training_data_path: Path to JSONL training data for FOCUS
+        training_data_path: Path to JSONL training data for FOCUS. May be None
+            only when a cache hit is guaranteed by reuse_policy.
         fasttext_model_min_count: Minimum occurrences for FastText embeddings (default: 4)
         cache_dir: Directory where embeddings should be cached (typically tokenizer directory)
+        embedding_hash: 8-char hash of mix + FOCUS knobs; used as sidecar key.
+        embedding_meta: Provenance dict written next to a freshly-computed sidecar.
+        reuse_policy: None (strict hash match), "any" (load the sole cached set
+            across both new and legacy layouts), or an explicit hash string.
 
     Returns:
         Tuple of (input_embeddings, output_embeddings)
         output_embeddings will be None if model ties word embeddings
     """
-    # Check for cached embeddings
-    if cache_dir is not None:
-        input_emb_path = os.path.join(cache_dir, 'focus_input_embeddings.pt')
-        output_emb_path = os.path.join(cache_dir, 'focus_output_embeddings.pt')
+    cached = resolve_cached_embedding_paths(cache_dir, embedding_hash, reuse_policy)
+    if cached is not None:
+        input_pt, output_pt = cached
+        print(f"Loading cached FOCUS embeddings from {input_pt}", file=sys.stderr)
+        new_input_embeddings = torch.load(input_pt, weights_only=True)
 
-        if os.path.exists(input_emb_path):
-            print(f"Loading cached FOCUS embeddings from {cache_dir}", file=sys.stderr)
-            new_input_embeddings = torch.load(input_emb_path, weights_only=True)
+        has_separate_output = (
+            hasattr(source_model.config, 'tie_word_embeddings')
+            and not source_model.config.tie_word_embeddings
+        )
 
-            # Check if we need output embeddings
-            has_separate_output = (
-                hasattr(source_model.config, 'tie_word_embeddings')
-                and not source_model.config.tie_word_embeddings
-            )
-
-            if has_separate_output and os.path.exists(output_emb_path):
-                new_output_embeddings = torch.load(output_emb_path, weights_only=True)
-            elif has_separate_output:
-                # Cache exists for input but not output - this shouldn't happen
+        if has_separate_output:
+            if output_pt is None:
                 print(
-                    f"Warning: Found cached input embeddings but missing output embeddings. "
-                    f"Regenerating both.",
-                    file=sys.stderr
+                    f"Warning: Found cached input embeddings at {input_pt} but "
+                    f"missing matching output embeddings. Regenerating both.",
+                    file=sys.stderr,
                 )
             else:
-                new_output_embeddings = None
-                print(f"FOCUS embeddings loaded from cache. Vocab size: {len(target_tokenizer)}", file=sys.stderr)
+                new_output_embeddings = torch.load(output_pt, weights_only=True)
+                print(
+                    f"FOCUS embeddings loaded from cache. Vocab size: {len(target_tokenizer)}",
+                    file=sys.stderr,
+                )
                 return new_input_embeddings, new_output_embeddings
+        else:
+            print(
+                f"FOCUS embeddings loaded from cache. Vocab size: {len(target_tokenizer)}",
+                file=sys.stderr,
+            )
+            return new_input_embeddings, None
 
-            print(f"FOCUS embeddings loaded from cache. Vocab size: {len(target_tokenizer)}", file=sys.stderr)
-            return new_input_embeddings, new_output_embeddings
 
     # Check whether any target tokens are absent from the source vocabulary.
     # FOCUS crashes (fastdist TypingError) when the novel-token set is empty,
@@ -1022,6 +1131,11 @@ def apply_focus_initialization(
             has_separate_output=has_separate_output,
         )
     else:
+        if training_data_path is None:
+            raise ValueError(
+                "apply_focus_initialization: training_data_path is required "
+                "when novel tokens are present and no cached embeddings were loaded."
+            )
         print(
             f"Applying FOCUS to initialize embeddings "
             f"({novel_token_count} novel tokens)",
@@ -1059,17 +1173,18 @@ def apply_focus_initialization(
 
     print(f"Embedding initialization complete. New vocab size: {len(target_tokenizer)}", file=sys.stderr)
 
-    # Cache the embeddings if cache_dir provided
-    if cache_dir is not None:
-        os.makedirs(cache_dir, exist_ok=True)
-        input_emb_path = os.path.join(cache_dir, 'focus_input_embeddings.pt')
-        output_emb_path = os.path.join(cache_dir, 'focus_output_embeddings.pt')
+    # Cache the embeddings if cache_dir + embedding_hash provided
+    if cache_dir is not None and embedding_hash is not None:
+        input_pt, output_pt, meta_yaml = _sidecar_paths(cache_dir, embedding_hash)
+        os.makedirs(os.path.dirname(input_pt), exist_ok=True)
 
-        print(f"Saving FOCUS embeddings to {cache_dir}", file=sys.stderr)
-        torch.save(new_input_embeddings, input_emb_path)
-
+        print(f"Saving FOCUS embeddings to {input_pt}", file=sys.stderr)
+        torch.save(new_input_embeddings, input_pt)
         if new_output_embeddings is not None:
-            torch.save(new_output_embeddings, output_emb_path)
+            torch.save(new_output_embeddings, output_pt)
+        if embedding_meta is not None:
+            with open(meta_yaml, 'w') as f:
+                yaml.dump(embedding_meta, f, default_flow_style=False, sort_keys=False)
 
         print("FOCUS embeddings cached", file=sys.stderr)
 

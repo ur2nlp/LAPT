@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 
 from src.artifact_configs import (
     TokenizerConfig, DatasetConfig, TokenizedDatasetConfig, _dict_diff,
+    focus_embedding_hash,
 )
 
 
@@ -696,3 +697,226 @@ class TestTokenizedDatasetConfig:
 
         tok_dataset = TokenizedDatasetConfig.from_args(args)
         assert tok_dataset.cache_dir('data/hy') == 'data/hy/tokenized_v81'
+
+
+def _focus_args(**overrides):
+    """Build a minimal args DictConfig for focus_embedding_hash tests."""
+    args = OmegaConf.create({
+        'hf_model': 'facebook/xglm-564M',
+        'dataset': {
+            'type': 'oscar',
+            'language': 'hy',
+            'cache_dir': 'data/hy',
+            'dev_size': 0.1,
+        },
+        'training': {'max_length': 512},
+        'focus': {
+            'enabled': True,
+            'vocab_size': 16384,
+            'num_samples': 100_000,
+            'fasttext_model_min_count': 4,
+        },
+        'seed': 1,
+    })
+    return OmegaConf.merge(args, OmegaConf.create(overrides))
+
+
+def _multinomial_args(**source_overrides):
+    """Multinomial dataset args with two sources."""
+    sources = source_overrides.pop('sources', [
+        {'id': 'enwiki', 'sampling_prob': 0.5, 'upsampling_factor': 1.0},
+        {'id': 'ang', 'sampling_prob': 0.5, 'upsampling_factor': 2.0},
+    ])
+    args = OmegaConf.create({
+        'hf_model': 'facebook/xglm-564M',
+        'dataset': {
+            'type': 'multinomial',
+            'cache_dir': 'data/oldgerm',
+            'dev_size': 0.1,
+            'alpha': 0.5,
+            'total_samples': 5_000_000,
+            'sources': sources,
+        },
+        'training': {'max_length': 512},
+        'focus': {
+            'enabled': True,
+            'vocab_size': 16384,
+            'num_samples': 100_000,
+            'fasttext_model_min_count': 4,
+        },
+        'seed': 1,
+    })
+    return OmegaConf.merge(args, OmegaConf.create(source_overrides))
+
+
+class TestFocusEmbeddingHash:
+    """Test that focus_embedding_hash captures every input that changes what
+    fastText sees during FOCUS, and only those inputs."""
+
+    def test_deterministic_and_short(self):
+        args = _focus_args()
+        h1 = focus_embedding_hash(args)
+        h2 = focus_embedding_hash(args)
+        assert h1 == h2
+        assert len(h1) == 8
+        assert all(c in '0123456789abcdef' for c in h1)
+
+    def test_sensitive_to_num_samples(self):
+        h_a = focus_embedding_hash(_focus_args(focus={'num_samples': 100_000}))
+        h_b = focus_embedding_hash(_focus_args(focus={'num_samples': 200_000}))
+        assert h_a != h_b
+
+    def test_sensitive_to_seed(self):
+        h_a = focus_embedding_hash(_focus_args(seed=1))
+        h_b = focus_embedding_hash(_focus_args(seed=2))
+        assert h_a != h_b
+
+    def test_sensitive_to_fasttext_min_count(self):
+        h_a = focus_embedding_hash(_focus_args(focus={'fasttext_model_min_count': 4}))
+        h_b = focus_embedding_hash(_focus_args(focus={'fasttext_model_min_count': 8}))
+        assert h_a != h_b
+
+    def test_sensitive_to_dataset_language(self):
+        h_a = focus_embedding_hash(_focus_args(dataset={'language': 'hy'}))
+        h_b = focus_embedding_hash(_focus_args(dataset={'language': 'ka'}))
+        assert h_a != h_b
+
+    def test_insensitive_to_unrelated_knobs(self):
+        h_a = focus_embedding_hash(_focus_args(focus={'vocab_size': 16384}))
+        h_b = focus_embedding_hash(_focus_args(focus={'vocab_size': 32768}))
+        assert h_a == h_b
+        # training knobs don't enter the hash
+        h_c = focus_embedding_hash(_focus_args(training={'max_length': 1024}))
+        assert h_a == h_c
+
+    def test_multinomial_alpha_changes_hash(self):
+        h_a = focus_embedding_hash(_multinomial_args(dataset={'alpha': 0.5}))
+        h_b = focus_embedding_hash(_multinomial_args(dataset={'alpha': 0.7}))
+        assert h_a != h_b
+
+    def test_multinomial_total_samples_changes_hash(self):
+        h_a = focus_embedding_hash(_multinomial_args(dataset={'total_samples': 5_000_000}))
+        h_b = focus_embedding_hash(_multinomial_args(dataset={'total_samples': 10_000_000}))
+        assert h_a != h_b
+
+    def test_multinomial_per_source_changes_hash(self):
+        base_sources = [
+            {'id': 'enwiki', 'sampling_prob': 0.5, 'upsampling_factor': 1.0},
+            {'id': 'ang', 'sampling_prob': 0.5, 'upsampling_factor': 2.0},
+        ]
+        alt_sources = [
+            {'id': 'enwiki', 'sampling_prob': 0.5, 'upsampling_factor': 1.0},
+            {'id': 'ang', 'sampling_prob': 0.5, 'upsampling_factor': 3.0},
+        ]
+        h_a = focus_embedding_hash(_multinomial_args(sources=base_sources))
+        h_b = focus_embedding_hash(_multinomial_args(sources=alt_sources))
+        assert h_a != h_b
+
+    def test_focus_dataset_overrides_training_dataset(self):
+        # When focus.dataset is set, hash depends on focus.dataset and not on args.dataset.
+        focus_ds = {'type': 'plaintext', 'path': '/data/got_only.txt', 'cache_dir': 'data/got'}
+        a = _focus_args(focus={'dataset': focus_ds})
+        b = _focus_args(focus={'dataset': focus_ds}, dataset={'language': 'ka'})
+        assert focus_embedding_hash(a) == focus_embedding_hash(b)
+
+        focus_ds_alt = {'type': 'plaintext', 'path': '/data/other.txt', 'cache_dir': 'data/other'}
+        c = _focus_args(focus={'dataset': focus_ds_alt})
+        assert focus_embedding_hash(a) != focus_embedding_hash(c)
+
+    def test_seed_still_matters_with_focus_dataset(self):
+        focus_ds = {'type': 'plaintext', 'path': '/data/got.txt', 'cache_dir': 'data/got'}
+        h_a = focus_embedding_hash(_focus_args(focus={'dataset': focus_ds}, seed=1))
+        h_b = focus_embedding_hash(_focus_args(focus={'dataset': focus_ds}, seed=2))
+        assert h_a != h_b
+
+    def test_num_samples_still_matters_with_focus_dataset(self):
+        focus_ds = {'type': 'plaintext', 'path': '/data/got.txt', 'cache_dir': 'data/got'}
+        h_a = focus_embedding_hash(_focus_args(
+            focus={'dataset': focus_ds, 'num_samples': 100_000},
+        ))
+        h_b = focus_embedding_hash(_focus_args(
+            focus={'dataset': focus_ds, 'num_samples': 200_000},
+        ))
+        assert h_a != h_b
+
+    def test_fasttext_min_count_still_matters_with_focus_dataset(self):
+        focus_ds = {'type': 'plaintext', 'path': '/data/got.txt', 'cache_dir': 'data/got'}
+        h_a = focus_embedding_hash(_focus_args(
+            focus={'dataset': focus_ds, 'fasttext_model_min_count': 4},
+        ))
+        h_b = focus_embedding_hash(_focus_args(
+            focus={'dataset': focus_ds, 'fasttext_model_min_count': 8},
+        ))
+        assert h_a != h_b
+
+
+class TestTokenizerConfigEmbeddingFieldStripping:
+    """Tests for the migration / decoupling change in to_dict and check_cached."""
+
+    def _make_args(self, **overrides):
+        return _focus_args(**overrides)
+
+    def test_to_dict_excludes_embedding_only_fields(self):
+        args = self._make_args()
+        d = TokenizerConfig.from_args(args).to_dict()
+        for k in ('train_dataset_cache', 'focus_dataset', 'fasttext_model_min_count'):
+            assert k not in d, f"to_dict should not emit {k}"
+
+    def test_check_cached_tolerates_legacy_fields(self, tmp_path):
+        # Simulate a tokenizer cache written by old code that included the
+        # now-stripped fields. check_cached must NOT consider them a mismatch.
+        cached = {
+            'hf_model': 'facebook/xglm-564M',
+            'vocab_size': 16384,
+            'num_samples': 100000,
+            'character_coverage': 1.0,
+            'inherit_additional_special_tokens': True,
+            'use_seed_vocabulary': False,
+            'seed_vocab_multiplier': 5.0,
+            'seed_lambda': 0.5,
+            'seed_min_frequency': 1,
+            'seed_round_mode': 'round',
+            'seed_score_mode': 'count',
+            'seed': 1,
+            'init_model_id': None,
+            'tokenizer_path': None,
+            # Legacy fields that current to_dict no longer emits:
+            'train_dataset_cache': 'data/hy_legacy',
+            'focus_dataset': None,
+            'fasttext_model_min_count': 4,
+        }
+        cfg_path = tmp_path / 'training_config.yaml'
+        import yaml as _yaml
+        with open(cfg_path, 'w') as f:
+            _yaml.safe_dump(cached, f)
+
+        args = self._make_args()
+        # Should be a no-op return True, NOT raise.
+        assert TokenizerConfig.from_args(args).check_cached(str(cfg_path)) is True
+
+    def test_check_cached_still_raises_on_real_tokenizer_diff(self, tmp_path):
+        args1 = self._make_args(focus={'vocab_size': 16384})
+        args2 = self._make_args(focus={'vocab_size': 32768})
+        cfg_path = tmp_path / 'training_config.yaml'
+        TokenizerConfig.from_args(args1).save(str(cfg_path))
+        with pytest.raises(ValueError, match='vocab_size'):
+            TokenizerConfig.from_args(args2).check_cached(str(cfg_path))
+
+    def test_mix_change_does_not_invalidate_tokenizer(self, tmp_path):
+        # Two mixes (different cache_dir / language) but same tokenizer params.
+        args1 = self._make_args(dataset={'cache_dir': 'data/mix_a', 'language': 'hy'})
+        args2 = self._make_args(dataset={'cache_dir': 'data/mix_b', 'language': 'hy'})
+        cfg_path = tmp_path / 'training_config.yaml'
+        TokenizerConfig.from_args(args1).save(str(cfg_path))
+        assert TokenizerConfig.from_args(args2).check_cached(str(cfg_path)) is True
+
+    def test_focus_dataset_change_does_not_invalidate_tokenizer(self, tmp_path):
+        args1 = self._make_args(focus={'dataset': {
+            'type': 'plaintext', 'path': '/a.txt', 'cache_dir': 'data/a'
+        }})
+        args2 = self._make_args(focus={'dataset': {
+            'type': 'plaintext', 'path': '/b.txt', 'cache_dir': 'data/b'
+        }})
+        cfg_path = tmp_path / 'training_config.yaml'
+        TokenizerConfig.from_args(args1).save(str(cfg_path))
+        assert TokenizerConfig.from_args(args2).check_cached(str(cfg_path)) is True

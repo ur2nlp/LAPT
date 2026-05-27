@@ -425,6 +425,17 @@ class TokenizerConfig(ArtifactConfig):
         suffix = self._build_suffix()
         return f"{model_short}_{suffix}"
 
+    # Fields that affect FOCUS embeddings but NOT the tokenizer artifact
+    # itself (or, in the pre-built-tokenizer case, neither). Stripped from
+    # both sides during check_cached so that a mix / FOCUS-knob change does
+    # not invalidate an otherwise-reusable tokenizer cache. Embedding
+    # provenance lives in the per-mix sidecar meta under focus_embs/.
+    _embedding_only_fields = (
+        'train_dataset_cache',
+        'focus_dataset',
+        'fasttext_model_min_count',
+    )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for saving to YAML.
 
@@ -439,13 +450,49 @@ class TokenizerConfig(ArtifactConfig):
                 'init_model_id': self.init_model_id,
                 'tokenizer_path': self.tokenizer_path,
                 'num_samples': self.num_samples,
-                'fasttext_model_min_count': self.fasttext_model_min_count,
                 'seed': self.seed,
-                'train_dataset_cache': self.train_dataset_cache,
-                'focus_dataset': self.focus_dataset,
             }
         from dataclasses import asdict
-        return asdict(self)
+        d = asdict(self)
+        for k in self._embedding_only_fields:
+            d.pop(k, None)
+        return d
+
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Validate cached tokenizer config, tolerating legacy embedding-only fields.
+
+        Older tokenizer caches recorded fields like `train_dataset_cache`,
+        `focus_dataset`, and `fasttext_model_min_count` that we now consider
+        embedding-level (not tokenizer-level) provenance. Strip them from the
+        cached config before diffing so previously valid caches keep working
+        and a mix change no longer forces a full tokenizer retrain.
+        """
+        if not os.path.exists(config_path):
+            return True
+        with open(config_path, 'r') as f:
+            cached = yaml.safe_load(f) or {}
+        for k in self._embedding_only_fields:
+            cached.pop(k, None)
+        # Round-trip via the base implementation by writing the filtered
+        # config to a tempfile would be over-engineered; replicate the diff
+        # inline.
+        diffs = _dict_diff(cached, self.to_dict())
+        if not diffs:
+            return True
+        error_msg = (
+            f"\n{'=' * 70}\n"
+            f"CONFIG MISMATCH: {self.artifact_name}\n"
+            f"{'=' * 70}\n"
+            f"Cached artifact was created with different parameters:\n\n"
+            + "\n".join(f"  {diff}" for diff in diffs)
+            + f"\n\n"
+            f"To proceed, either add fresh_tokenizer=true or align your config.\n"
+            f"{'=' * 70}\n"
+        )
+        if error_on_mismatch:
+            raise ValueError(error_msg)
+        print(error_msg, file=sys.stderr)
+        return False
 
 
 class DatasetConfig(ArtifactConfig):
@@ -542,6 +589,32 @@ def effective_dataset_cache_dir(args: DictConfig) -> str:
     if dataset_type != 'multinomial':
         return base_cache_dir
     return DatasetConfig.from_args(args).effective_cache_dir(base_cache_dir)
+
+
+def focus_embedding_hash(args: DictConfig) -> str:
+    """
+    Build a deterministic 8-char hash identifying the inputs that determine
+    FOCUS embedding values, independent of tokenizer hyperparameters.
+
+    Hashes the FOCUS-training data spec (separate `focus.dataset` if set,
+    otherwise the training-dataset spec), `focus.num_samples`, `seed`, and
+    `focus.fasttext_model_min_count` — every input that changes what
+    fastText sees or how it is sampled. The same tokenizer can therefore
+    host multiple cached embedding sets keyed by this hash, one per mix.
+    """
+    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
+        data_spec = OmegaConf.to_container(args.focus.dataset, resolve=True)
+    else:
+        data_spec = DatasetConfig.from_args(args).to_dict()
+
+    keys = {
+        'data': data_spec,
+        'num_samples': args.focus.num_samples,
+        'seed': args.seed,
+        'fasttext_model_min_count': args.focus.get('fasttext_model_min_count', 4),
+    }
+    canonical = json.dumps(keys, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:8]
 
 
 class TokenizedDatasetConfig(ArtifactConfig):
