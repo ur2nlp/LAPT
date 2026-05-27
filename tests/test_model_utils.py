@@ -201,3 +201,149 @@ class TestGetTokenizedPath:
         })
         path = get_tokenized_path(args)
         assert "tokenized_focus_" not in path
+
+
+import os
+from types import SimpleNamespace
+
+import torch
+
+import src.model_utils as model_utils_mod
+from src.artifact_configs import TokenizerConfig, focus_embedding_hash
+from src.tokenizer_utils import _sidecar_paths
+
+
+def _focus_model_args(cache_dir_base: str, language: str = "hy"):
+    """Minimal args for _initialize_focus_model in a tmp working dir."""
+    return OmegaConf.create({
+        'hf_model': 'facebook/xglm-564M',
+        'dataset': {
+            'type': 'oscar',
+            'language': language,
+            'cache_dir': cache_dir_base,
+            'dev_size': 0.1,
+        },
+        'training': {'max_length': 512},
+        'focus': {
+            'enabled': True,
+            'tokenizer_path': None,
+            'vocab_size': 16384,
+            'num_samples': 100_000,
+            'inherit_additional_special_tokens': True,
+            'character_coverage': 1.0,
+            'use_seed_vocabulary': False,
+            'fasttext_model_min_count': 4,
+            'reuse_embeddings': None,
+        },
+        'seed': 1,
+    })
+
+
+class _FakeEmbed(torch.nn.Module):
+    def __init__(self, vocab_size, hidden):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.zeros(vocab_size, hidden))
+        self.padding_idx = 0
+
+
+class _FakeModel:
+    def __init__(self, vocab_size=10, hidden=4):
+        self.config = SimpleNamespace(
+            tie_word_embeddings=True,
+            pad_token_id=0, bos_token_id=1, eos_token_id=2, vocab_size=vocab_size,
+        )
+        self._embed = _FakeEmbed(vocab_size, hidden)
+
+    def get_input_embeddings(self): return self._embed
+    def get_output_embeddings(self): return self._embed
+    def resize_token_embeddings(self, n): pass
+    def tie_weights(self): pass
+
+
+class _FakeTokenizer:
+    def __init__(self, n=10):
+        self._n = n
+        self.pad_token_id = 0
+        self.bos_token_id = 1
+        self.eos_token_id = 2
+
+    def __len__(self): return self._n
+
+
+class TestInitializeFocusModelJsonlGating:
+    """Verify _initialize_focus_model only materializes the FOCUS JSONL when
+    needed (i.e., not when both tokenizer and per-mix embeddings are cached)."""
+
+    def _common_patches(self, monkeypatch, jsonl_calls, focus_calls):
+        monkeypatch.setattr(
+            model_utils_mod, 'prepare_focus_training_data',
+            lambda **kw: (jsonl_calls.append(kw) or '/tmp/fake.jsonl'),
+        )
+        monkeypatch.setattr(
+            model_utils_mod, 'train_new_tokenizer',
+            lambda **kw: _FakeTokenizer(),
+        )
+        def _apply(**kw):
+            focus_calls.append(kw)
+            n = len(kw['target_tokenizer'])
+            return torch.zeros(n, 4), None
+        monkeypatch.setattr(model_utils_mod, 'apply_focus_initialization', _apply)
+
+        class _CfgStub:
+            @staticmethod
+            def from_pretrained(name): return SimpleNamespace()
+        class _ModelStub:
+            @staticmethod
+            def from_pretrained(name, config=None): return _FakeModel()
+        class _TokStub:
+            @staticmethod
+            def from_pretrained(name, **kw): return _FakeTokenizer()
+        monkeypatch.setattr(model_utils_mod, 'AutoConfig', _CfgStub)
+        monkeypatch.setattr(model_utils_mod, 'AutoModelForCausalLM', _ModelStub)
+        monkeypatch.setattr(model_utils_mod, 'AutoTokenizer', _TokStub)
+
+    def test_skips_jsonl_when_both_caches_hit(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        args = _focus_model_args(cache_dir_base=str(tmp_path / 'data'))
+
+        tok_cfg = TokenizerConfig.from_args(args)
+        tok_dir = tok_cfg.cache_dir(args.dataset.language)
+        os.makedirs(tok_dir, exist_ok=True)
+        with open(os.path.join(tok_dir, 'tokenizer.json'), 'w') as f:
+            f.write('{}')
+
+        emb_hash = focus_embedding_hash(args)
+        inp, _outp, _meta = _sidecar_paths(tok_dir, emb_hash)
+        os.makedirs(os.path.dirname(inp), exist_ok=True)
+        torch.save(torch.zeros(10, 4), inp)
+
+        jsonl_calls, focus_calls = [], []
+        self._common_patches(monkeypatch, jsonl_calls, focus_calls)
+
+        model_utils_mod._initialize_focus_model(args)
+        assert jsonl_calls == [], (
+            "prepare_focus_training_data should NOT be called when both "
+            f"tokenizer and embeddings are cached; got {len(jsonl_calls)} call(s)."
+        )
+        assert len(focus_calls) == 1
+        assert focus_calls[0]['training_data_path'] is None
+
+    def test_calls_jsonl_when_embeddings_miss(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        args = _focus_model_args(cache_dir_base=str(tmp_path / 'data'))
+
+        tok_cfg = TokenizerConfig.from_args(args)
+        tok_dir = tok_cfg.cache_dir(args.dataset.language)
+        os.makedirs(tok_dir, exist_ok=True)
+        with open(os.path.join(tok_dir, 'tokenizer.json'), 'w') as f:
+            f.write('{}')
+
+        jsonl_calls, focus_calls = [], []
+        self._common_patches(monkeypatch, jsonl_calls, focus_calls)
+
+        model_utils_mod._initialize_focus_model(args)
+        assert len(jsonl_calls) == 1, (
+            f"prepare_focus_training_data should be called exactly once when "
+            f"embeddings are missing; got {len(jsonl_calls)} call(s)."
+        )
+        assert focus_calls[0]['training_data_path'] == '/tmp/fake.jsonl'

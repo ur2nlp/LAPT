@@ -8,19 +8,22 @@ specialization workflows.
 import os
 import random
 import sys
+from typing import Optional
 
 import numpy as np
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from tokenizer_utils import (
     apply_focus_initialization,
     prepare_focus_training_data,
-    train_new_tokenizer
+    resolve_cached_embedding_paths,
+    train_new_tokenizer,
 )
 from artifact_configs import (
     TokenizerConfig, get_model_shortname, format_number, effective_dataset_cache_dir,
+    focus_embedding_hash,
 )
 
 
@@ -134,32 +137,59 @@ def _initialize_focus_model(args: DictConfig):
     tokenizer_config = TokenizerConfig.from_args(args)
     tokenizer_id = tokenizer_config.tokenizer_id()
 
-    # Prepare JSONL training data for FOCUS. The subset only depends on the
-    # source dataset, num_samples, and seed, so it is shared across FOCUS runs
-    # that differ only in tokenizer hyperparameters.
-    subset_filename = (
-        f"training_subset_s{format_number(args.focus.num_samples)}"
-        f"_seed{args.seed}.jsonl"
-    )
-    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
-        # Using separate FOCUS dataset - store in that dataset's cache dir
-        focus_data_cache = args.focus.dataset.cache_dir
-        jsonl_path = prepare_focus_training_data(
-            num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{focus_data_cache}/{subset_filename}",
-            seed=args.seed,
-            dataset_config=args.focus.dataset
-        )
+    # Hash of the inputs that determine FOCUS embedding values (mix + num_samples
+    # + seed + fasttext_min_count). Independent of tokenizer hyperparameters.
+    emb_hash = focus_embedding_hash(args)
+    reuse_policy = args.focus.get('reuse_embeddings', None)
+
+    # Pre-compute target paths so we can decide whether the JSONL is needed at
+    # all. The JSONL is consumed by (a) tokenizer training (SentencePiece) and
+    # (b) FOCUS's fastText fit on the target side; if both the tokenizer and
+    # the per-mix embeddings are already cached, nothing reads it.
+    if args.focus.tokenizer_path:
+        embedding_cache_dir = args.focus.tokenizer_path
+        tokenizer_cache_exists = True
     else:
-        # Using training dataset - store in the effective cache dir so the
-        # subset sits alongside the mix-specific untokenized split it is
-        # sampled from, and is shared across FOCUS runs on that same mix.
-        training_cache_dir = effective_dataset_cache_dir(args)
-        jsonl_path = prepare_focus_training_data(
-            num_samples=args.focus.num_samples,
-            output_jsonl_path=f"{training_cache_dir}/{subset_filename}",
-            seed=args.seed,
-            train_dataset_cache=training_cache_dir
+        embedding_cache_dir = tokenizer_config.cache_dir(args.dataset.language)
+        tokenizer_cache_exists = os.path.exists(
+            os.path.join(embedding_cache_dir, "tokenizer.json")
+        )
+
+    embeddings_cache_hit = (
+        resolve_cached_embedding_paths(embedding_cache_dir, emb_hash, reuse_policy)
+        is not None
+    )
+
+    jsonl_needed = not (tokenizer_cache_exists and embeddings_cache_hit)
+    jsonl_path: Optional[str] = None
+    if jsonl_needed:
+        # Subset name depends only on source data + num_samples + seed and is
+        # therefore shared across FOCUS runs on the same mix.
+        subset_filename = (
+            f"training_subset_s{format_number(args.focus.num_samples)}"
+            f"_seed{args.seed}.jsonl"
+        )
+        if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
+            focus_data_cache = args.focus.dataset.cache_dir
+            jsonl_path = prepare_focus_training_data(
+                num_samples=args.focus.num_samples,
+                output_jsonl_path=f"{focus_data_cache}/{subset_filename}",
+                seed=args.seed,
+                dataset_config=args.focus.dataset
+            )
+        else:
+            training_cache_dir = effective_dataset_cache_dir(args)
+            jsonl_path = prepare_focus_training_data(
+                num_samples=args.focus.num_samples,
+                output_jsonl_path=f"{training_cache_dir}/{subset_filename}",
+                seed=args.seed,
+                train_dataset_cache=training_cache_dir
+            )
+    else:
+        print(
+            f"Skipping FOCUS JSONL materialization: tokenizer cache present "
+            f"and embeddings cache hit for hash {emb_hash}.",
+            file=sys.stderr,
         )
 
     # Load existing tokenizer or train a new one
@@ -167,13 +197,8 @@ def _initialize_focus_model(args: DictConfig):
         print(f"Loading tokenizer from {args.focus.tokenizer_path}", file=sys.stderr)
         tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
     else:
-        tokenizer_output_dir = tokenizer_config.cache_dir(args.dataset.language)
+        tokenizer_output_dir = embedding_cache_dir
         config_path = os.path.join(tokenizer_output_dir, "training_config.yaml")
-
-        # Check if tokenizer cache exists
-        tokenizer_cache_exists = os.path.exists(
-            os.path.join(tokenizer_output_dir, "tokenizer.json")
-        )
 
         # Verify config matches if cache exists
         if tokenizer_cache_exists:
@@ -187,13 +212,15 @@ def _initialize_focus_model(args: DictConfig):
                     file=sys.stderr
                 )
 
+        # train_new_tokenizer is cache-aware: returns the existing tokenizer
+        # without re-training when the cache is populated. jsonl_path may be
+        # None in that case since it is not consulted.
         tokenizer = train_new_tokenizer(
             config=tokenizer_config,
             jsonl_path=jsonl_path,
             output_path=tokenizer_output_dir
         )
 
-        # Save config if we just created the tokenizer
         if not tokenizer_cache_exists:
             tokenizer_config.save(config_path)
 
@@ -215,9 +242,22 @@ def _initialize_focus_model(args: DictConfig):
     model = AutoModelForCausalLM.from_pretrained(args.hf_model, config=config)
     source_tokenizer = AutoTokenizer.from_pretrained(args.hf_model)
 
-    # Cache embeddings in tokenizer directory
-    # If using custom tokenizer path, cache there; otherwise use the trained tokenizer directory
-    embedding_cache_dir = args.focus.tokenizer_path if args.focus.tokenizer_path else tokenizer_output_dir
+    # Build provenance meta for the embedding sidecar.
+    if hasattr(args.focus, 'dataset') and args.focus.dataset is not None:
+        data_spec = OmegaConf.to_container(args.focus.dataset, resolve=True)
+    else:
+        data_spec = None  # uses training dataset; recorded via effective cache dir below
+    embedding_meta = {
+        'embedding_hash': emb_hash,
+        'tokenizer_id': tokenizer_id,
+        'num_samples': args.focus.num_samples,
+        'seed': args.seed,
+        'fasttext_model_min_count': tokenizer_config.fasttext_model_min_count,
+        'focus_dataset': data_spec,
+        'train_dataset_cache': (
+            effective_dataset_cache_dir(args) if data_spec is None else None
+        ),
+    }
 
     new_input_embeddings, new_output_embeddings = apply_focus_initialization(
         source_model=model,
@@ -225,7 +265,10 @@ def _initialize_focus_model(args: DictConfig):
         target_tokenizer=tokenizer,
         training_data_path=jsonl_path,
         fasttext_model_min_count=tokenizer_config.fasttext_model_min_count,
-        cache_dir=embedding_cache_dir
+        cache_dir=embedding_cache_dir,
+        embedding_hash=emb_hash,
+        embedding_meta=embedding_meta,
+        reuse_policy=reuse_policy,
     )
 
     # Resize the existing embedding module in place, then overwrite its weight

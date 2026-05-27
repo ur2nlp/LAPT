@@ -418,3 +418,274 @@ class TestTokenizerTraining:
         # Verify both have correct vocab size
         assert len(tokenizer1) == vocab_size
         assert len(tokenizer2) == vocab_size
+
+
+import os
+from types import SimpleNamespace
+
+import torch
+
+from tokenizer_utils import (
+    apply_focus_initialization,
+    resolve_cached_embedding_paths,
+    _sidecar_paths,
+    FOCUS_EMBS_SUBDIR,
+    LEGACY_INPUT_NAME,
+    LEGACY_OUTPUT_NAME,
+)
+
+
+def _touch(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(b'')
+
+
+class TestResolveCachedEmbeddingPaths:
+    """Tests for the embedding sidecar resolver under default and 'any' policies."""
+
+    def test_empty_dir_default_policy(self, tmp_path):
+        assert resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', None) is None
+
+    def test_empty_dir_any_policy(self, tmp_path):
+        assert resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', 'any') is None
+
+    def test_default_policy_hash_match(self, tmp_path):
+        inp, outp, _meta = _sidecar_paths(str(tmp_path), 'abcd1234')
+        _touch(inp)
+        _touch(outp)
+        result = resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', None)
+        assert result == (inp, outp)
+
+    def test_default_policy_hash_match_no_output_sidecar(self, tmp_path):
+        inp, outp, _meta = _sidecar_paths(str(tmp_path), 'abcd1234')
+        _touch(inp)
+        result = resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', None)
+        assert result == (inp, None)
+
+    def test_default_policy_hash_miss(self, tmp_path):
+        # A different hash's sidecar exists; default policy must NOT load it.
+        other_inp, _, _ = _sidecar_paths(str(tmp_path), 'deadbeef')
+        _touch(other_inp)
+        assert resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', None) is None
+
+    def test_any_policy_loads_lone_new_sidecar(self, tmp_path):
+        inp, outp, _ = _sidecar_paths(str(tmp_path), 'deadbeef')
+        _touch(inp)
+        _touch(outp)
+        result = resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', 'any')
+        assert result == (inp, outp)
+
+    def test_any_policy_loads_lone_legacy_file(self, tmp_path):
+        legacy_in = tmp_path / LEGACY_INPUT_NAME
+        legacy_out = tmp_path / LEGACY_OUTPUT_NAME
+        _touch(str(legacy_in))
+        _touch(str(legacy_out))
+        result = resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', 'any')
+        assert result == (str(legacy_in), str(legacy_out))
+
+    def test_any_policy_legacy_input_only(self, tmp_path):
+        legacy_in = tmp_path / LEGACY_INPUT_NAME
+        _touch(str(legacy_in))
+        result = resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', 'any')
+        assert result == (str(legacy_in), None)
+
+    def test_any_policy_ambiguous_new_plus_legacy(self, tmp_path):
+        inp, _, _ = _sidecar_paths(str(tmp_path), 'deadbeef')
+        _touch(inp)
+        _touch(str(tmp_path / LEGACY_INPUT_NAME))
+        with pytest.raises(ValueError, match='2 cached embedding sets'):
+            resolve_cached_embedding_paths(str(tmp_path), 'abcd1234', 'any')
+
+    def test_any_policy_ambiguous_two_hashed(self, tmp_path):
+        a, _, _ = _sidecar_paths(str(tmp_path), 'aaaaaaaa')
+        b, _, _ = _sidecar_paths(str(tmp_path), 'bbbbbbbb')
+        _touch(a)
+        _touch(b)
+        with pytest.raises(ValueError, match='2 cached embedding sets'):
+            resolve_cached_embedding_paths(str(tmp_path), 'aaaaaaaa', 'any')
+
+    def test_explicit_hash_policy_present(self, tmp_path):
+        inp, outp, _ = _sidecar_paths(str(tmp_path), 'feedface')
+        _touch(inp)
+        _touch(outp)
+        # Request a specific hash; the active emb_hash arg is ignored when a
+        # specific reuse_policy is set.
+        result = resolve_cached_embedding_paths(str(tmp_path), 'unrelated', 'feedface')
+        assert result == (inp, outp)
+
+    def test_explicit_hash_policy_absent(self, tmp_path):
+        with pytest.raises(ValueError, match="reuse_embeddings='feedface'"):
+            resolve_cached_embedding_paths(str(tmp_path), 'unrelated', 'feedface')
+
+    def test_cache_dir_none(self):
+        assert resolve_cached_embedding_paths(None, 'abcd1234', None) is None
+        assert resolve_cached_embedding_paths(None, 'abcd1234', 'any') is None
+
+
+class _StubModel:
+    """Minimal source-model stub for apply_focus_initialization.
+
+    Provides config + get_input_embeddings/get_output_embeddings.
+    """
+
+    def __init__(self, vocab_size: int, hidden_dim: int = 4, tied: bool = True):
+        self.config = SimpleNamespace(tie_word_embeddings=tied)
+        self._inp = torch.nn.Embedding(vocab_size, hidden_dim)
+        if not tied:
+            self._out = torch.nn.Linear(hidden_dim, vocab_size, bias=False)
+
+    def get_input_embeddings(self):
+        return self._inp
+
+    def get_output_embeddings(self):
+        return self._out  # only reached when not tied
+
+
+class _StubTokenizer:
+    """Minimal HF-tokenizer-like object exposing only the methods that
+    apply_focus_initialization touches: __len__, convert_ids_to_tokens,
+    convert_tokens_to_ids. Used to construct synthetic target vocabularies
+    that are either strict subsets of a real source tokenizer (no novel
+    tokens) or include explicit novel strings."""
+
+    def __init__(self, tokens):
+        self._tokens = list(tokens)
+        self._id_to_tok = dict(enumerate(self._tokens))
+        self._tok_to_id = {t: i for i, t in enumerate(self._tokens)}
+
+    def __len__(self):
+        return len(self._tokens)
+
+    def convert_ids_to_tokens(self, i):
+        return self._id_to_tok[i]
+
+    def convert_tokens_to_ids(self, t):
+        return self._tok_to_id.get(t, 0)
+
+
+def _pruned_target_from_source(source_tokenizer, n: int = 64):
+    """Build a target tokenizer whose vocab is a strict subset of source's.
+
+    Skips ID 0 (typically a special token whose exact string differs across
+    fast/slow XGLM tokenizer variants) and takes the next n IDs to keep the
+    test independent of XGLM's special-token layout.
+    """
+    tokens = [source_tokenizer.convert_ids_to_tokens(i) for i in range(1, 1 + n)]
+    return _StubTokenizer(tokens)
+
+
+class TestApplyFocusInitializationCache:
+    """Sidecar write + cache-hit / cache-miss behavior of apply_focus_initialization.
+
+    Uses real XGLM as source and either a pruned XGLM subset (no novel tokens)
+    or a stub with synthetic novel strings (novel tokens) as the target.
+    """
+
+    def test_sidecar_write_layout(self, tmp_path, base_tokenizer):
+        target = _pruned_target_from_source(base_tokenizer, n=32)
+        cache_dir = str(tmp_path / "tok")
+        os.makedirs(cache_dir, exist_ok=True)
+        emb_hash = 'cafebabe'
+        meta = {'embedding_hash': emb_hash, 'num_samples': 100}
+
+        model = _StubModel(vocab_size=len(base_tokenizer))
+        new_in, new_out = apply_focus_initialization(
+            source_model=model,
+            source_tokenizer=base_tokenizer,
+            target_tokenizer=target,
+            training_data_path=None,
+            cache_dir=cache_dir,
+            embedding_hash=emb_hash,
+            embedding_meta=meta,
+        )
+        assert new_in.shape == (len(target), 4)
+        assert new_out is None  # tied
+
+        inp, outp, meta_path = _sidecar_paths(cache_dir, emb_hash)
+        assert os.path.exists(inp), f"missing {inp}"
+        assert not os.path.exists(outp), "no output sidecar for tied model"
+        assert os.path.exists(meta_path)
+
+        import yaml as _yaml
+        with open(meta_path) as f:
+            loaded_meta = _yaml.safe_load(f)
+        assert loaded_meta == meta
+
+    def test_cache_hit_skips_compute_with_none_training_data(self, tmp_path, base_tokenizer):
+        # Use a target with synthetic novel tokens to prove that on a cache hit
+        # the function returns *without* triggering the novel-token validation
+        # (i.e. caching genuinely short-circuits the entire downstream path).
+        target = _StubTokenizer(['<<<NOVEL_TOK_A>>>', '<<<NOVEL_TOK_B>>>'])
+        cache_dir = str(tmp_path / "tok")
+        emb_hash = 'cafe1111'
+        inp, _outp, _meta = _sidecar_paths(cache_dir, emb_hash)
+        os.makedirs(os.path.dirname(inp), exist_ok=True)
+
+        sentinel = torch.full((len(target), 4), 7.0)
+        torch.save(sentinel, inp)
+
+        model = _StubModel(vocab_size=len(base_tokenizer))
+        new_in, new_out = apply_focus_initialization(
+            source_model=model,
+            source_tokenizer=base_tokenizer,
+            target_tokenizer=target,
+            training_data_path=None,
+            cache_dir=cache_dir,
+            embedding_hash=emb_hash,
+        )
+        assert torch.equal(new_in, sentinel)
+        assert new_out is None
+
+    def test_cache_miss_no_novel_tokens_runs_without_training_data(
+        self, tmp_path, base_tokenizer
+    ):
+        """No cache hit + target ⊂ source → direct-copy path succeeds without
+        a JSONL. Build_vocab_adapted_model relies on this, and so does the
+        JSONL gate in _initialize_focus_model."""
+        target = _pruned_target_from_source(base_tokenizer, n=64)
+        cache_dir = str(tmp_path / "tok")
+        os.makedirs(cache_dir, exist_ok=True)
+
+        # Sanity: every target token really is in source.
+        source_toks = {
+            base_tokenizer.convert_ids_to_tokens(i)
+            for i in range(len(base_tokenizer))
+        }
+        assert all(target.convert_ids_to_tokens(i) in source_toks
+                   for i in range(len(target)))
+
+        model = _StubModel(vocab_size=len(base_tokenizer))
+        new_in, _new_out = apply_focus_initialization(
+            source_model=model,
+            source_tokenizer=base_tokenizer,
+            target_tokenizer=target,
+            training_data_path=None,
+            cache_dir=cache_dir,
+            embedding_hash='nope0000',
+            embedding_meta={'embedding_hash': 'nope0000'},
+        )
+        assert new_in.shape == (len(target), 4)
+        inp, _outp, _meta = _sidecar_paths(cache_dir, 'nope0000')
+        assert os.path.exists(inp)
+
+    def test_cache_miss_novel_tokens_requires_training_data(
+        self, tmp_path, base_tokenizer
+    ):
+        """Novel tokens + cache miss + training_data_path=None → ValueError,
+        raised before the FOCUS / fastText path runs."""
+        # Synthetic tokens guaranteed not to appear in XGLM's vocab.
+        target = _StubTokenizer(['<<<NOVEL_TOK_A>>>', '<<<NOVEL_TOK_B>>>'])
+        cache_dir = str(tmp_path / "tok")
+        os.makedirs(cache_dir, exist_ok=True)
+
+        model = _StubModel(vocab_size=len(base_tokenizer))
+        with pytest.raises(ValueError, match='training_data_path is required'):
+            apply_focus_initialization(
+                source_model=model,
+                source_tokenizer=base_tokenizer,
+                target_tokenizer=target,
+                training_data_path=None,
+                cache_dir=cache_dir,
+                embedding_hash='nope0001',
+            )
