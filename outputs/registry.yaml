@@ -11995,3 +11995,258 @@ v139-i17:
   group: add-norobots
   note: lr1e-4, dropout 0.35, eng-chat x32
   observation: increasing lr to 1e-4 overfits, even with higher dropout
+v73L:
+  params:
+    hf_model: facebook/xglm-1.7B
+    tokenizer: xglm1b_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.2
+    attention_dropout: 0.2
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: token_mean
+    per_example_loss_floor: 1
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 18
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 5.0
+    upsampling_factor_got-translit: 2.5
+    upsampling_factor_non: 15.0
+    upsampling_factor_got-eng: 5.0
+    effective_batch: 60
+    lr: 7.5e-05
+    focus_enabled: true
+  extracted_at: '2026-05-27T23:58:46+00:00'
+  era: separate-translit
+  group: 1.7B-hyperparameter-sweep
+  note: got x5, translit x2.5, got-eng x5, non x15, dropout 0.2, lr 7.5e-5
+  observation: Upping non proportion improves bpc without significantly hurting other
+    languages; lr 7.5e-5 and dropout 0.25 is the sweet spot
+v74L:
+  params:
+    hf_model: facebook/xglm-1.7B
+    tokenizer: xglm1b_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: token_mean
+    per_example_loss_floor: 1
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 18
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 5.0
+    upsampling_factor_got-translit: 2.5
+    upsampling_factor_non: 15.0
+    upsampling_factor_got-eng: 5.0
+    effective_batch: 60
+    lr: 7.5e-05
+    focus_enabled: true
+  extracted_at: '2026-05-27T23:58:48+00:00'
+  era: separate-translit
+  group: 1.7B-hyperparameter-sweep
+  note: got x5, translit x2.5, got-eng x5, non x15, dropout 0.25, lr 7.5e-5
+  observation: Upping non proportion improves bpc without significantly hurting other
+    languages; lr 7.5e-5 and dropout 0.25 is the sweet spot
+v75L:
+  params:
+    hf_model: facebook/xglm-1.7B
+    tokenizer: xglm1b_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: token_mean
+    per_example_loss_floor: 1
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 18
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 5.0
+    upsampling_factor_got-translit: 2.5
+    upsampling_factor_non: 15.0
+    upsampling_factor_got-eng: 5.0
+    effective_batch: 60
+    lr: 0.0001
+    focus_enabled: true
+  extracted_at: '2026-05-27T23:58:51+00:00'
+  era: separate-translit
+  group: 1.7B-hyperparameter-sweep
+  note: got x5, translit x2.5, got-eng x5, non x15, dropout 0.25, lr 1e-4
+  observation: Upping non proportion improves bpc without significantly hurting other
+    languages; lr 7.5e-5 and dropout 0.25 is the sweet spot
+v76L:
+  params:
+    hf_model: facebook/xglm-1.7B
+    tokenizer: xglm1b_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.2
+    attention_dropout: 0.2
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: token_mean
+    per_example_loss_floor: 1
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 18
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 5.0
+    upsampling_factor_got-translit: 2.5
+    upsampling_factor_non: 20.0
+    upsampling_factor_got-eng: 5.0
+    effective_batch: 60
+    lr: 5.0e-05
+    focus_enabled: true
+  extracted_at: '2026-05-27T23:58:54+00:00'
+  era: separate-translit
+  group: 1.7B-hyperparameter-sweep
+  note: got x5, translit x2.5, got-eng x5, non x20, dropout 0.2, lr 5e-5
+  observation: Upping non proportion improves bpc without significantly hurting other
+    languages; lr 7.5e-5 and dropout 0.25 is the sweet spot
+v77L:
+  params:
+    hf_model: facebook/xglm-1.7B
+    tokenizer: xglm1b_ptex-c4-nv5k-p999-nrn
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: token_mean
+    per_example_loss_floor: 1
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 18
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    num_samples: 5000000
+    fasttext_model_min_count: 1
+    upsampling_factor_got: 5.0
+    upsampling_factor_got-translit: 2.5
+    upsampling_factor_non: 20.0
+    upsampling_factor_got-eng: 5.0
+    effective_batch: 60
+    lr: 7.5e-05
+    focus_enabled: true
+  extracted_at: '2026-05-29T14:42:37+00:00'
+  era: separate-translit
+  group: 1.7B-hyperparameter-sweep
+  note: got x5, translit x2.5, got-eng x5, non x20, dropout 0.25, lr 7.5e-5
+  observation: Upping non proportion improves bpc without significantly hurting other
+    languages; lr 7.5e-5 and dropout 0.25 is the sweet spot
