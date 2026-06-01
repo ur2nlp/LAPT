@@ -7,6 +7,7 @@ Usage:
     python tools/interactive_prompt.py --model models/got/l40-basic --device cuda
     python tools/interactive_prompt.py --model models/got/l40-basic --compile
     python tools/interactive_prompt.py --model models/got/l40-basic --template templates/translate_got.txt
+    python tools/interactive_prompt.py --model models/got/l40-basic --batch prompts.txt
 
 Template files:
     A template file is a text file with an {input} placeholder. Everything before {input}
@@ -19,6 +20,11 @@ Template files:
     With this template, typing "the light of the world" sends:
         "Translate to Gothic: the light of the world Response:"
     and displays only the model's continuation.
+
+Batch mode (--batch):
+    Reads prompts from a file, one per line. Blank lines and lines starting with '#' are
+    skipped. Each prompt is echoed and the model's response is printed, then the script exits.
+    The template (if any) is applied to each prompt, just as in interactive mode.
 
 Commands (during interactive session):
     /temp <value>       - Set temperature
@@ -41,6 +47,7 @@ Commands (during interactive session):
 
 import argparse
 from dataclasses import dataclass, field
+import sys
 import torch
 from pathlib import Path
 from transformers import pipeline
@@ -166,6 +173,10 @@ def generate_and_print(session: Session, full_prompt: str):
         do_sample=session.do_sample,
         temperature=session.temperature,
         top_p=session.top_p,
+        # Pass EOS explicitly from the tokenizer so a stale generation_config
+        # (e.g. base-model EOS id surviving a vocab swap) cannot silently
+        # prevent the model from halting on its real end-of-sequence token.
+        eos_token_id=session.generator.tokenizer.eos_token_id,
         pad_token_id=session.generator.tokenizer.eos_token_id,
     )
     if session.repetition_penalty != 1.0:
@@ -252,6 +263,13 @@ def main():
         default=None,
         help='Path to a prompt template file (text file with {input} placeholder)'
     )
+    parser.add_argument(
+        '--batch',
+        type=str,
+        default=None,
+        metavar='FILE',
+        help='Run non-interactively, reading prompts from FILE (one per line; blank lines and # comments skipped)'
+    )
 
     args = parser.parse_args()
 
@@ -291,6 +309,27 @@ def main():
     )
 
     show_settings(session)
+
+    if args.batch:
+        batch_path = Path(args.batch)
+        if not batch_path.exists():
+            print(f"Error: batch file not found: {args.batch}", file=sys.stderr)
+            return
+        lines = batch_path.read_text().splitlines()
+        prompts = [line for line in lines if line.strip() and not line.strip().startswith('#')]
+        print(f"Running batch mode with {len(prompts)} prompt(s) from {args.batch}\n")
+        for prompt in prompts:
+            print(f"> {prompt}")
+            if session.template:
+                full_prompt = apply_template(session.template, prompt)
+            else:
+                full_prompt = prompt
+            try:
+                generate_and_print(session, full_prompt)
+            except Exception as e:
+                print(f"Error generating for prompt {prompt!r}: {e}", file=sys.stderr)
+        return
+
     print("Type 'quit', 'exit', or 'q' to exit.")
     print("Type '/help' for available commands.\n")
 

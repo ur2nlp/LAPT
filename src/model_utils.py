@@ -326,6 +326,15 @@ def _initialize_focus_model(args: DictConfig):
     model.config.bos_token_id = tokenizer.bos_token_id
     model.config.eos_token_id = tokenizer.eos_token_id
 
+    # The generation config is a separate object that takes precedence over
+    # model.config during generation. It is derived from the base model and so
+    # retains the base tokenizer's special-token IDs; it must be synced too, or
+    # generation halts on the wrong EOS id and never stops on the real one.
+    if model.generation_config is not None:
+        model.generation_config.pad_token_id = tokenizer.pad_token_id
+        model.generation_config.bos_token_id = tokenizer.bos_token_id
+        model.generation_config.eos_token_id = tokenizer.eos_token_id
+
     del source_tokenizer
     print("FOCUS initialization complete", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
