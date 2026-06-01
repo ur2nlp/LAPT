@@ -173,6 +173,10 @@ def generate_and_print(session: Session, full_prompt: str):
         do_sample=session.do_sample,
         temperature=session.temperature,
         top_p=session.top_p,
+        # Pass EOS explicitly from the tokenizer so a stale generation_config
+        # (e.g. base-model EOS id surviving a vocab swap) cannot silently
+        # prevent the model from halting on its real end-of-sequence token.
+        eos_token_id=session.generator.tokenizer.eos_token_id,
         pad_token_id=session.generator.tokenizer.eos_token_id,
     )
     if session.repetition_penalty != 1.0:
