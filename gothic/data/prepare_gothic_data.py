@@ -303,6 +303,77 @@ def generate_monolingual(
     return lines_written, verse_instances
 
 
+# Instruction phrasings per task, for prompt-side diversification of the
+# instruction-tuning data. {input} is the source text; for the English -> Gothic
+# direction {target} is the Gothic-script label ("Gothic" / "Romanized Gothic").
+# The original fixed phrasing is kept first in each list so it stays represented.
+# Diversifying the *prompt* (phrasing + input quoting) makes the model robust to
+# how a task is asked; the *response* is deliberately left a single canonical
+# bare form so input quoting does not get echoed into the output. See
+# `.claude/gothic/scaling_instruction_tuning.md`.
+INSTRUCTION_TEMPLATES = {
+    "to_gothic_script": [
+        "Transliterate to Gothic script: {input}",
+        "Convert the following to Gothic script: {input}",
+        "Rewrite this in the Gothic alphabet: {input}",
+        "Write the following in Gothic script: {input}",
+    ],
+    "to_latin_script": [
+        "Transliterate to Latin script: {input}",
+        "Convert the following to Latin script: {input}",
+        "Rewrite this in the Latin alphabet: {input}",
+        "Write the following in Latin script: {input}",
+    ],
+    "to_target": [
+        "Translate to {target}: {input}",
+        "Translate the following into {target}: {input}",
+        "Give the {target} translation of: {input}",
+        "Render the following in {target}: {input}",
+    ],
+    "to_english": [
+        "Translate to English: {input}",
+        "Translate the following into English: {input}",
+        "Give the English translation of: {input}",
+        "Render the following in English: {input}",
+    ],
+}
+
+
+def build_instruction_prompt(
+    task_key: str,
+    input_text: str,
+    rng: random.Random,
+    target_label: str = None,
+) -> str:
+    """Build a varied instruction prompt ending in ' Response:'.
+
+    Diversifies two axes independently with the seeded RNG: the instruction
+    phrasing (one of several templates) and whether the input is wrapped in
+    double quotes. The caller always pairs this with a single canonical bare
+    response, which decouples input quoting from output quoting so the model
+    learns to ignore input quotes rather than echo them.
+
+    Quote wrapping is skipped when the input already contains a double quote
+    (common in Bible verses) to avoid confusing nested quotes.
+
+    Args:
+        task_key: One of the keys in INSTRUCTION_TEMPLATES.
+        input_text: The source text to embed in the prompt.
+        rng: Seeded RNG for the template choice and the quote coin flip.
+        target_label: The {target} substitution for the 'to_target' task
+            ("Gothic" or "Romanized Gothic"); ignored for other tasks.
+
+    Returns:
+        The prompt string ending with ' Response:'.
+    """
+    template = rng.choice(INSTRUCTION_TEMPLATES[task_key])
+    presented_input = input_text
+    if '"' not in input_text and rng.random() < 0.5:
+        presented_input = f'"{input_text}"'
+    instruction = template.format(input=presented_input, target=target_label)
+    return f"{instruction} Response:"
+
+
 def generate_transliteration(
     verse_ids: List[Tuple[str, int, int]],
     gothic_verses: Dict[Tuple[str, int, int], List[str]],
@@ -310,7 +381,8 @@ def generate_transliteration(
     direction: str,
     instruction_format: bool,
     delimiter: str = None,
-    output_format: str = 'plaintext'
+    output_format: str = 'plaintext',
+    rng: random.Random = None
 ):
     """Generate transliteration parallel data."""
     lines_written = 0
@@ -329,11 +401,12 @@ def generate_transliteration(
                 # Roman → Gothic
                 if direction in ['roman_to_gothic', 'both']:
                     if instruction_format and output_format == 'jsonl':
-                        prompt = f"Transliterate to Gothic script: {roman_text} Response:"
+                        prompt = build_instruction_prompt("to_gothic_script", roman_text, rng)
                         response = f" {gothic_text}"
                         f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
                     elif instruction_format:
-                        example = f"Transliterate to Gothic script: {roman_text} Response: {gothic_text}"
+                        prompt = build_instruction_prompt("to_gothic_script", roman_text, rng)
+                        example = f"{prompt} {gothic_text}"
                         f.write(' '.join(example.split()) + '\n')
                     else:
                         separator = delimiter if delimiter else ' '
@@ -350,11 +423,12 @@ def generate_transliteration(
                 # Gothic → Roman
                 if direction in ['gothic_to_roman', 'both']:
                     if instruction_format and output_format == 'jsonl':
-                        prompt = f"Transliterate to Latin script: {gothic_text} Response:"
+                        prompt = build_instruction_prompt("to_latin_script", gothic_text, rng)
                         response = f" {roman_text}"
                         f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
                     elif instruction_format:
-                        example = f"Transliterate to Latin script: {gothic_text} Response: {roman_text}"
+                        prompt = build_instruction_prompt("to_latin_script", gothic_text, rng)
+                        example = f"{prompt} {roman_text}"
                         f.write(' '.join(example.split()) + '\n')
                     else:
                         separator = delimiter if delimiter else ' '
@@ -380,7 +454,8 @@ def generate_translation(
     direction: str,
     instruction_format: bool,
     delimiter: str = None,
-    output_format: str = 'plaintext'
+    output_format: str = 'plaintext',
+    rng: random.Random = None
 ):
     """Generate translation parallel data."""
     lines_written = 0
@@ -415,11 +490,12 @@ def generate_translation(
                         # Use script-specific prompt for English → Gothic
                         target_lang = "Romanized Gothic" if script_name == 'roman' else "Gothic"
                         if instruction_format and output_format == 'jsonl':
-                            prompt = f"Translate to {target_lang}: {english_text} Response:"
+                            prompt = build_instruction_prompt("to_target", english_text, rng, target_label=target_lang)
                             response = f" {gothic_text}"
                             f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
                         elif instruction_format:
-                            example = f"Translate to {target_lang}: {english_text} Response: {gothic_text}"
+                            prompt = build_instruction_prompt("to_target", english_text, rng, target_label=target_lang)
+                            example = f"{prompt} {gothic_text}"
                             f.write(' '.join(example.split()) + '\n')
                         else:
                             separator = delimiter if delimiter else ' '
@@ -436,11 +512,12 @@ def generate_translation(
                     # Gothic → English
                     if direction in ['gothic_to_eng', 'both']:
                         if instruction_format and output_format == 'jsonl':
-                            prompt = f"Translate to English: {gothic_text} Response:"
+                            prompt = build_instruction_prompt("to_english", gothic_text, rng)
                             response = f" {english_text}"
                             f.write(json.dumps({"prompt": prompt, "response": response}, ensure_ascii=False) + '\n')
                         elif instruction_format:
-                            example = f"Translate to English: {gothic_text} Response: {english_text}"
+                            prompt = build_instruction_prompt("to_english", gothic_text, rng)
+                            example = f"{prompt} {english_text}"
                             f.write(' '.join(example.split()) + '\n')
                         else:
                             separator = delimiter if delimiter else ' '
@@ -659,6 +736,10 @@ Examples:
     print("\nGenerating data...", file=sys.stderr)
     stats = {}
 
+    # Seeded RNG for prompt-side diversification (phrasing + input quoting) of
+    # the instruction-tuning formats. Independent of the split/codex RNG stream.
+    prompt_rng = random.Random(args.seed)
+
     for split_name in args.splits:
         verse_ids_for_split = split_dict[split_name]
 
@@ -705,7 +786,7 @@ Examples:
                     verse_ids_for_split, gothic_verses,
                     str(output_path), args.transliteration_direction,
                     args.instruction_format, args.delimiter,
-                    args.output_format
+                    args.output_format, prompt_rng
                 )
                 stats[str(output_path)] = {
                     'unique_verses': len(verse_ids_for_split),
@@ -718,7 +799,7 @@ Examples:
                     verse_ids_for_split, gothic_verses, english_verses,
                     str(output_path), args.translation_script,
                     args.translation_direction, args.instruction_format,
-                    args.delimiter, args.output_format
+                    args.delimiter, args.output_format, prompt_rng
                 )
                 stats[str(output_path)] = {
                     'unique_verses': len(verse_ids_for_split),
