@@ -19,7 +19,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from gothic.transliterate import transliterate_latin_to_gothic
+from gothic.orthography import transliterate_latin_to_gothic
 
 # Mapping from Gothic abbreviations to WEB book names (for translation alignment)
 GOTHIC_TO_WEB_BOOKS = {

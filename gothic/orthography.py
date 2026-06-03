@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-Transliteration utilities for Gothic script.
+Orthography utilities for Gothic.
 
-Provides bidirectional transliteration between Latin romanization and Gothic Unicode
-characters. Can be used as a module or run standalone to transliterate files.
+Provides two related families of operations:
+
+1. Bidirectional transliteration between Latin romanization and Gothic Unicode
+   script (``transliterate_latin_to_gothic`` / ``transliterate_gothic_to_latin``).
+2. Normalization of romanized dictionary orthography (macrons, acute accents,
+   the ƕ digraph) to the surface conventions used in the gotica corpus
+   (``normalize_orthography``).
 
 Usage as module:
-    from transliterate import transliterate_latin_to_gothic, transliterate_gothic_to_latin
+    from gothic.orthography import transliterate_latin_to_gothic, normalize_orthography
 
     gothic_text = transliterate_latin_to_gothic("saihwan")
     latin_text = transliterate_gothic_to_latin("𐍃𐌰𐌹𐍈𐌰𐌽")
+    surface = normalize_orthography("dwalmōn")  # -> "dwalmon"
 
 Usage as CLI:
-    python transliterate.py input.txt output.txt --direction to-gothic
-    python transliterate.py input.txt output.txt --direction to-latin
+    python orthography.py input.txt output.txt --direction to-gothic
+    python orthography.py input.txt output.txt --direction to-latin
 """
 
 def get_latin_gothic_mappings():
@@ -154,6 +160,39 @@ def transliterate_gothic_to_latin(text):
     for gothic, latin in sorted(gothic_to_latin.items(), key=lambda x: -len(x[0])):
         text = text.replace(gothic, latin)
 
+    return text
+
+
+# Normalize romanized dictionary orthography to match gotica surface forms.
+# Macrons mark vowel length, acute accents mark diphthong components (aí=ai, aú=au),
+# ƕ is the Unicode digraph character for hw, ↑ is a cross-reference artifact.
+ORTHOGRAPHY_MAP = str.maketrans(
+    {
+        "ā": "a", "ē": "e", "ī": "i", "ō": "o", "ū": "u",
+        "Ā": "A", "Ē": "E", "Ī": "I", "Ō": "O", "Ū": "U",
+        "á": "a", "í": "i", "ú": "u",
+        "à": "a", "ì": "i",
+        "ä": "a",
+        "↑": "",
+    }
+)
+
+
+def normalize_orthography(text: str) -> str:
+    """Normalize romanized Gothic dictionary orthography to gotica conventions.
+
+    Strips macrons (ā→a), acute accents (aí→ai, aú→au), grave accents,
+    diaeresis, cross-reference artifacts (↑), and expands ƕ→hw.
+
+    Args:
+        text: Romanized Gothic text using dictionary orthographic conventions.
+
+    Returns:
+        The text normalized to the surface orthography of the gotica corpus.
+    """
+    text = text.translate(ORTHOGRAPHY_MAP)
+    # ƕ → hw (must be done as string replacement, not char-to-char)
+    text = text.replace("ƕ", "hw").replace("Ƕ", "Hw")
     return text
 
 

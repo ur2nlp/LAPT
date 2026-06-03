@@ -34,22 +34,7 @@ import re
 import sys
 from collections import OrderedDict
 
-from gothic.transliterate import transliterate_gothic_to_latin
-
-
-# Normalize Koebler orthographic conventions to match gotica surface forms.
-# Macrons mark vowel length, acute accents mark diphthong components (aí=ai, aú=au),
-# ƕ is the Unicode digraph character for hw, ↑ is a cross-reference artifact.
-ORTHOGRAPHY_MAP = str.maketrans(
-    {
-        "ā": "a", "ē": "e", "ī": "i", "ō": "o", "ū": "u",
-        "Ā": "A", "Ē": "E", "Ī": "I", "Ō": "O", "Ū": "U",
-        "á": "a", "í": "i", "ú": "u",
-        "à": "a", "ì": "i",
-        "ä": "a",
-        "↑": "",
-    }
-)
+from gothic.orthography import normalize_orthography, transliterate_gothic_to_latin
 
 
 def levenshtein(s1: str, s2: str) -> int:
@@ -72,18 +57,6 @@ def levenshtein(s1: str, s2: str) -> int:
         prev_row = curr_row
 
     return prev_row[-1]
-
-
-def normalize_orthography(text: str) -> str:
-    """Normalize Koebler dictionary orthography to match gotica conventions.
-
-    Strips macrons (ā→a), acute accents (aí→ai, aú→au), grave accents,
-    diaeresis, cross-reference artifacts (↑), and expands ƕ→hw.
-    """
-    text = text.translate(ORTHOGRAPHY_MAP)
-    # ƕ → hw (must be done as string replacement, not char-to-char)
-    text = text.replace("ƕ", "hw").replace("Ƕ", "Hw")
-    return text
 
 
 def strip_punctuation(surface_form: str) -> str:
