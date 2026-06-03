@@ -11,6 +11,7 @@ Subcommands:
     diff      - Show only parameters that vary between selected runs
     verify    - Check registry params match local config files in outputs/configs/
     annotate  - Set era/group/note/observation for a run
+    debt      - Report annotation debt (un-registered runs, empty note/observation)
     sort      - Rewrite registry.yaml ordered by experiment ID or timestamp
 
 Usage:
@@ -661,6 +662,97 @@ def cmd_verify(args: argparse.Namespace) -> None:
     )
 
 
+def _registry_artifact_stems() -> tuple[set[str], set[str]]:
+    """Return (config_stems, trainer_state_stems) found under outputs/."""
+    base = REGISTRY_PATH.parent
+    config_stems = {path.stem for path in (base / "configs").glob("*.yaml")}
+    state_stems = {path.stem for path in (base / "trainer_states").glob("*.json")}
+    return config_stems, state_stems
+
+
+def _is_blank_annotation(value: object) -> bool:
+    """True if a note/observation field is missing or whitespace-only."""
+    return value is None or (isinstance(value, str) and value.strip() == "")
+
+
+def categorize_debt(
+    registry: dict,
+    config_stems: set[str],
+    state_stems: set[str],
+) -> dict[str, list[str]]:
+    """Categorize annotation debt from a registry and the artifact files present.
+
+    Pure (no I/O) so it can be unit-tested. Returns naturally-sorted version
+    lists keyed by 'unregistered', 'orphan', 'empty_note', 'empty_observation'.
+    """
+    have_files = config_stems | state_stems
+    registry_ids = set(registry)
+    return {
+        "unregistered": sorted(have_files - registry_ids, key=_natural_sort_key),
+        "orphan": sorted(registry_ids - have_files, key=_natural_sort_key),
+        "empty_note": sorted(
+            (rid for rid in registry_ids if _is_blank_annotation(registry[rid].get("note"))),
+            key=_natural_sort_key,
+        ),
+        "empty_observation": sorted(
+            (rid for rid in registry_ids
+             if _is_blank_annotation(registry[rid].get("observation"))),
+            key=_natural_sort_key,
+        ),
+    }
+
+
+def cmd_debt(args: argparse.Namespace) -> None:
+    """Handle the 'debt' subcommand.
+
+    Reconciles the outputs/ tree against the registry and reports
+    experiment-tracking debt. Read-only — never edits the registry.
+
+    Categories, in priority order:
+        un-registered  - a config and/or trainer state exists but there is no
+                         registry entry (usually a run that wasn't synced)
+        empty note     - registry entry whose note is missing/blank (clear debt)
+        empty obs      - missing/blank observation (common; soft signal only)
+        orphan         - registry entry with no backing config or trainer state
+    """
+    registry = load_registry()
+    config_stems, state_stems = _registry_artifact_stems()
+    debt = categorize_debt(registry, config_stems, state_stems)
+    unregistered = debt["unregistered"]
+    orphan = debt["orphan"]
+    empty_note = debt["empty_note"]
+    empty_obs = debt["empty_observation"]
+
+    print(
+        f"registry: {len(registry)} entries | "
+        f"configs: {len(config_stems)} | trainer_states: {len(state_stems)}\n"
+    )
+
+    print(f"UN-REGISTERED (files present, no registry row): {len(unregistered)}")
+    for rid in unregistered:
+        tags = []
+        if rid in config_stems:
+            tags.append("config")
+        if rid in state_stems:
+            tags.append("state")
+        print(f"  {rid}  ({'+'.join(tags)})")
+
+    print(f"\nEMPTY note (clear debt): {len(empty_note)}")
+    if empty_note:
+        print("  " + ", ".join(empty_note))
+
+    print(f"\nEMPTY observation (common; soft signal): {len(empty_obs)}")
+    if args.list_observations and empty_obs:
+        print("  " + ", ".join(empty_obs))
+
+    if orphan:
+        print(f"\nORPHAN registry rows (no backing config/state): {len(orphan)}")
+        print("  " + ", ".join(orphan))
+
+    if args.strict and (unregistered or empty_note):
+        sys.exit(1)
+
+
 def sort_registry(registry: dict, by: str) -> dict:
     """Return a new registry dict with entries ordered by ID or timestamp.
 
@@ -837,6 +929,22 @@ def main():
         help="Set run status (e.g. 'manually_closed' to prevent re-fetching)",
     )
 
+    # debt
+    debt_parser = subparsers.add_parser(
+        "debt",
+        help="Report annotation debt: un-registered runs and empty note/observation fields",
+    )
+    debt_parser.add_argument(
+        "--list-observations",
+        action="store_true",
+        help="Also list versions with an empty observation (off by default; common)",
+    )
+    debt_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero if any un-registered run or empty note is found",
+    )
+
     # sort
     sort_parser = subparsers.add_parser(
         "sort",
@@ -857,6 +965,7 @@ def main():
         "diff": cmd_diff,
         "verify": cmd_verify,
         "annotate": cmd_annotate,
+        "debt": cmd_debt,
         "sort": cmd_sort,
     }
     commands[args.command](args)

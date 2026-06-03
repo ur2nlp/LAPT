@@ -10,6 +10,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.registry import (
+    categorize_debt,
     diff_runs,
     extract_params,
     format_param_value,
@@ -69,6 +70,43 @@ def sample_config_v82():
             "seed_vocab_multiplier": 5.0,
         },
     }
+
+
+class TestCategorizeDebt:
+    @pytest.fixture
+    def registry(self):
+        return {
+            "v01": {"params": {}, "note": "annotated", "observation": "seen"},
+            "v02": {"params": {}, "note": "", "observation": "seen"},
+            "v03": {"params": {}, "note": "   ", "observation": None},
+            "v10": {"params": {}, "note": "ok"},  # observation key absent
+        }
+
+    def test_unregistered_runs(self, registry):
+        # v04/v05 have files but no registry row
+        debt = categorize_debt(registry, {"v01", "v04"}, {"v01", "v05"})
+        assert debt["unregistered"] == ["v04", "v05"]
+
+    def test_orphan_rows(self, registry):
+        # registry rows with no backing files
+        debt = categorize_debt(registry, {"v01"}, {"v02"})
+        assert debt["orphan"] == ["v03", "v10"]
+
+    def test_empty_note_includes_blank_and_whitespace(self, registry):
+        debt = categorize_debt(registry, set(), set())
+        # v02 (empty) and v03 (whitespace) are blank; v01/v10 are not
+        assert debt["empty_note"] == ["v02", "v03"]
+
+    def test_empty_observation_includes_absent_and_none(self, registry):
+        debt = categorize_debt(registry, set(), set())
+        # v03 (None) and v10 (key absent) count as empty
+        assert debt["empty_observation"] == ["v03", "v10"]
+
+    def test_natural_sort_order(self, registry):
+        # v2 / v100 are not registry keys, so both are unregistered
+        debt = categorize_debt(registry, {"v2", "v100"}, set())
+        # numeric-aware sort: v2 before v100 (lexical would give v100 first)
+        assert debt["unregistered"] == ["v2", "v100"]
 
 
 class TestExtractParams:
