@@ -1,19 +1,19 @@
 type: multinomial
-language: old_germanic_a035
+language: old_germanic
 sources:
   - type: plaintext
-    id: ang
-    path: data/beowulf/beowulf_clean.txt
-  - type: concat
     id: got
     dev_size: -1  # No dev split - using external holdout instead
-    sources:
-      - type: plaintext
-        path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
-      - type: plaintext
-        path: data/gothic_prepared/transliteration_all-codices_both-directions_train.txt
+    upsampling_factor: 5.0
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
+  - type: plaintext
+    id: got-translit
+    dev_size: -1
+    upsampling_factor: 2.5
+    path: data/gothic_prepared/transliteration_all-codices_both-directions_delimited_train.txt
   - type: concat
     id: non
+    upsampling_factor: 20.0
     sources:
       - type: plaintext
         path: data/sagas/sagas_clean.txt
@@ -22,16 +22,17 @@ sources:
   - type: plaintext
     id: got-eng
     dev_size: -1  # No dev split - using external holdout instead
-    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_train.txt
+    upsampling_factor: 5.0
+    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_delimited_train.txt
   - type: huggingface
     id: eng
-    name: wikimedia/wikipedia
-    config: 20231101.en
+    name: allenai/c4
+    config: en
     split: train
-    max_samples: 5100000
+    max_samples: 5020000
     min_words_per_line: 8
-    oversampling_factor: 32
-    dev_size: 100000
+    oversampling_factor: 8
+    dev_size: 20000
 alpha: 0.5
 total_samples: 9000000
 dev_size: 0.1

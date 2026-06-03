@@ -1,37 +1,47 @@
 type: multinomial
 language: gothic_instruct
 sources:
-  # === Instruction data (loss masking on response only) ===
-  # Gothic translation (English ↔ Gothic, both scripts)
   - type: instruction_jsonl
     id: got-translation
     dev_size: -1  # Using external holdout (test split)
-    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train.jsonl
-  # Gothic transliteration (Roman ↔ Gothic script)
+    upsampling_factor: 16
+    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_pd_train.jsonl
+  - type: instruction_jsonl
+    id: got-translation-cot
+    dev_size: -1  # Using external holdout (test split)
+    upsampling_factor: 16
+    path: data/gothic_instruct/translation-cot_both-scripts_both-directions_train.jsonl
   - type: instruction_jsonl
     id: got-transliteration
     dev_size: -1  # Using external holdout (test split)
-    path: data/gothic_instruct/transliteration_all-codices_both-directions_train.jsonl
-  # English FLAN (NLI/QA tasks)
+    upsampling_factor: 2
+    path: data/gothic_instruct/transliteration_all-codices_both-directions_pd_train.jsonl
   - type: instruction_jsonl
-    id: eng-flan
-    path: data/flan_filtered/flan_nli_qa.jsonl
-  # === LM data (standard causal LM loss on all tokens) ===
-  # Gothic monolingual
+    id: got-alignment
+    dev_size: -1
+    upsampling_factor: 16
+    path: data/gothic_instruct/alignment_both-scripts_train_v0.4.jsonl
+  - type: instruction_hf
+    id: eng-chat
+    name: HuggingFaceH4/no_robots
+    split: train
+    dev_size: -1
+    upsampling_factor: 32
   - type: plaintext
     id: got
     dev_size: -1  # Using external holdout
+    upsampling_factor: 16
     path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
-  # English Wikipedia
   - type: huggingface
     id: eng
-    name: wikimedia/wikipedia
-    config: 20231101.en
+    name: allenai/c4
+    config: en
     split: train
-    max_samples: 5100000
+    max_samples: 5020000
     min_words_per_line: 8
-    oversampling_factor: 32
-    dev_size: 100000
+    oversampling_factor: 8
+    dev_size: 20000
 alpha: 0.5
 total_samples: 9000000
+dev_size: 0.1
 cache_dir: "data/${dataset.language}"

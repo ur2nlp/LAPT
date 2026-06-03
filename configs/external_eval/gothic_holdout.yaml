@@ -1,9 +1,11 @@
 # External evaluation sets from Gothic prepared data
-# These are held-out test sets for Gothic monolingual+transliteration and translation tasks
+# These are held-out test sets for Gothic monolingual, transliteration, and translation tasks
 external_eval_sets:
   - name: got_holdout
-    path: data/gothic_prepared/mono-translit_all-codices_both-scripts_both_directions_test.txt
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_test.txt
     format: plaintext
+  - name: got-translit_holdout
+    path: data/gothic_prepared/transliteration_all-codices_both-directions_delimited_test.txt
   - name: got-eng_holdout
-    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_test.txt
+    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_delimited_test.txt
     format: plaintext
