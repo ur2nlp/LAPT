@@ -12250,3 +12250,710 @@ v77L:
   note: got x5, translit x2.5, got-eng x5, non x20, dropout 0.25, lr 7.5e-5
   observation: Upping non proportion improves bpc without significantly hurting other
     languages; lr 7.5e-5 and dropout 0.25 is the sweet spot
+v74L-i1:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 32
+    upsampling_factor_got-transliteration: 4
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 5.0e-05
+    focus_enabled: false
+  extracted_at: '2026-06-01T18:46:23+00:00'
+  era: wordspotting-v0.4
+  group: 1.7B-initial-sweep
+  note: lr 5e-5, dropout 0.3, alignment x32, translation x32, translit x4
+  observation: Overfits around 20k steps with alignment and translation at x32; only
+    when lr lowered to 2.5e-5 does it train longer and to a better minimum; higher
+    dropout only helped with lower lr and upsampling
+v74L-i2:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 32
+    upsampling_factor_got-transliteration: 4
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 5.0e-05
+    focus_enabled: false
+  extracted_at: '2026-06-01T18:46:26+00:00'
+  era: wordspotting-v0.4
+  group: 1.7B-initial-sweep
+  note: lr 5e-5, dropout 0.35, alignment x32, translation x32, translit x4
+  observation: Overfits around 20k steps with alignment and translation at x32; only
+    when lr lowered to 2.5e-5 does it train longer and to a better minimum; higher
+    dropout only helped with lower lr and upsampling
+v74L-i3:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 32
+    upsampling_factor_got-transliteration: 4
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-01T18:46:28+00:00'
+  era: wordspotting-v0.4
+  group: 1.7B-initial-sweep
+  note: lr 2.5e-5, dropout 0.3, alignment x32, translation x32, translit x4
+  observation: Overfits around 20k steps with alignment and translation at x32; only
+    when lr lowered to 2.5e-5 does it train longer and to a better minimum; higher
+    dropout only helped with lower lr and upsampling
+v74L-i4:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 5.0e-05
+    focus_enabled: false
+  extracted_at: '2026-06-01T18:46:31+00:00'
+  era: wordspotting-v0.4
+  group: 1.7B-initial-sweep
+  note: lr 5e-5, dropout 0.3, alignment x16, translation x16, translit x2
+  observation: Overfits around 20k steps with alignment and translation at x32; only
+    when lr lowered to 2.5e-5 does it train longer and to a better minimum; higher
+    dropout only helped with lower lr and upsampling
+v74L-i5:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-02T15:30:34+00:00'
+  era: wordspotting-v0.4
+  group: 1.7B-initial-sweep
+  note: lr 2.5e-5, dropout 0.3, alignment x16, translation x16, translit x2
+  observation: Overfits around 20k steps with alignment and translation at x32; only
+    when lr lowered to 2.5e-5 does it train longer and to a better minimum; higher
+    dropout only helped with lower lr and upsampling
+v74L-i6:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 1.0e-05
+    focus_enabled: false
+  extracted_at: '2026-06-02T15:30:38+00:00'
+  era: wordspotting-v0.4
+  group: 1.7B-initial-sweep
+  note: lr 1e-5, dropout 0.3, alignment x16, translation x16, translit x2
+  observation: Overfits around 20k steps with alignment and translation at x32; only
+    when lr lowered to 2.5e-5 does it train longer and to a better minimum; higher
+    dropout only helped with lower lr and upsampling
+v74L-i7:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-02T15:30:40+00:00'
+  era: wordspotting-v0.4
+  group: 1.7B-initial-sweep
+  note: lr 2.5e-5, dropout 0.35, alignment x16, translation x16, translit x2
+  observation: Overfits around 20k steps with alignment and translation at x32; only
+    when lr lowered to 2.5e-5 does it train longer and to a better minimum; higher
+    dropout only helped with lower lr and upsampling
+v74L-i8:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-03T04:14:23+00:00'
+  era: wordspotting-v0.4
+  group: IT-diversification
+  note: diversified translate/translit prompts; lr 2.5e-5, dropout 0.3, alignment
+    x16, translation x16, translit x2
+  observation: very hard to distinguish from i5, to which i8 only adds prompt diversification
+v74L-i9:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-03T04:14:27+00:00'
+  era: wordspotting-v0.4
+  group: IT-diversification
+  note: added CoT translation; prompt diversification; lr 2.5e-5, dropout 0.3, alignment
+    x16, translation x16, cot x16, translit x2
+  observation: Adding CoT translation gives a very slight edge in alignment and translation
+v74L-i10:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-04T15:27:53+00:00'
+  era: wordspotting-v0.4
+  group: IT-diversification
+  note: cot+pd; lr 2.5e-5, dropout 0.25, alignment x16, translation x16, cot x16,
+    translit x2
+  observation: Lowering dropout below 0.3 does not seem to help here
+v74L-i11:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.2
+    attention_dropout: 0.2
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-04T15:27:55+00:00'
+  era: wordspotting-v0.4
+  group: IT-diversification
+  note: cot+pd; lr 2.5e-5, dropout 0.2, alignment x16, translation x16, cot x16, translit
+    x2
+  observation: Lowering dropout below 0.3 does not seem to help here
+v74L-i12:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_got-lexicon: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-04T15:27:59+00:00'
+  era: wordspotting-v0.4
+  group: IT-diversification
+  note: cot+pd + lexical/dictionary task; lr 2.5e-5, dropout 0.3, alignment x16, lex
+    x16, translation x16, cot x16, translit x2
+  observation: Adding lexical task gives significant gains in alignment, translation,
+    and cot-translation
+v74L-i13:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: token_mean
+    per_example_loss_floor: 1
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 16
+    upsampling_factor_got-lexicon: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-04T15:28:01+00:00'
+  era: wordspotting-v0.4
+  group: IT-diversification
+  note: cot+pd+lex; token-mean loss; lr 2.5e-5, dropout 0.3, alignment x16, lex x16,
+    translation x16, cot x16, translit x2
+  observation: Tried switching back to token-mean loss because of the observation
+    that models trained with CoT translation didn't seem to generate it. However,
+    all else being equal this doesn't seem to improve translation bpc, and obviously
+    hurts alignment (shorter length)
+v74L-i14:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: token_mean
+    per_example_loss_floor: 1
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-04T15:28:03+00:00'
+  era: wordspotting-v0.4
+  group: IT-diversification
+  note: cot+pd+lex; token-mean loss; lr 2.5e-5, dropout 0.3, alignment x32, lex x32,
+    translation x16, cot x16, translit x2
+  observation: Upping proportion of shorter-length tasks claws back some of the performance
+    lost from switching to token-mean
