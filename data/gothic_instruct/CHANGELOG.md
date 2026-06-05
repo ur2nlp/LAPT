@@ -38,10 +38,16 @@ cluster where needed): authentic newline-form alignment v0.4 (the newline form t
 runs ate; its space-form is the 1.0.0 release), legacy `_a` alignment, newline-form cot and
 dictionary, and the pre-pd translation/transliteration.
 
+**Live files renamed to the versioned scheme** `<descriptors>_<split>_v1.0.0.jsonl`
+(version after the split suffix, matching the archive's `_v0.4` convention),
+dropping `_pd_` per "keep all but pd". Added `aliases:` to each manifest entry
+mapping the old config/registry-referenced filenames to their current versioned
+file (or to the archived as-run form, for `alignment` `_v0.4`/`_a` and the
+even-older `word-spotting_*_a`). Configs for finished runs are left untouched;
+the aliases are the bridge. Validated: every config-referenced path resolves to a
+current file or an alias.
+
 ### Still pending (next session)
-- Rename live files into the versioned scheme (`..._vMAJOR.MINOR.PATCH.jsonl`,
-  dropping `_pd_`; keep other descriptors per "keep all but pd"), adding
-  `aliases:` to the manifest for the old config-referenced paths.
 - Define MAJOR/MINOR/PATCH bump semantics (deferred discussion).
 - Optionally: emit a `.meta.json` sidecar from each generator so provenance is
   captured automatically on every run.

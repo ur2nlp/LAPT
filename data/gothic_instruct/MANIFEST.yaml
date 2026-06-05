@@ -5,6 +5,10 @@
 # renamed into a versioned scheme (`..._vMAJOR.MINOR.PATCH.jsonl`) without
 # changing the sha. See CHANGELOG.md for the narrative.
 #
+# `aliases` lists prior filenames (referenced in finished configs / the registry)
+# that resolve to the same content as the entry they sit on -- the bridge from an
+# old config path string to its current versioned file.
+#
 # `used_by` lists the finished training runs whose configs reference the file.
 # CAVEAT: a run consumed whatever bytes sat at that path *at run time*. Where a
 # file was regenerated this session (cot, dictionary, alignment; newline ->
@@ -30,19 +34,25 @@ artifacts:
     releases:
       - version: 1.0.0
         files:
-          train: {path: translation_all-codices_both-scripts_both-directions_pd_train.jsonl, sha256: 6aa648e1c83c2be2786274d1115099a9399ae23e19176222821338f1f4a0bd36, n: 5400}
-          test:  {path: translation_all-codices_both-scripts_both-directions_pd_test.jsonl,  sha256: 513cf62654c22d7dbe5f868f670c9b21da534491f2327b14a118f69bd5d22e86, n: 1332}
+          train: {path: translation_all-codices_both-scripts_both-directions_train_v1.0.0.jsonl, sha256: 6aa648e1c83c2be2786274d1115099a9399ae23e19176222821338f1f4a0bd36, n: 5400}
+          test:  {path: translation_all-codices_both-scripts_both-directions_test_v1.0.0.jsonl,  sha256: 513cf62654c22d7dbe5f868f670c9b21da534491f2327b14a118f69bd5d22e86, n: 1332}
+        aliases:
+          - translation_all-codices_both-scripts_both-directions_pd_train.jsonl
+          - translation_all-codices_both-scripts_both-directions_pd_test.jsonl
         source: {name: gothic-bible-parallel-all-codices, version: unversioned}
         generator: {module: gothic.data.prepare_gothic_data, note: "prompt-diversified; pre-flatten (already space-form)"}
         used_by: [v74L-i8..i15, v139-i18..i21]
-        notes: "Bytes unchanged this session; exactly what the listed runs consumed."
+        notes: "Bytes unchanged this session; exactly what the listed runs consumed. aliases = pre-rename _pd_ names in configs."
     archived:
       - label: pre-pd
         files:
           train: {path: archive/translation_all-codices_both-scripts_both-directions_train.jsonl, sha256: 5388857fd5a2379fc7bbf9cf8779ec29240049526a8b8b1466f9d9b2a62d147c, n: 5400}
           test:  {path: archive/translation_all-codices_both-scripts_both-directions_test.jsonl,  sha256: d2980c00ff43e595b380f226114187e36371d77e7fd5c581a65f709783b4e501, n: 1332}
+        aliases:
+          - translation_all-codices_both-scripts_both-directions_train.jsonl
+          - translation_all-codices_both-scripts_both-directions_test.jsonl
         used_by: [v74L-i1..i7, v81-instruct-a/b, v126-ia..ic, v139-i1..i17, v139-ia..is]
-        notes: "Pre-1.0 predecessor (no prompt diversification); space-form. Heavily used by earlier runs."
+        notes: "Pre-1.0 predecessor (no prompt diversification); space-form. Heavily used by earlier runs. aliases = old live (non-archive) path in configs."
 
   transliteration-instruct:
     description: Latin<->Gothic-script transliteration, prompt-diversified.
@@ -50,19 +60,25 @@ artifacts:
     releases:
       - version: 1.0.0
         files:
-          train: {path: transliteration_all-codices_both-directions_pd_train.jsonl, sha256: ea8b61fbcfe22ba28104715bb4250be5b9e0ab6713b130b0c2c8a0a25b0a9365, n: 6750}
-          test:  {path: transliteration_all-codices_both-directions_pd_test.jsonl,  sha256: 97fb793653cd5972878d03fbc9a010319196953c690dc29dfb680e6878006208, n: 1680}
+          train: {path: transliteration_all-codices_both-directions_train_v1.0.0.jsonl, sha256: ea8b61fbcfe22ba28104715bb4250be5b9e0ab6713b130b0c2c8a0a25b0a9365, n: 6750}
+          test:  {path: transliteration_all-codices_both-directions_test_v1.0.0.jsonl,  sha256: 97fb793653cd5972878d03fbc9a010319196953c690dc29dfb680e6878006208, n: 1680}
+        aliases:
+          - transliteration_all-codices_both-directions_pd_train.jsonl
+          - transliteration_all-codices_both-directions_pd_test.jsonl
         source: {name: gothic-bible-parallel-all-codices, version: unversioned}
         generator: {module: gothic.data.prepare_gothic_data, note: "prompt-diversified; pre-flatten (already space-form)"}
         used_by: [v74L-i8..i15, v139-i18..i21]
-        notes: "Bytes unchanged this session; exactly what the listed runs consumed."
+        notes: "Bytes unchanged this session; exactly what the listed runs consumed. aliases = pre-rename _pd_ names in configs."
     archived:
       - label: pre-pd
         files:
           train: {path: archive/transliteration_all-codices_both-directions_train.jsonl, sha256: 36e94bcb3984cd10a53bbbfa6ef6e75da4865779494cad7543ad5460de1ce9d8, n: 6750}
           test:  {path: archive/transliteration_all-codices_both-directions_test.jsonl,  sha256: afef8e09b199b7b80e177ba3cfecafe1dbebc67b5c380209563b2e742ca1230c, n: 1680}
+        aliases:
+          - transliteration_all-codices_both-directions_train.jsonl
+          - transliteration_all-codices_both-directions_test.jsonl
         used_by: [v74L-i1..i7, v81-instruct-a/b, v126-ia..ic, v139-i1..i17, v139-ia..is]
-        notes: "Pre-1.0 predecessor (no prompt diversification); space-form."
+        notes: "Pre-1.0 predecessor (no prompt diversification); space-form. aliases = old live (non-archive) path in configs."
 
   translation-cot-instruct:
     description: Chain-of-thought translation (key words first, then full sentence).
@@ -70,8 +86,11 @@ artifacts:
     releases:
       - version: 1.0.0
         files:
-          train: {path: translation-cot_both-scripts_both-directions_train.jsonl, sha256: ab8a37a2312d288c98f443594dbe5421bc5939c356a82e6d4102d257e2d0c4bc, n: 5288}
-          test:  {path: translation-cot_both-scripts_both-directions_test.jsonl,  sha256: b974e5c79e3fb92aaa66b29d6b60f45bb2cc07a74ca9ccd1ab400c433939a339, n: 1312}
+          train: {path: translation-cot_both-scripts_both-directions_train_v1.0.0.jsonl, sha256: ab8a37a2312d288c98f443594dbe5421bc5939c356a82e6d4102d257e2d0c4bc, n: 5288}
+          test:  {path: translation-cot_both-scripts_both-directions_test_v1.0.0.jsonl,  sha256: b974e5c79e3fb92aaa66b29d6b60f45bb2cc07a74ca9ccd1ab400c433939a339, n: 1312}
+        aliases:
+          - translation-cot_both-scripts_both-directions_train.jsonl
+          - translation-cot_both-scripts_both-directions_test.jsonl
         source: {name: ws-alignments, version: "v0.4", path: data/gothic_word_spotting/train_alignments.jsonl, git_sha: 958f8c3}
         generator: {module: gothic.word_spotting.expand_to_cot, args: "script=both, directions=both, variants=1", seed: 1, note: "regenerated this session with flatten_prompt (newline->space)"}
         used_by: [v74L-i9..i15, v139-i18..i21]
@@ -90,7 +109,9 @@ artifacts:
     releases:
       - version: 1.0.0
         files:
-          train: {path: dictionary-lookup_both-scripts_both-directions_train.jsonl, sha256: 8d64293d10ac5ddace2ba62c5679c5e003268d82754d1640a98aa31853c4129e, n: 12022}
+          train: {path: dictionary-lookup_both-scripts_both-directions_train_v1.0.0.jsonl, sha256: 8d64293d10ac5ddace2ba62c5679c5e003268d82754d1640a98aa31853c4129e, n: 12022}
+        aliases:
+          - dictionary-lookup_both-scripts_both-directions_train.jsonl
         source: {name: wright-gothic-glossary, path: data/gothic_dictionaries/wright_gothic_english.json}
         generator: {module: gothic.dictionary_lookup.expand_to_instruction, args: "script=both, directions=both, variants=1, reverse-gloss-mode=sample", seed: 1, note: "regenerated this session with flatten_prompt (newline->space)"}
         used_by: [v74L-i12..i15, v139-i18..i21]
@@ -108,8 +129,9 @@ artifacts:
     releases:
       - version: 1.0.0
         files:
-          train: {path: alignment_both-scripts_train.jsonl, sha256: 2e64190da9fb99d85a9b4ca590aa3569669fd36d8973d0a11cac95fc79e4bc2c, n: 33327}
-          test:  {path: alignment_both-scripts_test.jsonl,  sha256: b36c05b88a5ce4e70c3c2596b6464070d2903dbe4055c7755e81964b982f6cd9, n: 8236}
+          train: {path: alignment_both-scripts_train_v1.0.0.jsonl, sha256: 2e64190da9fb99d85a9b4ca590aa3569669fd36d8973d0a11cac95fc79e4bc2c, n: 33327}
+          test:  {path: alignment_both-scripts_test_v1.0.0.jsonl,  sha256: b36c05b88a5ce4e70c3c2596b6464070d2903dbe4055c7755e81964b982f6cd9, n: 8236}
+        aliases: []   # never config-referenced (space-form is new this session); as-run path is on the archived v0.4 entry below
         source: {name: ws-verified-diversified, version: "v0.4", path: "data/gothic_word_spotting/diversification/{train,test}_verified_b_diversified.jsonl"}
         generator: {module: gothic.word_spotting.expand_to_instruction, args: "projections=all, script=both", seed: 1, note: "space-form (flatten_prompt); regenerated this session"}
         used_by: [v74L-i1..i15, v139-i1..i21]
@@ -130,6 +152,9 @@ artifacts:
         files:
           train: {path: archive/alignment_both-scripts_train_v0.4.jsonl, sha256: fc49ee64a8e5eb2c5c3e3bc95eb475dd28b0564b76852a973c48fdc8b2087724, n: 33327}
           test:  {path: archive/alignment_both-scripts_test_v0.4.jsonl,  sha256: f1ade7cd8889d07f6a3e2aebf0b56a19c14aeeea1fb99a8130bbf88657b32e41, n: 8236}
+        aliases:
+          - alignment_both-scripts_train_v0.4.jsonl
+          - alignment_both-scripts_test_v0.4.jsonl
         used_by: [v74L-i1..i15, v139-i1..i21]
         notes: >-
           Authentic newline-form expansion the listed runs consumed. Generated from
@@ -142,5 +167,10 @@ artifacts:
         files:
           train: {path: archive/alignment_both-scripts_train_a.jsonl, sha256: c999e3c01d6a58c780a9248f565ce5d37193aad947b5fa76efc67ace48964479, n: 19890}
           test:  {path: archive/alignment_both-scripts_test_a.jsonl,  sha256: 071b59f6b15c8904cf0fae53dc4d8b085105136e7634d960a693535ca7b7ec65, n: 7006}
+        aliases:
+          - alignment_both-scripts_train_a.jsonl
+          - alignment_both-scripts_test_a.jsonl
+          - word-spotting_both-scripts_train_a.jsonl
+          - word-spotting_both-scripts_test_a.jsonl
         used_by: [v139-ib..is]
-        notes: "Older legacy expansion; superseded well before v0.4."
+        notes: "Older legacy expansion; superseded well before v0.4. aliases include the even-older word-spotting_*_a names."
