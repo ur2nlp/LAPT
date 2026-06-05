@@ -1,5 +1,9 @@
 /data/*
 !/data/gothic_word_spotting/
+# Track curated instruction-tuning data + provenance (incl. archive/); see
+# data/gothic_instruct/MANIFEST.yaml. These artifacts are not reliably
+# regenerable, so git is their canonical preservation.
+!/data/gothic_instruct/
 # Re-ignore recomputable artifacts inside gothic_word_spotting/
 /data/gothic_word_spotting/raw_llm/train_results_b*.jsonl
 /data/gothic_word_spotting/raw_llm/test_results.jsonl

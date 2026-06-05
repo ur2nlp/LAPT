@@ -1,0 +1,135 @@
+# Provenance + version registry for Gothic instruction-tuning data.
+#
+# Reliable versioning starts with this manifest (snapshot 2026-06-05). The
+# sha256 is the ground-truth identity of an artifact; filenames may later be
+# renamed into a versioned scheme (`..._vMAJOR.MINOR.PATCH.jsonl`) without
+# changing the sha. See CHANGELOG.md for the narrative.
+#
+# `used_by` lists the finished training runs whose configs reference the file.
+# CAVEAT: a run consumed whatever bytes sat at that path *at run time*. Where a
+# file was regenerated this session (cot, dictionary; newline -> space), the
+# runs consumed the ARCHIVED newline-form, and the live 1.0.0 is the
+# content-identical space-normalization of it (verified: flatten(old)==new).
+#
+# Bump semantics (MAJOR/MINOR/PATCH) are intentionally NOT yet defined; to be
+# settled in a dedicated discussion. 1.0.0 is just the agreed starting label.
+
+schema_version: 1
+snapshot_date: 2026-06-05
+
+# Shared format of all 1.0.0 releases: single-line prompt ending in
+# " Response:"; response begins with a single leading space; no newlines
+# (the PTEx tokenizer has no newline piece -- see .claude/TODO.md).
+prompt_schema: "space-delimited; prompt ends ' Response:'; response leading-space; no newlines"
+
+artifacts:
+
+  translation-instruct:
+    description: English<->Gothic full-sentence translation, prompt-diversified.
+    current: 1.0.0
+    releases:
+      - version: 1.0.0
+        files:
+          train: {path: translation_all-codices_both-scripts_both-directions_pd_train.jsonl, sha256: 6aa648e1c83c2be2786274d1115099a9399ae23e19176222821338f1f4a0bd36, n: 5400}
+          test:  {path: translation_all-codices_both-scripts_both-directions_pd_test.jsonl,  sha256: 513cf62654c22d7dbe5f868f670c9b21da534491f2327b14a118f69bd5d22e86, n: 1332}
+        source: {name: gothic-bible-parallel-all-codices, version: unversioned}
+        generator: {module: gothic.data.prepare_gothic_data, note: "prompt-diversified; pre-flatten (already space-form)"}
+        used_by: [v74L-i8..i15, v139-i18..i21]
+        notes: "Bytes unchanged this session; exactly what the listed runs consumed."
+    archived:
+      - label: pre-pd
+        files:
+          train: {path: archive/translation_all-codices_both-scripts_both-directions_train.jsonl, sha256: 5388857fd5a2379fc7bbf9cf8779ec29240049526a8b8b1466f9d9b2a62d147c, n: 5400}
+          test:  {path: archive/translation_all-codices_both-scripts_both-directions_test.jsonl,  sha256: d2980c00ff43e595b380f226114187e36371d77e7fd5c581a65f709783b4e501, n: 1332}
+        used_by: [v74L-i1..i7, v81-instruct-a/b, v126-ia..ic, v139-i1..i17, v139-ia..is]
+        notes: "Pre-1.0 predecessor (no prompt diversification); space-form. Heavily used by earlier runs."
+
+  transliteration-instruct:
+    description: Latin<->Gothic-script transliteration, prompt-diversified.
+    current: 1.0.0
+    releases:
+      - version: 1.0.0
+        files:
+          train: {path: transliteration_all-codices_both-directions_pd_train.jsonl, sha256: ea8b61fbcfe22ba28104715bb4250be5b9e0ab6713b130b0c2c8a0a25b0a9365, n: 6750}
+          test:  {path: transliteration_all-codices_both-directions_pd_test.jsonl,  sha256: 97fb793653cd5972878d03fbc9a010319196953c690dc29dfb680e6878006208, n: 1680}
+        source: {name: gothic-bible-parallel-all-codices, version: unversioned}
+        generator: {module: gothic.data.prepare_gothic_data, note: "prompt-diversified; pre-flatten (already space-form)"}
+        used_by: [v74L-i8..i15, v139-i18..i21]
+        notes: "Bytes unchanged this session; exactly what the listed runs consumed."
+    archived:
+      - label: pre-pd
+        files:
+          train: {path: archive/transliteration_all-codices_both-directions_train.jsonl, sha256: 36e94bcb3984cd10a53bbbfa6ef6e75da4865779494cad7543ad5460de1ce9d8, n: 6750}
+          test:  {path: archive/transliteration_all-codices_both-directions_test.jsonl,  sha256: afef8e09b199b7b80e177ba3cfecafe1dbebc67b5c380209563b2e742ca1230c, n: 1680}
+        used_by: [v74L-i1..i7, v81-instruct-a/b, v126-ia..ic, v139-i1..i17, v139-ia..is]
+        notes: "Pre-1.0 predecessor (no prompt diversification); space-form."
+
+  translation-cot-instruct:
+    description: Chain-of-thought translation (key words first, then full sentence).
+    current: 1.0.0
+    releases:
+      - version: 1.0.0
+        files:
+          train: {path: translation-cot_both-scripts_both-directions_train.jsonl, sha256: ab8a37a2312d288c98f443594dbe5421bc5939c356a82e6d4102d257e2d0c4bc, n: 5288}
+          test:  {path: translation-cot_both-scripts_both-directions_test.jsonl,  sha256: b974e5c79e3fb92aaa66b29d6b60f45bb2cc07a74ca9ccd1ab400c433939a339, n: 1312}
+        source: {name: ws-alignments, version: "v0.4", path: data/gothic_word_spotting/train_alignments.jsonl, git_sha: 958f8c3}
+        generator: {module: gothic.word_spotting.expand_to_cot, args: "script=both, directions=both, variants=1", seed: 1, note: "regenerated this session with flatten_prompt (newline->space)"}
+        used_by: [v74L-i9..i15, v139-i18..i21]
+        notes: "Space-normalization of the newline-form the runs consumed; content-identical (verified flatten(old)==new). New bytes at this path as of 2026-06-05."
+    archived:
+      - label: newline-form (as-run)
+        files:
+          train: {path: archive/translation-cot_both-scripts_both-directions_train.jsonl, sha256: a2ab96660d98b82c2d220f87592057e7d23b0a1dbcabd1693c1e01e8d7f44d58, n: 5288}
+          test:  {path: archive/translation-cot_both-scripts_both-directions_test.jsonl,  sha256: 5cffa5acd76351e0380d896ff0bc7ff325da8d98784bcb76b130987bdb44ba4c, n: 1312}
+        used_by: [v74L-i9..i15, v139-i18..i21]
+        notes: "Authentic newline-form input (\\nResponse:) consumed by the listed runs; superseded by 1.0.0 via separator normalization."
+
+  dictionary-lookup-instruct:
+    description: Wright glossary lemma<->gloss lookup (both directions/scripts).
+    current: 1.0.0
+    releases:
+      - version: 1.0.0
+        files:
+          train: {path: dictionary-lookup_both-scripts_both-directions_train.jsonl, sha256: 8d64293d10ac5ddace2ba62c5679c5e003268d82754d1640a98aa31853c4129e, n: 12022}
+        source: {name: wright-gothic-glossary, path: data/gothic_dictionaries/wright_gothic_english.json}
+        generator: {module: gothic.dictionary_lookup.expand_to_instruction, args: "script=both, directions=both, variants=1, reverse-gloss-mode=sample", seed: 1, note: "regenerated this session with flatten_prompt (newline->space)"}
+        used_by: [v74L-i12..i15, v139-i18..i21]
+        notes: "Space-normalization of the newline-form the runs consumed; content-identical (verified flatten(old)==new)."
+    archived:
+      - label: newline-form (as-run)
+        files:
+          train: {path: archive/dictionary-lookup_both-scripts_both-directions_train.jsonl, sha256: 6d3574228bf615ce69645f81e645ee98c8e3e08cb465cfa8daafa1e8d7ae90a7, n: 12022}
+        used_by: [v74L-i12..i15, v139-i18..i21]
+        notes: "Authentic newline-form input consumed by the listed runs."
+
+  alignment-instruct:
+    description: Word-spotting alignment instruction tasks (forward/reverse/cloze/discrimination).
+    current: null   # 1.0.0 NOT yet cut -- see notes
+    releases: []     # PENDING
+    pending:
+      planned_version: 1.0.0
+      blocker: >-
+        1.0.0 must be the STATUS-FILTERED expansion (verified_correct +
+        kept_edited only, matching the cot expander). The expander currently
+        applies no status filter, so a naive regen includes unverified/rejected
+        alignments AND makes the v0.4->v0.5 re-review a no-op. Add the filter,
+        then cut 1.0.0 from train_alignments.jsonl (git_sha 958f8c3).
+      tracked_in: .claude/TODO.md ("Newlines tokenize to <unk>" + word-spotting v0.5 reconciliation)
+    archived:
+      - label: "v0.4 expansion (as-run, newline-form)"
+        files:
+          train: {path: archive/alignment_both-scripts_train_v0.4.jsonl, sha256: fc49ee64a8e5eb2c5c3e3bc95eb475dd28b0564b76852a973c48fdc8b2087724, n: 33327}
+          test:  {path: archive/alignment_both-scripts_test_v0.4.jsonl,  sha256: f1ade7cd8889d07f6a3e2aebf0b56a19c14aeeea1fb99a8130bbf88657b32e41, n: 8236}
+        used_by: [v74L-i1..i15, v139-i1..i21]
+        notes: >-
+          Authentic newline-form input the listed runs consumed (4,178 source
+          alignments). NOT reproducible from current code + train_alignments.jsonl:
+          built from an earlier verified-only snapshot now gone. The eventual
+          status-filtered 1.0.0 will have DIFFERENT content (this is unlike
+          cot/dict, where 1.0.0 is content-identical to the as-run form).
+      - label: "legacy _a expansion (newline-form)"
+        files:
+          train: {path: archive/alignment_both-scripts_train_a.jsonl, sha256: c999e3c01d6a58c780a9248f565ce5d37193aad947b5fa76efc67ace48964479, n: 19890}
+          test:  {path: archive/alignment_both-scripts_test_a.jsonl,  sha256: 071b59f6b15c8904cf0fae53dc4d8b085105136e7634d960a693535ca7b7ec65, n: 7006}
+        used_by: [v139-ib..is]
+        notes: "Older legacy expansion; superseded well before v0.4."
