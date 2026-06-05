@@ -7,8 +7,8 @@
 #
 # `used_by` lists the finished training runs whose configs reference the file.
 # CAVEAT: a run consumed whatever bytes sat at that path *at run time*. Where a
-# file was regenerated this session (cot, dictionary; newline -> space), the
-# runs consumed the ARCHIVED newline-form, and the live 1.0.0 is the
+# file was regenerated this session (cot, dictionary, alignment; newline ->
+# space), the runs consumed the ARCHIVED newline-form, and the live 1.0.0 is the
 # content-identical space-normalization of it (verified: flatten(old)==new).
 #
 # Bump semantics (MAJOR/MINOR/PATCH) are intentionally NOT yet defined; to be
@@ -104,17 +104,27 @@ artifacts:
 
   alignment-instruct:
     description: Word-spotting alignment instruction tasks (forward/reverse/cloze/discrimination).
-    current: null   # 1.0.0 NOT yet cut -- see notes
-    releases: []     # PENDING
-    pending:
-      planned_version: 1.0.0
-      blocker: >-
-        1.0.0 must be the STATUS-FILTERED expansion (verified_correct +
-        kept_edited only, matching the cot expander). The expander currently
-        applies no status filter, so a naive regen includes unverified/rejected
-        alignments AND makes the v0.4->v0.5 re-review a no-op. Add the filter,
-        then cut 1.0.0 from train_alignments.jsonl (git_sha 958f8c3).
-      tracked_in: .claude/TODO.md ("Newlines tokenize to <unk>" + word-spotting v0.5 reconciliation)
+    current: 1.0.0
+    releases:
+      - version: 1.0.0
+        files:
+          train: {path: alignment_both-scripts_train.jsonl, sha256: 2e64190da9fb99d85a9b4ca590aa3569669fd36d8973d0a11cac95fc79e4bc2c, n: 33327}
+          test:  {path: alignment_both-scripts_test.jsonl,  sha256: b36c05b88a5ce4e70c3c2596b6464070d2903dbe4055c7755e81964b982f6cd9, n: 8236}
+        source: {name: ws-verified-diversified, version: "v0.4", path: "data/gothic_word_spotting/diversification/{train,test}_verified_b_diversified.jsonl"}
+        generator: {module: gothic.word_spotting.expand_to_instruction, args: "projections=all, script=both", seed: 1, note: "space-form (flatten_prompt); regenerated this session"}
+        used_by: [v74L-i1..i15, v139-i1..i21]
+        notes: >-
+          Space-normalization of the newline-form the runs consumed; content-identical
+          (verified flatten(archive)==this). NOT itself trained on by any run, but
+          directly comparable. Cleanly reproducible: expand the diversified files
+          (4,178 train / 1,031 test alignments) with default projections, script=both,
+          seed 1.
+    next:
+      note: >-
+        A later release will be generated from the v0.5 verification round, at which
+        point the expander may be switched to operate on train_alignments.jsonl
+        (the newer status-bearing format) instead of the diversified file. See
+        .claude/TODO.md.
     archived:
       - label: "v0.4 expansion (as-run, newline-form)"
         files:
@@ -122,11 +132,12 @@ artifacts:
           test:  {path: archive/alignment_both-scripts_test_v0.4.jsonl,  sha256: f1ade7cd8889d07f6a3e2aebf0b56a19c14aeeea1fb99a8130bbf88657b32e41, n: 8236}
         used_by: [v74L-i1..i15, v139-i1..i21]
         notes: >-
-          Authentic newline-form input the listed runs consumed (4,178 source
-          alignments). NOT reproducible from current code + train_alignments.jsonl:
-          built from an earlier verified-only snapshot now gone. The eventual
-          status-filtered 1.0.0 will have DIFFERENT content (this is unlike
-          cot/dict, where 1.0.0 is content-identical to the as-run form).
+          Authentic newline-form expansion the listed runs consumed. Generated from
+          {train,test}_verified_b_diversified.jsonl (4,178 train / 1,031 test
+          alignments) with default args + seed 1; the 1.0.0 release is its
+          space-normalization (content-identical). [Earlier suspected un-reproducible
+          when wrongly expanded from train_alignments.jsonl -- resolved 2026-06-05:
+          the expander consumes the diversified file, not train_alignments.jsonl.]
       - label: "legacy _a expansion (newline-form)"
         files:
           train: {path: archive/alignment_both-scripts_train_a.jsonl, sha256: c999e3c01d6a58c780a9248f565ce5d37193aad947b5fa76efc67ace48964479, n: 19890}

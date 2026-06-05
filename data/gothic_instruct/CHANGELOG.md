@@ -21,20 +21,24 @@ releases distinct from the as-run bytes.
   space-normalized form of the newline data the runs consumed; **content-identical**
   (verified `flatten(old)==new`). The newline-form is archived.
 
-**`alignment-instruct` 1.0.0 deliberately NOT cut.** It must be the
-status-filtered expansion (`verified_correct` + `kept_edited`), which requires
-adding a status filter to `gothic.word_spotting.expand_to_instruction` first
-(the expander currently filters nothing — so a naive regen would train on
-rejected/unverified alignments and would make the v0.4→v0.5 re-review a no-op).
-Only the archived as-run input is registered for now.
+**`alignment-instruct` 1.0.0 cut** (space-form, content-identical to the as-run
+newline archive — same pattern as cot/dict). Resolved a provenance scare from
+earlier in the session: the v0.4 alignment files were thought un-reproducible
+because regenerating from `train_alignments.jsonl` gave 4,718 alignments vs the
+4,178 reflected in v0.4. The expander was in fact never run on
+`train_alignments.jsonl` (a newer, status-bearing format); it consumes the
+verified+diversified files `data/gothic_word_spotting/diversification/{train,test}_verified_b_diversified.jsonl`
+(4,178 train / 1,031 test alignments). Expanding those with default args + seed 1
+reproduces v0.4 exactly (33,327 train / 8,236 test, zero diffs after separator
+normalization). 1.0.0 is the space-normalization of that; not itself trained on,
+but directly comparable to what the v74L/v139 runs consumed.
 
 **Archive populated** (newline-form / pre-pd predecessors, fetched from the
-cluster where needed): authentic newline-form alignment v0.4 (the un-reproducible
-4,178-alignment input the runs ate), legacy `_a` alignment, newline-form cot and
+cluster where needed): authentic newline-form alignment v0.4 (the newline form the
+runs ate; its space-form is the 1.0.0 release), legacy `_a` alignment, newline-form cot and
 dictionary, and the pre-pd translation/transliteration.
 
 ### Still pending (next session)
-- Cut `alignment-instruct` 1.0.0 after adding the status filter.
 - Rename live files into the versioned scheme (`..._vMAJOR.MINOR.PATCH.jsonl`,
   dropping `_pd_`; keep other descriptors per "keep all but pd"), adding
   `aliases:` to the manifest for the old config-referenced paths.
