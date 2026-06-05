@@ -190,6 +190,73 @@ def format_match(distance: int, citation_form: str, glosses_str: str) -> str:
     return f"{citation_form}: {glosses_str}"
 
 
+def score_alignment(
+    target_word: str,
+    gothic_surface: str,
+    gothic_surface_gothic: str,
+    all_forms: list[tuple[str, str]],
+    english_to_forms: dict[str, set[str]],
+    form_to_glosses: dict[str, str],
+    threshold: int,
+    use_normalize: bool,
+    top_n: int = 3,
+) -> dict | None:
+    """Score a single alignment against the dictionary.
+
+    Returns a dict of scoring columns (``tier``, ``script_ok``, and ``dist_N`` /
+    ``match_N`` for each of the top ``top_n`` matches), or ``None`` if the Gothic
+    surface form is empty after punctuation stripping.
+    """
+    cleaned_surface = strip_punctuation(gothic_surface)
+    if not cleaned_surface:
+        return None
+
+    # Global top-N matches
+    global_matches = find_top_matches(
+        cleaned_surface, all_forms, top_n, use_normalize,
+    )
+
+    # English-filtered matches
+    english_filtered_forms = english_words_match(
+        target_word, english_to_forms,
+    )
+    best_english_dist = None
+    if english_filtered_forms:
+        english_candidates = [
+            (cf, form_to_glosses[cf])
+            for cf in english_filtered_forms
+            if cf in form_to_glosses
+        ]
+        if english_candidates:
+            english_matches = find_top_matches(
+                cleaned_surface, english_candidates, 1, use_normalize,
+            )
+            if english_matches:
+                best_english_dist = english_matches[0][0]
+
+    best_global_dist = global_matches[0][0] if global_matches else 999
+    tier = assign_tier(best_global_dist, best_english_dist, threshold)
+
+    # Check that Gothic script word transliterates to the Roman word
+    transliterated = transliterate_gothic_to_latin(gothic_surface_gothic)
+    script_match = "yes" if transliterated == gothic_surface else "no"
+
+    row = {"tier": tier, "script_ok": script_match}
+
+    # Add top-N match columns
+    for i in range(top_n):
+        idx = i + 1
+        if i < len(global_matches):
+            dist, cf, glosses = global_matches[i]
+            row[f"dist_{idx}"] = dist
+            row[f"match_{idx}"] = format_match(dist, cf, glosses)
+        else:
+            row[f"dist_{idx}"] = ""
+            row[f"match_{idx}"] = ""
+
+    return row
+
+
 def verify_alignments(
     jsonl_path: str,
     dict_path: str,
@@ -219,9 +286,13 @@ def verify_alignments(
             target_word = alignment["target_word"]
             gothic_surface = alignment["gothic_word_roman"]
             gothic_surface_gothic = alignment["gothic_word_gothic"]
-            cleaned_surface = strip_punctuation(gothic_surface)
 
-            if not cleaned_surface:
+            scored = score_alignment(
+                target_word, gothic_surface, gothic_surface_gothic,
+                all_forms, english_to_forms, form_to_glosses,
+                threshold, use_normalize, top_n,
+            )
+            if scored is None:
                 print(
                     f"Warning: empty surface form after cleaning '{gothic_surface}', "
                     f"skipping",
@@ -229,54 +300,16 @@ def verify_alignments(
                 )
                 continue
 
-            # Global top-N matches
-            global_matches = find_top_matches(
-                cleaned_surface, all_forms, top_n, use_normalize,
-            )
-
-            # English-filtered matches
-            english_filtered_forms = english_words_match(
-                target_word, english_to_forms,
-            )
-            best_english_dist = None
-            if english_filtered_forms:
-                english_candidates = [
-                    (cf, form_to_glosses[cf])
-                    for cf in english_filtered_forms
-                    if cf in form_to_glosses
-                ]
-                if english_candidates:
-                    english_matches = find_top_matches(
-                        cleaned_surface, english_candidates, 1, use_normalize,
-                    )
-                    if english_matches:
-                        best_english_dist = english_matches[0][0]
-
-            best_global_dist = global_matches[0][0] if global_matches else 999
-            tier = assign_tier(best_global_dist, best_english_dist, threshold)
-
-            # Check that Gothic script word transliterates to the Roman word
-            transliterated = transliterate_gothic_to_latin(gothic_surface_gothic)
-            script_match = "yes" if transliterated == gothic_surface else "no"
-
             row = {
-                "tier": tier,
+                "tier": scored["tier"],
                 "english_word": target_word,
                 "gothic_surface": gothic_surface,
                 "gothic_surface_gothic": gothic_surface_gothic,
-                "script_ok": script_match,
+                "script_ok": scored["script_ok"],
             }
-
-            # Add top-N match columns
-            for i in range(top_n):
-                idx = i + 1
-                if i < len(global_matches):
-                    dist, cf, glosses = global_matches[i]
-                    row[f"dist_{idx}"] = dist
-                    row[f"match_{idx}"] = format_match(dist, cf, glosses)
-                else:
-                    row[f"dist_{idx}"] = ""
-                    row[f"match_{idx}"] = ""
+            for i in range(1, top_n + 1):
+                row[f"dist_{i}"] = scored[f"dist_{i}"]
+                row[f"match_{i}"] = scored[f"match_{i}"]
 
             row["english_sentence"] = english_sentence
             row["gothic_sentence_roman"] = gothic_sentence_roman
