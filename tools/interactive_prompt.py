@@ -26,6 +26,10 @@ Batch mode (--batch):
     skipped. Each prompt is echoed and the model's response is printed, then the script exits.
     The template (if any) is applied to each prompt, just as in interactive mode.
 
+    To include a newline within a single prompt, write a literal '\n' escape in the line; it
+    is decoded to a real newline before the prompt is sent. For example, the batch line
+    "Line one\nLine two" sends a two-line prompt.
+
 Commands (during interactive session):
     /temp <value>       - Set temperature
     /topp <value>       - Set top-p nucleus sampling threshold
@@ -316,7 +320,11 @@ def main():
             print(f"Error: batch file not found: {args.batch}", file=sys.stderr)
             return
         lines = batch_path.read_text().splitlines()
-        prompts = [line for line in lines if line.strip() and not line.strip().startswith('#')]
+        prompts = [
+            line.replace('\\n', '\n')
+            for line in lines
+            if line.strip() and not line.strip().startswith('#')
+        ]
         print(f"Running batch mode with {len(prompts)} prompt(s) from {args.batch}\n")
         for prompt in prompts:
             print(f"> {prompt}")
