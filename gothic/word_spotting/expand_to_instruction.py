@@ -27,7 +27,7 @@ Input format (from verify_word_spotting.py --finalize):
                       "gothic_word_gothic": "..."}, ...]}
 
 Output format (instruction_jsonl, one line per example):
-    {"prompt": "...\\nResponse:", "response": " answer"}
+    {"prompt": "... Response:", "response": " answer"}
 
 Usage:
     python -m gothic.word_spotting.expand_to_instruction \
@@ -49,6 +49,8 @@ import random
 import string
 import sys
 from pathlib import Path
+
+from gothic.instruction_format import flatten_prompt
 
 
 # Marker substituted for the missing word in cloze prompts.
@@ -239,7 +241,7 @@ def make_example(
         raise ValueError(f"Unknown projection: {projection}")
 
     template = rng.choice(TEMPLATES[projection])
-    prompt = template.format(**context)
+    prompt = flatten_prompt(template.format(**context))
     return {"prompt": prompt, "response": f" {response}"}
 
 

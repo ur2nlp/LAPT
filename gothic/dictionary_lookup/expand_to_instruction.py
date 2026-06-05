@@ -32,7 +32,7 @@ Form/gloss handling:
 
 Input:  data/gothic_dictionaries/wright_gothic_english.json
 Output format (instruction_jsonl, one line per example):
-    {"prompt": "...\\nResponse:", "response": " answer"}
+    {"prompt": "... Response:", "response": " answer"}
 
 Usage:
     python -m gothic.dictionary_lookup.expand_to_instruction \
@@ -50,6 +50,7 @@ import random
 import sys
 from pathlib import Path
 
+from gothic.instruction_format import flatten_prompt
 from gothic.orthography import transliterate_latin_to_gothic
 
 SCRIPTS = ["roman", "gothic"]
@@ -66,8 +67,10 @@ LANG_LABELS = {"roman": "romanized Gothic", "gothic": "Gothic"}
 # Prompt templates. Forward fills {lang} and {gloss}; reverse fills {lang} and
 # {word}. The query placeholder is bare (no hard-coded quotes) so quoting can be
 # diversified per example by maybe_quote — see the quote-sensitivity rigidity
-# mitigation in prepare_gothic_data.build_instruction_prompt. Both end with the
-# unified "\nResponse:" delimiter; responses begin with a leading space.
+# mitigation in prepare_gothic_data.build_instruction_prompt. Templates end with
+# a "\nResponse:" delimiter, but flatten_prompt collapses the newline to a space
+# at assembly (the PTEx tokenizer has no newline piece); responses begin with a
+# leading space.
 FORWARD_TEMPLATES = [
     "What is the {lang} word for {gloss}?\nResponse:",
     "Give the {lang} word that means {gloss}.\nResponse:",
@@ -170,10 +173,10 @@ def expand_entry(
                 for word in rendered_forms:
                     for _ in range(variants):
                         template = rng.choice(FORWARD_TEMPLATES)
-                        prompt = template.format(
+                        prompt = flatten_prompt(template.format(
                             lang=lang,
                             gloss=maybe_quote(gloss, rng, quote_prob),
-                        )
+                        ))
                         examples.append({
                             "prompt": prompt,
                             "response": f" {word}",
@@ -184,10 +187,10 @@ def expand_entry(
                 for _ in range(variants):
                     for gloss in reverse_gloss_sets(glosses, reverse_gloss_mode, rng):
                         template = rng.choice(REVERSE_TEMPLATES)
-                        prompt = template.format(
+                        prompt = flatten_prompt(template.format(
                             lang=lang,
                             word=maybe_quote(word, rng, quote_prob),
-                        )
+                        ))
                         examples.append({
                             "prompt": prompt,
                             "response": f" {gloss}",

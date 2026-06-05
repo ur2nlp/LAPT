@@ -41,7 +41,7 @@ Input format (canonical {train,test}_alignments.jsonl from assign_alignment_ids)
                       "gothic_word_gothic": "..."}, ...]}
 
 Output format (instruction_jsonl, one line per example):
-    {"prompt": "...\\nResponse:", "response": " ..."}
+    {"prompt": "... Response:", "response": " ..."}
 
 Usage:
     python -m gothic.word_spotting.expand_to_cot \
@@ -55,6 +55,8 @@ import random
 import string
 import sys
 from pathlib import Path
+
+from gothic.instruction_format import flatten_prompt
 
 
 # Alignment statuses that are trustworthy enough to train on.
@@ -306,8 +308,10 @@ def make_cot_example(
     chosen.sort(key=sort_key)
     items = [gloss_pair(alignment, direction, word_field) for alignment in chosen]
 
-    prompt = rng.choice(PROMPT_TEMPLATES[direction]).format(
-        source_sentence=source_sentence,
+    prompt = flatten_prompt(
+        rng.choice(PROMPT_TEMPLATES[direction]).format(
+            source_sentence=source_sentence,
+        )
     )
     response = render_response(items, full_translation, direction, rng)
     return {"prompt": prompt, "response": f" {response}"}
