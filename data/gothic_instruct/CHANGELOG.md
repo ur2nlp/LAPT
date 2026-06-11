@@ -4,6 +4,30 @@ Human-readable history of the instruction-tuning artifacts in this folder.
 `MANIFEST.yaml` is the machine-readable companion (sha256, per-file provenance,
 `used_by`). Newest first.
 
+## 2026-06-11 — v0.5 regeneration: alignment 2.0.0, CoT 2.0.0
+
+**MAJOR bumps for both word-spotting-derived artifacts**, regenerated from the
+re-reviewed v0.5 canonical alignments (`data/gothic_word_spotting/{train,test}_alignments.jsonl`
+at `cf21d31`) — the underlying facts changed, so MAJOR by the settled semantics.
+Both expanders now consume the status-bearing canonical files directly, taking the
+trainable subset `{verified_correct, kept_edited}` (4,140 train / 1,023 test
+alignments) via the shared `gothic.word_spotting.canonical` filter, rather than the
+old v0.4 diversified file.
+
+- **`alignment-instruct` 2.0.0** — default projections (forward/reverse/cloze/
+  discrimination), `script=both`, seed 1 → **33,049 train / 8,172 test** examples
+  (71 train / 12 test projection/alignment combos skipped, chiefly cloze with no
+  token match). Resolves the `next:` note that was pending on this artifact.
+- **`translation-cot-instruct` 2.0.0** — `script=both`, `directions=both`,
+  `variants=1`, `min_words=2`, seed 1 → **5,312 train / 1,312 test** examples. The
+  1.1.0 sampler is unchanged (min_words=2 soft floor); verified empirically on the
+  v0.5 source that every verse with ≥2 trainable alignments glosses ≥2 words, and
+  single-alignment verses still emit a one-word example. Count moved 5288→5312 train
+  / 1312→1312 test purely from the changed trainable set.
+
+Neither is trained on yet. Live train configs still point at the prior versions —
+repoint them (and decide the holdout-eval comparability spine) before the next run.
+
 ## 2026-06-11 — Bump semantics defined; CoT 1.1.0
 
 **Version semantics settled** (the deferred discussion from 2026-06-05), now

@@ -95,8 +95,24 @@ artifacts:
 
   translation-cot-instruct:
     description: Chain-of-thought translation (key words first, then full sentence).
-    current: 1.1.0
+    current: 2.0.0
     releases:
+      - version: 2.0.0
+        files:
+          train: {path: translation-cot_both-scripts_both-directions_train_v2.0.0.jsonl, sha256: d8fc1a456ef139c4c34183a19b9851c10fe2a685e97542b1959cdbf762bcd725, n: 5312}
+          test:  {path: translation-cot_both-scripts_both-directions_test_v2.0.0.jsonl,  sha256: 2792ee13b0327f58fdb5156c104b860dd559abc9c2f81bb55cb812d098b35504, n: 1312}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.5", path: "data/gothic_word_spotting/{train,test}_alignments.jsonl", git_sha: cf21d31}
+        generator: {module: gothic.word_spotting.expand_to_cot, args: "script=both, directions=both, variants=1, min_words=2", seed: 1, note: "trainable filter {verified_correct, kept_edited} via gothic.word_spotting.canonical"}
+        used_by: []
+        notes: >-
+          MAJOR bump over 1.1.0: the source facts changed. Regenerated from the
+          re-reviewed v0.5 canonical alignments (4,140 train / 1,023 test trainable)
+          instead of the v0.4 diversified file. Sampler is unchanged from 1.1.0
+          (min_words=2 soft floor: verses with >=2 trainable alignments gloss >=2,
+          single-alignment verses still emit one-word examples -- verified
+          empirically on this source). Example count moved 5288->5312 train /
+          1312==1312 test purely from the changed trainable set. Not yet trained on.
       - version: 1.1.0
         files:
           train: {path: translation-cot_both-scripts_both-directions_train_v1.1.0.jsonl, sha256: b43515fa5e66ad581250cf55f31f16385157253a0a81c4fb483ef26ed601ee4c, n: 5288}
@@ -153,8 +169,25 @@ artifacts:
 
   alignment-instruct:
     description: Word-spotting alignment instruction tasks (forward/reverse/cloze/discrimination).
-    current: 1.0.0
+    current: 2.0.0
     releases:
+      - version: 2.0.0
+        files:
+          train: {path: alignment_both-scripts_train_v2.0.0.jsonl, sha256: 097ed9386b5078495018c5892d2531c9edae55345473e651088362e6990af022, n: 33049}
+          test:  {path: alignment_both-scripts_test_v2.0.0.jsonl,  sha256: 3a5951def7e20509e3366daf120eac9bd32ff7a05986129741e18fd3afee48ff, n: 8172}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.5", path: "data/gothic_word_spotting/{train,test}_alignments.jsonl", git_sha: cf21d31}
+        generator: {module: gothic.word_spotting.expand_to_instruction, args: "projections=all, script=both", seed: 1, note: "trainable filter {verified_correct, kept_edited} via gothic.word_spotting.canonical"}
+        used_by: []
+        notes: >-
+          MAJOR bump over 1.0.0: the source facts changed. Switched the expander to
+          consume the re-reviewed v0.5 canonical alignments
+          (data/gothic_word_spotting/{train,test}_alignments.jsonl, status-bearing)
+          instead of the v0.4 diversified file. Trainable subset
+          {verified_correct, kept_edited} = 4,140 train / 1,023 test alignments,
+          expanded with default projections + script=both + seed 1 into 33,049 train /
+          8,172 test examples (71 train / 12 test projection/alignment combos skipped,
+          chiefly cloze without a token match). Not yet trained on.
       - version: 1.0.0
         files:
           train: {path: alignment_both-scripts_train_v1.0.0.jsonl, sha256: 2e64190da9fb99d85a9b4ca590aa3569669fd36d8973d0a11cac95fc79e4bc2c, n: 33327}
@@ -171,10 +204,9 @@ artifacts:
           seed 1.
     next:
       note: >-
-        A later release will be generated from the v0.5 verification round, at which
-        point the expander may be switched to operate on train_alignments.jsonl
-        (the newer status-bearing format) instead of the diversified file. See
-        .claude/TODO.md.
+        Done: 2.0.0 (above) is the v0.5 release. The expander now operates on
+        train_alignments.jsonl (the status-bearing canonical format) via the shared
+        gothic.word_spotting.canonical trainable filter.
     archived:
       - label: "v0.4 expansion (as-run, newline-form)"
         files:
