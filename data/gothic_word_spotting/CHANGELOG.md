@@ -2,6 +2,46 @@
 
 Stage-based versioning; see [README.md](README.md#versioning).
 
+## v0.5-diversified-verified — 2026-06-11
+
+Resolved the `unverified` subset and cleaned editorial artifacts, graduating the
+canonical files to a single sound trainable set. Trainable
+(`verified_correct` + `kept_edited`) is now **4140 train / 1023 test**.
+
+### Changed
+- **Re-reviewed the `unverified` subset** via the `review_unverified.py`
+  round-trip (`verification/{train,test}_v05_review.tsv`):
+  - train: 630 → `verified_correct`, 19 → `kept_edited`, 18 → `rejected`
+  - test: 164 → `verified_correct`, 5 → `kept_edited`, 9 → `rejected`
+- **Cleaned Gothic-side editorial artifacts** (`clean_alignments.py` /
+  `orthography.clean_gothic_artifacts`) across both sentence and surface fields:
+  unwrapped reconstruction parentheses (`wa(i)ros` → `wairos`,
+  `(𐍃𐌿)𐌽𐌹𐍅𐌴` → `𐍃𐌿𐌽𐌹𐍅𐌴`), removed Arabic-numeral glosses (`(2222)`), joined
+  enclitic tildes (`qaþuþ~þan` → `qaþuþþan`), trimmed trailing fragment dashes.
+  76 train / 20 test sentences affected; every Gothic surface was re-validated to
+  occur in its sentence.
+- **De-duplicated diversification-pass duplicates**: collapsed identical
+  within-sentence alignments that `assign_alignment_ids.py` had given distinct
+  `_dN` ids (90 train / 18 test alignments dropped, keeping the best-verified
+  member).
+- **English-target mismatch review**
+  (`verification/{train,test}_english_mismatch_v05.tsv`): flagged trainable
+  alignments whose English `target_word` does not occur verbatim as a token in
+  the translation, then reviewed by hand. Policy: the listed English word must
+  appear (or mostly appear) in the English sentence. Rejected genuine semantic
+  mismatches where the gloss conflicts with the translation wording (e.g.
+  "messenger" vs the verse's "angel", or `dagam` glossed "days" where the verse
+  reads "years"); 25 train / 8 test → `rejected`. Kept morphological near-misses
+  where the content word is still present and only the surface form or
+  surrounding phrasing differs (e.g. `þiujo` glossed "maid" in a verse reading
+  "one of the maids").
+
+### Added
+- `gothic/word_spotting/clean_alignments.py` — dedupe + Gothic-artifact cleanup
+  + English-target mismatch export (in `review_unverified`'s apply schema).
+- `review_unverified.py --statuses` (review any status, not just `unverified`)
+  and `--no-coverage-check` (apply a content-defined subset TSV).
+
 ## v0.4-diversified-unverified — 2026-05-20
 
 Initial documented state. Established the canonical

@@ -167,11 +167,12 @@ versioning (which doesn't map well to data lifecycles).
 
 - `v0.1-llm-raw` — raw LLM proposals, no review
 - `v0.2-verified-a` — partial first-pass review (archived, not released)
-- `v0.3-verified-b` — full first-pass review (current "verified" baseline)
+- `v0.3-verified-b` — full first-pass review (earlier "verified" baseline)
 - `v0.4-diversified-unverified` — post-diversification, diversification
-  additions not yet re-reviewed (current state)
-- `v0.5-diversified-verified` — after diversification additions are
-  re-reviewed (planned)
+  additions not yet re-reviewed
+- `v0.5-diversified-verified` — diversification additions re-reviewed, Gothic
+  editorial artifacts cleaned, within-sentence duplicates deduped, English-target
+  mismatches rejected (current state)
 - `v1.0` — first public release (planned)
 
 Git tags should mark each version.
@@ -210,16 +211,20 @@ For future review rounds, prefer in-place english_word edits (with a
 parenthetical or appended note) over wholesale rewrites, or explicitly add
 new rows for manual additions so they can be assigned `_m{N}` IDs.
 
-## Statistics (v0.4-diversified-unverified)
+## Statistics (v0.5-diversified-verified)
 
 | | Train | Test |
 |---|---|---|
 | Sentences | 1,343 | 333 |
-| Total alignments (all statuses) | 4,718 | 1,180 |
-| `verified_correct` | 3,477 | 854 |
-| `kept_edited` | 32 | 5 |
-| `unverified` (llm_original) | 32 | 12 |
-| `unverified` (llm_diversify) | 753 | 194 |
-| `rejected` | 23 | 10 |
+| Total alignments (all statuses) | 4,628 | 1,162 |
+| `verified_correct` | 4,084 | 1,011 |
+| `kept_edited` | 56 | 12 |
+| `unverified` (llm_original) | 8 | 5 |
+| `unverified` (llm_diversify) | 20 | 5 |
+| `rejected` | 59 | 24 |
 | `replaced_in_diversification` | 401 | 105 |
-| **Trainable subset** (verified_correct + kept_edited) | **3,509** | **859** |
+| **Trainable subset** (verified_correct + kept_edited) | **4,140** | **1,023** |
+
+Total alignments dropped from v0.4 (4,718 / 1,180) because the v0.5 cleanup
+removed 90 train / 18 test within-sentence diversification duplicates. A residue
+of `unverified` rows remains (review-skipped, not yet adjudicated).
