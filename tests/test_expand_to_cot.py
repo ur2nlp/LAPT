@@ -142,10 +142,27 @@ def test_make_cot_example_eng2got_prompt_has_english_source(sample_entry):
     assert "𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸." in example["response"]
 
 
-def test_make_cot_example_respects_min_words(sample_entry):
-    """A verse with fewer trainable alignments than min_words yields None."""
+def test_make_cot_example_softens_min_words_to_available(sample_entry):
+    """min_words is a soft floor: a verse with fewer trainable alignments still
+    emits, glossing all of them rather than being dropped."""
     rng = random.Random(1)
-    assert cot.make_cot_example(sample_entry, "got2eng", "roman", rng, 4) is None
+    example = cot.make_cot_example(sample_entry, "got2eng", "roman", rng, 4)
+    assert example is not None
+    # all three of the verse's words are glossed (count softened to 3)
+    for word in ("saijands", "saijiþ", "waurd"):
+        assert word in example["response"]
+
+
+def test_make_cot_example_empty_alignments_returns_none():
+    """A verse with no trainable alignments yields None."""
+    entry = {
+        "english_sentence": "the son of Levi, the son of Melchi,",
+        "gothic_sentence_roman": "sunaus Laiwweis, sunaus Mailkeis,",
+        "gothic_sentence_gothic": "x",
+        "alignments": [],
+    }
+    rng = random.Random(1)
+    assert cot.make_cot_example(entry, "got2eng", "roman", rng, 2) is None
 
 
 def test_make_cot_example_glosses_ordered_by_source_position(sample_entry):

@@ -27,7 +27,10 @@ examples (from ``prepare_gothic_data.py``) rather than replacing them, so the
 CoT format carries information instead of becoming an unconditional output prior.
 
 Rigidity mitigations (so the format is not memorised as a rote template):
-    - The number of glossed words is sampled per example (1..all trainable).
+    - The number of glossed words is sampled per example, with a floor of
+      ``min_words`` (default 2) up to all trainable alignments. The floor skews
+      the chain toward 2-3 anchors; it is softened to the available count so a
+      single-alignment verse still emits a one-word example.
     - Gloss items are rendered with several phrasings, some with quotes and some
       without, since the model is observably sensitive to quote presence.
     - Two join styles ("a, b, and c" vs. "a. b. c.") and several prompt and
@@ -273,14 +276,17 @@ def make_cot_example(
         direction: "got2eng" or "eng2got".
         script_key: "roman" or "gothic".
         rng: Seeded RNG for word subset, ordering-independent style choices.
-        min_words: Minimum number of words to gloss.
+        min_words: Target floor on the number of words to gloss. Softened to the
+            verse's trainable-alignment count when the verse has fewer, so a
+            verse with a single alignment still emits a one-word example rather
+            than being dropped.
 
     Returns:
-        A {"prompt": ..., "response": ...} dict, or None if the verse has fewer
-        than ``min_words`` trainable alignments.
+        A {"prompt": ..., "response": ...} dict, or None if the verse has no
+        trainable alignments.
     """
     alignments = trainable_alignments(entry)
-    if len(alignments) < min_words:
+    if not alignments:
         return None
 
     sentence_field, word_field = SCRIPT_FIELDS[script_key]
@@ -296,8 +302,12 @@ def make_cot_example(
         full_translation = gothic_sentence
         order_case_insensitive = True
 
-    # sample how many words to gloss, then which ones
-    count = rng.randint(min_words, len(alignments))
+    # sample how many words to gloss, then which ones. The floor skews the
+    # gloss chain toward >=2 anchors (the uniform-from-1 default over-produced
+    # single-link examples); it is softened to the available count so
+    # single-alignment verses still contribute.
+    effective_min = min(min_words, len(alignments))
+    count = rng.randint(effective_min, len(alignments))
     chosen = rng.sample(alignments, count)
 
     # order gloss items by their source word's position in the source sentence
@@ -340,7 +350,8 @@ def expand_entry(
 
     Returns:
         An (examples, skipped) tuple, where skipped counts direction/script/
-        variant combinations that could not be built (too few alignments).
+        variant combinations that could not be built (the verse has no trainable
+        alignments).
     """
     examples: list[dict] = []
     skipped = 0
@@ -409,8 +420,13 @@ def main():
     parser.add_argument(
         "--min-words",
         type=int,
-        default=1,
-        help="Minimum number of words to gloss per example (default: 1).",
+        default=2,
+        help=(
+            "Target floor on words glossed per example, softened to a verse's "
+            "trainable-alignment count when fewer are available (default: 2). "
+            "The floor skews the gloss chain toward 2-3 anchors; verses with a "
+            "single alignment still emit a one-word example."
+        ),
     )
     parser.add_argument(
         "--seed",

@@ -15,8 +15,21 @@
 # space), the runs consumed the ARCHIVED newline-form, and the live 1.0.0 is the
 # content-identical space-normalization of it (verified: flatten(old)==new).
 #
-# Bump semantics (MAJOR/MINOR/PATCH) are intentionally NOT yet defined; to be
-# settled in a dedicated discussion. 1.0.0 is just the agreed starting label.
+# Bump semantics (settled 2026-06-11), keyed on what changes for a model trained
+# on the artifact:
+#   MAJOR -- the underlying facts change. New/edited/removed source content: a
+#     re-reviewed alignment round (e.g. ws v0.5), a new codex, added pair types,
+#     or switching the source file. The model now learns from different information.
+#   MINOR -- same facts, different rendering. Prompt phrasings, schema/format,
+#     sampling/templating procedure, or added/removed projections of the same
+#     relation. Source facts (verses, alignments, glossary entries) are untouched;
+#     only how they project into examples changes.
+#   PATCH -- corrective regeneration, no intended change to content OR rendering.
+#     A bugfix bringing output back in line with already-documented behavior,
+#     whitespace/separator normalization, dropping a corrupt record, or a
+#     manifest-only fix. Test: did we mean to change the output, or fix it to
+#     match what it was already supposed to be?
+# 1.0.0 was the agreed starting label for every artifact.
 
 schema_version: 1
 snapshot_date: 2026-06-05
@@ -82,8 +95,23 @@ artifacts:
 
   translation-cot-instruct:
     description: Chain-of-thought translation (key words first, then full sentence).
-    current: 1.0.0
+    current: 1.1.0
     releases:
+      - version: 1.1.0
+        files:
+          train: {path: translation-cot_both-scripts_both-directions_train_v1.1.0.jsonl, sha256: b43515fa5e66ad581250cf55f31f16385157253a0a81c4fb483ef26ed601ee4c, n: 5288}
+          test:  {path: translation-cot_both-scripts_both-directions_test_v1.1.0.jsonl,  sha256: 6544333b09c971e4645bdaeb7afc24f19c112760d16c5c8cc62c6f4e0ce31130, n: 1312}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.4", path: data/gothic_word_spotting/train_alignments.jsonl, git_sha: 958f8c3}
+        generator: {module: gothic.word_spotting.expand_to_cot, args: "script=both, directions=both, variants=1, min_words=2", seed: 1, note: "min_words floor 2 (soft, capped at a verse's alignment count) skews the gloss chain to 2-3 anchors"}
+        used_by: []
+        notes: >-
+          MINOR bump over 1.0.0: identical source facts, seed, and example count
+          (5288 train / 1312 test) -- only the gloss-chain density changed
+          (single-link share 36% -> 6%, now centered on 2-3 anchors). Targets the
+          observed single-link CoT bias. Verified the current source reproduces
+          1.0.0 exactly under the old min_words=1 sampler, so this is a pure
+          sampler diff. Not yet trained on.
       - version: 1.0.0
         files:
           train: {path: translation-cot_both-scripts_both-directions_train_v1.0.0.jsonl, sha256: ab8a37a2312d288c98f443594dbe5421bc5939c356a82e6d4102d257e2d0c4bc, n: 5288}

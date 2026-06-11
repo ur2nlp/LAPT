@@ -4,6 +4,31 @@ Human-readable history of the instruction-tuning artifacts in this folder.
 `MANIFEST.yaml` is the machine-readable companion (sha256, per-file provenance,
 `used_by`). Newest first.
 
+## 2026-06-11 — Bump semantics defined; CoT 1.1.0
+
+**Version semantics settled** (the deferred discussion from 2026-06-05), now
+recorded at the top of `MANIFEST.yaml`. Keyed on what changes for a model trained
+on the artifact: **MAJOR** = the underlying facts change (new/edited/removed
+source content, source-file switch); **MINOR** = same facts, different rendering
+(prompts, schema, sampling/templating, added/removed projections); **PATCH** =
+corrective regeneration with no intended change to content or rendering (bugfix to
+match documented behavior, whitespace normalization, dropping a corrupt record,
+manifest-only fix).
+
+**`translation-cot-instruct` 1.1.0 cut** (MINOR over 1.0.0). The CoT generator's
+gloss-count sampler (`expand_to_cot.py`) was changed from uniform-from-1 to a soft
+floor of `min_words=2` (capped at a verse's trainable-alignment count, so the 84
+genuine single-alignment train verses still emit a one-word example). This skews
+the gloss chain toward 2–3 anchors, targeting the observed single-link CoT bias
+(`.claude/gothic/it_generation_observations.md`, obs. 4). Single-link share
+dropped 36% → 6%. **Same source facts, seed, and example count** (5288 train /
+1312 test) as 1.0.0 — only gloss density changed; verified the current source
+reproduces 1.0.0 exactly under the old `min_words=1` sampler, so this is a pure
+sampler diff. Live train configs (`gothic_instruct.yaml`, `gothic_instruct_1b.yaml`)
+repointed to 1.1.0; the holdout-eval config is intentionally left on the 1.0.0
+test set as a comparability spine (see `scaling_instruction_tuning.md` § Evaluation
+— an eval-set change is the thing that rebases the metric). Not yet trained on.
+
 ## 2026-06-05 — Reliable versioning begins
 
 Established `MANIFEST.yaml` + this changelog, started git-tracking
