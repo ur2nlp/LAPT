@@ -1,3 +1,40 @@
+# Qualitative probe set for instruction-tuned Gothic models.
+# Lines beginning with '#' and blank lines are ignored by the batch reader.
+# Organized into three diagnostic buckets (see
+# .claude/gothic/it_generation_observations.md). Quoted/unquoted variants are
+# kept deliberately to probe the inference-time quote-sensitivity.
+
+# === Bucket A: held-out REAL verses ===========================================
+# Drawn from the v1.0.0 translation holdout (leakage-free). Measures genuine
+# in-domain translation. The got->eng pairs especially test the conditioning
+# failure: does the model reproduce the actual verse, or hallucinate a plausible
+# one? The sower verse is the shortest holdout item.
+Translate to Gothic: "For whoever is not against us is on our side."
+Translate to Gothic: For whoever is not against us is on our side.
+Translate to English: "𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸."
+Translate to English: 𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸.
+Translate to English: 𐌿𐌽𐍄𐌴 𐍃𐌰𐌴𐌹 𐌽𐌹𐍃𐍄 𐍅𐌹𐌸𐍂𐌰 𐌹𐌶𐍅𐌹𐍃, 𐍆𐌰𐌿𐍂 𐌹𐌶𐍅𐌹𐍃 𐌹𐍃𐍄.
+Work through this sentence word-by-word, then give its translation into English. Gothic: "𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸."
+
+# === Bucket B: in-domain CONSTRUCTED ==========================================
+# Invented sentences recombining common Biblical vocabulary (lord/frauja,
+# disciples/siponjos, Jesus, son/sunus, God/guþ, faith/galaubein, world/fairhvus)
+# but NOT verbatim verses. Measures composition on familiar lexis. eng->got only
+# for full sentences (authoring novel valid Gothic input reliably is not feasible
+# without verified vocab); word lookups probe in-domain lexical coverage.
+Translate to Gothic: "The Lord saw his disciples."
+Translate to Gothic: Jesus said to the man.
+Translate to Gothic: "The son of God came into the world."
+What is the Gothic translation for the word "faith"?
+What is the Gothic translation for the word "lord"?
+Work through this sentence word-by-word, then give its translation into Gothic. English: "The Lord saw his disciples."
+
+# === Bucket C: out-of-the-blue (chatbot cold-open) ============================
+# Constructed examples outside the corpus (dogs appear only licking wounds),
+# representative of what a curious user first throws at a Gothic chatbot. Keep
+# these, but do NOT read their failure as the headline metric -- they sit beyond
+# the ~150k-token corpus ceiling. The dog/word variants probe quote-sensitivity;
+# the Germany question is an English instruction-following control.
 Translate to Gothic: "Hello, world!"
 Translate to Gothic: Hello, world!
 What is the Gothic translation for the word "dog"?
@@ -6,7 +43,5 @@ Translate to Gothic: dog
 Translate to Gothic: "The dog ran away."
 Translate to Gothic: The dog ran away.
 Work through this sentence word-by-word, then give its translation into Gothic. English: "The dog ran away."
-Translate to English: "𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸."
-Translate to English: 𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸.
-Work through this sentence word-by-word, then give its translation into English. Gothic: "𐍃𐌰 𐍃𐌰𐌹𐌾𐌰𐌽𐌳𐍃 𐍅𐌰𐌿𐍂𐌳 𐍃𐌰𐌹𐌾𐌹𐌸."
+Translate to Gothic: I love you.
 What is the capital of Germany?
