@@ -13213,3 +13213,258 @@ v139-i21:
   note: lr5e-5; dropout 0.3; alignment x48
   observation: Adding CoT and lexical task drastically improve bpc for base model;
     upping lexicon, CoT, or alignment to x48 doesn't seem to help
+v74L-i16:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-06T02:42:08+00:00'
+  era: instruct-v1.0.0
+  group: initial-sweep
+  note: lr 2.5e-5, dropout 0.3, translation x16, CoT translation x16
+  observation: 0.3 vs. 0.35 dropout makes minimal difference; 32x CoT slightly better;
+    32x translation is too much
+v74L-i17:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 16
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-06T02:42:11+00:00'
+  era: instruct-v1.0.0
+  group: initial-sweep
+  note: lr 2.5e-5, dropout 0.35, translation x16, CoT translation x16
+  observation: 0.3 vs. 0.35 dropout makes minimal difference; 32x CoT slightly better;
+    32x translation is too much
+v74L-i18:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.3
+    attention_dropout: 0.3
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-06T02:42:14+00:00'
+  era: instruct-v1.0.0
+  group: initial-sweep
+  note: lr 2.5e-5, dropout 0.3, translation x16, CoT translation x32
+  observation: 0.3 vs. 0.35 dropout makes minimal difference; 32x CoT slightly better;
+    32x translation is too much
+v74L-i19:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-06T02:42:28+00:00'
+  era: instruct-v1.0.0
+  group: initial-sweep
+  note: lr 2.5e-5, dropout 0.35, translation x16, CoT translation x32
+  observation: 0.3 vs. 0.35 dropout makes minimal difference; 32x CoT slightly better;
+    32x translation is too much
+v74L-i20:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 32
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-09T15:36:38+00:00'
+  era: instruct-v1.0.0
+  group: initial-sweep
+  note: lr 2.5e-5, dropout 0.35, translation x32, CoT translation x32
+  observation: 0.3 vs. 0.35 dropout makes minimal difference; 32x CoT slightly better;
+    32x translation is too much
