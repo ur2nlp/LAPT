@@ -60,10 +60,8 @@ import sys
 from pathlib import Path
 
 from gothic.instruction_format import flatten_prompt
+from gothic.word_spotting.canonical import trainable_alignments
 
-
-# Alignment statuses that are trustworthy enough to train on.
-TRAINABLE_STATUSES = ("verified_correct", "kept_edited")
 
 # Punctuation stripped from sentence tokens when locating a word's position.
 PUNCTUATION = string.punctuation + "·"
@@ -144,25 +142,6 @@ CONCLUSION_TEMPLATES = {
         "so the whole sentence is {full}",
     ],
 }
-
-
-def trainable_alignments(entry: dict) -> list[dict]:
-    """Return the entry's alignments whose status is trustworthy for training.
-
-    Args:
-        entry: A canonical alignments JSONL entry.
-
-    Returns:
-        The sublist of alignments with a status in ``TRAINABLE_STATUSES``. The
-        canonical schema carries a ``status`` on every alignment; older
-        finalized files without it are treated as all-trainable.
-    """
-    kept = []
-    for alignment in entry["alignments"]:
-        status = alignment.get("status")
-        if status is None or status in TRAINABLE_STATUSES:
-            kept.append(alignment)
-    return kept
 
 
 def token_position(sentence: str, word: str, case_insensitive: bool) -> int:

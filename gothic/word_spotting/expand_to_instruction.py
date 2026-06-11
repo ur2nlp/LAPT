@@ -20,27 +20,34 @@ Each projection has a few interchangeable prompt templates; one is chosen per
 example with a seeded RNG, giving robustness to prompt phrasing without the
 combinatorial blow-up of emitting every template.
 
-Input format (from verify_word_spotting.py --finalize):
-    {"english_sentence": "...", "gothic_sentence_roman": "...",
-     "gothic_sentence_gothic": "...",
-     "alignments": [{"target_word": "...", "gothic_word_roman": "...",
+Input format (canonical {train,test}_alignments.jsonl from assign_alignment_ids):
+    {"sentence_id": "...", "english_sentence": "...",
+     "gothic_sentence_roman": "...", "gothic_sentence_gothic": "...",
+     "alignments": [{"alignment_id": "...", "status": "...",
+                      "target_word": "...", "gothic_word_roman": "...",
                       "gothic_word_gothic": "..."}, ...]}
+
+Only alignments whose ``status`` is trainable (``verified_correct`` /
+``kept_edited``) are expanded; the filter is shared with ``expand_to_cot.py`` via
+``gothic.word_spotting.canonical`` so the two datasets never train on different
+subsets (see `.claude/gothic/word_spotting.md` § "v0.5 single-source cutover").
+Older finalized files with no ``status`` field are treated as all-trainable.
 
 Output format (instruction_jsonl, one line per example):
     {"prompt": "... Response:", "response": " answer"}
 
 Usage:
     python -m gothic.word_spotting.expand_to_instruction \
-        --input data/gothic_word_spotting/train_verified_a.jsonl \
+        --input data/gothic_word_spotting/train_alignments.jsonl \
         --output data/gothic_word_spotting/train_word_spotting.jsonl
 
     # Original forward-only behaviour
     python -m gothic.word_spotting.expand_to_instruction \
-        --input finalized.jsonl --projections forward
+        --input train_alignments.jsonl --projections forward
 
     # Roman script only, random script per alignment
     python -m gothic.word_spotting.expand_to_instruction \
-        --input finalized.jsonl --script roman
+        --input train_alignments.jsonl --script roman
 """
 
 import argparse
@@ -51,6 +58,7 @@ import sys
 from pathlib import Path
 
 from gothic.instruction_format import flatten_prompt
+from gothic.word_spotting.canonical import trainable_alignments
 
 
 # Marker substituted for the missing word in cloze prompts.
@@ -256,7 +264,7 @@ def expand_entry(
     """Expand one word-spotting entry into instruction examples.
 
     Args:
-        entry: A finalized word-spotting JSONL entry.
+        entry: A canonical word-spotting JSONL entry.
         projections: Projection keys to emit.
         scripts: Script keys to consider ("roman", "gothic").
         pick_one_script: If True, choose one script per alignment at random
@@ -270,9 +278,10 @@ def expand_entry(
     """
     examples: list[dict] = []
     skipped = 0
-    target_words = [a["target_word"] for a in entry["alignments"]]
+    alignments = trainable_alignments(entry)
+    target_words = [a["target_word"] for a in alignments]
 
-    for alignment in entry["alignments"]:
+    for alignment in alignments:
         if pick_one_script:
             selected_scripts = [rng.choice(scripts)]
         else:
@@ -381,10 +390,12 @@ def main():
         pick_one_script = False
 
     rng = random.Random(args.seed)
+    # Distractor fallback pool draws only from trainable alignments, so a
+    # rejected/unverified target never leaks in as a discrimination distractor.
     global_pool = [
         alignment["target_word"]
         for entry in entries
-        for alignment in entry["alignments"]
+        for alignment in trainable_alignments(entry)
     ]
 
     examples: list[dict] = []
@@ -413,7 +424,7 @@ def main():
         if args.output:
             out_file.close()
 
-    total_alignments = sum(len(e["alignments"]) for e in entries)
+    total_alignments = sum(len(trainable_alignments(e)) for e in entries)
     skipped_note = f", {total_skipped} skipped" if total_skipped else ""
     print(
         f"Expanded {len(entries)} sentence pairs ({total_alignments} alignments) "
