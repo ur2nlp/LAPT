@@ -22,6 +22,9 @@ Usage as CLI:
     python orthography.py input.txt output.txt --direction to-latin
 """
 
+import re
+
+
 def get_latin_gothic_mappings():
     """
     Returns Latin-to-Gothic character mappings.
@@ -193,6 +196,56 @@ def normalize_orthography(text: str) -> str:
     text = text.translate(ORTHOGRAPHY_MAP)
     # ƕ → hw (must be done as string replacement, not char-to-char)
     text = text.replace("ƕ", "hw").replace("Ƕ", "Hw")
+    return text
+
+
+# A parenthesized run of pure ASCII digits — the decimal-value gloss of Gothic
+# letter-numerals in the genealogy tables (e.g. "·t· ·l· ·g· (333)"). The
+# preceding whitespace is consumed so removal does not leave a double space.
+_ARABIC_NUMERAL_PAREN = re.compile(r"\s*\(\d+\)")
+
+# A trailing fragment-continuation dash left at the end of a genealogy line.
+_TRAILING_DASH = re.compile(r"\s*-\s*$")
+
+
+def clean_gothic_artifacts(text: str) -> str:
+    """Strip editorial annotation artifacts from a Gothic surface string.
+
+    The gotica source marks editorial interventions that are noise for modeling
+    and for word-spotting alignment. This removes them:
+
+    - **Restoration parentheses** wrap letters the editor supplied where the
+      manuscript is damaged, e.g. ``wa(i)ros``, ``(su)niwe``, ``(jah)``, and
+      parenthesized Gothic numerals ``(·k·)``. The parentheses are dropped and
+      the enclosed text kept (it is the intended reading). No Gothic-side
+      parenthetical spans whitespace, so dropping the parenthesis characters is
+      exactly an unwrap — unlike English translation text, which *does* contain
+      genuine whitespace-spanning parentheticals and must not be passed here.
+    - **Arabic-numeral glosses** ``(2222)``, ``(654)`` give the decimal value of
+      the preceding Gothic letter-numerals; the whole token is removed.
+    - **Enclitic tildes** ``~`` mark the boundary of an assimilated enclitic
+      (Streitberg notation), e.g. ``qaþuþ~þan`` = qaþ+uh+þan. The manuscript
+      writes a single word, so the tilde is dropped (join).
+    - A trailing fragment-continuation dash (`` -``) is stripped.
+
+    Genuine Gothic letter-numerals (``·b·``, ``·x·``, ``·{90}·``) are preserved.
+
+    Args:
+        text: A Gothic string in either Roman or Gothic script.
+
+    Returns:
+        The cleaned string.
+    """
+    # Remove decimal-gloss tokens first, before the blanket parenthesis strip
+    # would turn "(333)" into a bare "333".
+    text = _ARABIC_NUMERAL_PAREN.sub("", text)
+    # Unwrap all remaining (whitespace-free, non-numeric) restoration parentheses.
+    text = text.replace("(", "").replace(")", "")
+    # Join assimilated enclitics written across a tilde.
+    text = text.replace("~", "")
+    # Drop a trailing fragment-continuation dash and collapse leftover whitespace.
+    text = _TRAILING_DASH.sub("", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
     return text
 
 
