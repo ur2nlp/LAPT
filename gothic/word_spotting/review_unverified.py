@@ -7,14 +7,21 @@ This is the v0.4 -> v0.5 review round-trip. Unlike ``verify_word_spotting.py``
 (which scores a flat per-sentence JSONL and *rebuilds* a new file on finalize),
 this module operates on ``{train,test}_alignments.jsonl`` — the canonical file
 with stable ``alignment_id`` / ``status`` / provenance — and touches ONLY the
-alignments whose status is ``unverified``. Every other alignment is left
+alignments named in the reviewed TSV. Every other alignment is left
 byte-identical.
 
+By default it reviews the ``unverified`` subset, but ``--statuses`` re-targets it
+to any status or set of statuses (e.g. ``verified_correct,kept_edited`` to
+re-audit already-resolved rows). The apply patch is keyed purely on
+``alignment_id`` and is status-agnostic; ``--statuses`` only governs which rows
+the export emits and which the apply expects to see covered.
+
 Export mode (default):
-    Filter the canonical file to ``status == "unverified"`` alignments, score each
-    against the Koebler dictionary (same tiers as ``verify_word_spotting.py``), and
-    write a review TSV. The first column is ``alignment_id`` — the join key used to
-    patch the file back. Sentence fields are carried for review context.
+    Filter the canonical file to the reviewed statuses, score each against the
+    Koebler dictionary (same tiers as ``verify_word_spotting.py``), and write a
+    review TSV. The first column is ``alignment_id`` — the join key used to patch
+    the file back; the ``status`` column carries each alignment's current status.
+    Sentence fields are carried for review context.
 
     The reviewer, in a spreadsheet:
       - sets ``status`` to ``correct`` (accept as-is) or ``reject`` (drop);
@@ -59,8 +66,10 @@ from gothic.word_spotting.verify_word_spotting import (
     score_alignment,
 )
 
-# Status the canonical alignments carry while awaiting this review.
+# Default status reviewed by this round-trip (the v0.4 -> v0.5 unverified subset).
+# Override with --statuses to re-review any other status or set of statuses.
 UNVERIFIED_STATUS = "unverified"
+DEFAULT_REVIEW_STATUSES = frozenset({UNVERIFIED_STATUS})
 
 # Reviewer status-cell vocabularies (lowercased, stripped).
 REJECT_STATUSES = {"reject", "rejected", "delete", "deleted", "drop", "remove", "x", "✗", "no"}
@@ -85,8 +94,15 @@ def export_review_tsv(
     use_normalize: bool,
     top_n: int,
     sort_order: str,
+    review_statuses: frozenset[str] = DEFAULT_REVIEW_STATUSES,
 ) -> None:
-    """Write a review TSV containing only the ``unverified`` alignments."""
+    """Write a review TSV containing the alignments whose status is reviewable.
+
+    Args:
+        review_statuses: Statuses to export (default: ``{"unverified"}``). Pass a
+            larger set via ``--statuses`` to re-review already-resolved
+            alignments (e.g. ``verified_correct``).
+    """
     all_forms, english_to_forms = load_dictionary(dict_path)
     form_to_glosses = {cf: gs for cf, gs in all_forms}
 
@@ -99,7 +115,7 @@ def export_review_tsv(
         gothic_sentence_gothic = record["gothic_sentence_gothic"]
 
         for alignment in record["alignments"]:
-            if alignment.get("status") != UNVERIFIED_STATUS:
+            if alignment.get("status") not in review_statuses:
                 continue
 
             target_word = alignment["target_word"]
@@ -120,7 +136,7 @@ def export_review_tsv(
                 continue
 
             row = {
-                "status": UNVERIFIED_STATUS,
+                "status": alignment.get("status", ""),
                 "alignment_id": alignment["alignment_id"],
                 "source": alignment.get("source", ""),
                 "tier": scored["tier"],
@@ -176,7 +192,11 @@ def export_review_tsv(
     tier_counts = {1: 0, 2: 0, 3: 0}
     for row in rows:
         tier_counts[row["tier"]] += 1
-    print(f"Unverified alignments exported: {len(rows)}", file=sys.stderr)
+    statuses_label = ", ".join(sorted(review_statuses))
+    print(
+        f"Alignments exported (status in {{{statuses_label}}}): {len(rows)}",
+        file=sys.stderr,
+    )
     print(f"  Tier 1 (high):       {tier_counts[1]}", file=sys.stderr)
     print(f"  Tier 2 (form):       {tier_counts[2]}", file=sys.stderr)
     print(f"  Tier 3 (suspicious): {tier_counts[3]}", file=sys.stderr)
@@ -186,8 +206,26 @@ def apply_review(
     jsonl_path: str,
     review_path: str,
     output_path: str | None,
+    review_statuses: frozenset[str] = DEFAULT_REVIEW_STATUSES,
+    coverage_check: bool = True,
 ) -> None:
-    """Patch reviewed statuses back into the canonical file, keyed by alignment_id."""
+    """Patch reviewed statuses back into the canonical file, keyed by alignment_id.
+
+    The patch itself is status-agnostic: every alignment whose ``alignment_id``
+    appears in the reviewed TSV is updated, regardless of its prior status. The
+    ``review_statuses`` set is used only for coverage accounting — to detect
+    alignments that were *meant* to be reviewed but have no row in the TSV (the
+    failure mode of a spreadsheet round-trip silently dropping rows).
+
+    Args:
+        coverage_check: When True (the default), warn about alignments whose
+            status is in ``review_statuses`` but which have no row in the TSV.
+            Disable this for a **content-defined subset** review (e.g. the
+            English-mismatch TSV, which intentionally covers only a few of many
+            same-status rows), where the snapshot would flag the unreviewed
+            remainder. The orphan check (TSV ids absent from the file) always
+            runs.
+    """
     with open(review_path, "r", encoding="utf-8-sig", newline="") as f:
         # READ with QUOTE_NONE: Google Sheets' TSV *export* is unquoted (it dumps
         # raw cell values, passing '"' through literally), so a QUOTE_MINIMAL reader
@@ -213,13 +251,17 @@ def apply_review(
     records = load_alignment_records(jsonl_path)
 
     # Snapshot which alignments were awaiting review, to detect rows that the
-    # review TSV failed to cover (e.g. lost to a spreadsheet round-trip).
-    unverified_before = {
-        alignment["alignment_id"]
-        for record in records
-        for alignment in record["alignments"]
-        if alignment.get("status") == UNVERIFIED_STATUS
-    }
+    # review TSV failed to cover (e.g. lost to a spreadsheet round-trip). Skipped
+    # for content-defined subset reviews, where it would flag the remainder.
+    if coverage_check:
+        review_before = {
+            alignment["alignment_id"]
+            for record in records
+            for alignment in record["alignments"]
+            if alignment.get("status") in review_statuses
+        }
+    else:
+        review_before = set()
 
     counts = {"verified_correct": 0, "kept_edited": 0, "rejected": 0}
     pending: list[str] = []
@@ -297,13 +339,7 @@ def apply_review(
     orphan_review_ids = review_ids - matched_ids
     # Alignments that were awaiting review but have no row in the TSV at all —
     # the failure mode of a spreadsheet round-trip silently dropping/merging rows.
-    uncovered_ids = unverified_before - review_ids
-    canonical_unverified = {
-        alignment["alignment_id"]
-        for record in records
-        for alignment in record["alignments"]
-        if alignment.get("status") == UNVERIFIED_STATUS
-    }
+    uncovered_ids = review_before - review_ids
 
     if output_path is None:
         output_path = jsonl_path
@@ -337,17 +373,13 @@ def apply_review(
             file=sys.stderr,
         )
     if uncovered_ids:
+        statuses_label = ", ".join(sorted(review_statuses))
         print(
-            f"  WARNING: {len(uncovered_ids)} unverified alignment(s) have NO row in "
-            f"the review TSV (lost in a spreadsheet round-trip?): "
+            f"  WARNING: {len(uncovered_ids)} alignment(s) awaiting review "
+            f"(status in {{{statuses_label}}}) have NO row in the review TSV "
+            f"(lost in a spreadsheet round-trip?): "
             f"{', '.join(sorted(uncovered_ids)[:10])}"
             + (" ..." if len(uncovered_ids) > 10 else ""),
-            file=sys.stderr,
-        )
-    if canonical_unverified:
-        print(
-            f"  NOTE: {len(canonical_unverified)} alignment(s) remain 'unverified' "
-            f"in the canonical file after this apply",
             file=sys.stderr,
         )
 
@@ -368,6 +400,25 @@ def main():
         metavar="REVIEW_TSV",
         default=None,
         help="Apply mode: read this reviewed TSV and patch statuses back in place.",
+    )
+    parser.add_argument(
+        "--statuses",
+        default=UNVERIFIED_STATUS,
+        help=(
+            "Comma-separated status(es) to review (default: 'unverified'). "
+            "Export filters to these statuses; apply uses them only for coverage "
+            "accounting (the patch itself is keyed on alignment_id). Pass e.g. "
+            "'verified_correct,kept_edited' to re-review already-resolved rows."
+        ),
+    )
+    parser.add_argument(
+        "--no-coverage-check",
+        action="store_true",
+        help=(
+            "Apply mode: skip the 'awaiting review but missing from TSV' warning. "
+            "Use when the TSV is a content-defined subset of a status (e.g. the "
+            "English-mismatch TSV from clean_alignments.py)."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -408,8 +459,21 @@ def main():
     )
     args = parser.parse_args()
 
+    review_statuses = frozenset(
+        status.strip() for status in args.statuses.split(",") if status.strip()
+    )
+    if not review_statuses:
+        print("Error: --statuses must name at least one status.", file=sys.stderr)
+        sys.exit(1)
+
     if args.apply:
-        apply_review(args.alignments, args.apply, args.output)
+        apply_review(
+            args.alignments,
+            args.apply,
+            args.output,
+            review_statuses,
+            coverage_check=not args.no_coverage_check,
+        )
         return
 
     export_review_tsv(
@@ -420,6 +484,7 @@ def main():
         args.normalize,
         args.top_n,
         args.sort,
+        review_statuses,
     )
 
 
