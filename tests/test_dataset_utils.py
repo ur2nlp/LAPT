@@ -41,6 +41,8 @@ from datasets import Dataset, DatasetDict, load_from_disk
 from omegaconf import DictConfig
 
 from dataset_utils import (
+    _validate_source_cache,
+    _save_source_cache_config,
     _load_plaintext_dataset,
     _load_plaintext_dir_dataset,
     _load_concat_dataset,
@@ -2159,3 +2161,43 @@ class TestHuggingFaceSplitIntoLines:
             with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
                 _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
                                           split_into_lines=False)
+
+    def test_legacy_cache_forgives_registered_default(self, tmp_path):
+        """
+        A cache built before split_into_lines was tracked must not be
+        invalidated when the current request uses the registered historical
+        default (True), but a genuinely different value (False) must still trip
+        the mismatch. The tolerated params come from SourceCacheTracking, keyed
+        by dataset type -- no per-loader literal.
+        """
+        untok = tmp_path / "untokenized"
+        untok.mkdir()
+        # Legacy huggingface cache config: no split_into_lines key.
+        _save_source_cache_config(str(untok), {'type': 'huggingface', 'name': 'x'})
+
+        # Current == registered default -> forgiven, validates without raising.
+        _validate_source_cache(
+            str(untok),
+            {'type': 'huggingface', 'name': 'x', 'split_into_lines': True},
+        )
+
+        # Current != default -> real change -> must still raise.
+        with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
+            _validate_source_cache(
+                str(untok),
+                {'type': 'huggingface', 'name': 'x', 'split_into_lines': False},
+            )
+
+    def test_no_legacy_tolerance_for_unregistered_type(self, tmp_path):
+        """
+        A dataset type with no SourceCacheTracking entry gets no forgiveness:
+        a tracked field absent from the cached config still trips the mismatch.
+        """
+        untok = tmp_path / "untokenized"
+        untok.mkdir()
+        _save_source_cache_config(str(untok), {'type': 'plaintext', 'path': 'p'})
+        with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
+            _validate_source_cache(
+                str(untok),
+                {'type': 'plaintext', 'path': 'p', 'some_new_field': True},
+            )

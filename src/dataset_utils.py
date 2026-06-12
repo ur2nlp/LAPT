@@ -20,7 +20,7 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, l
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
-from artifact_configs import _dict_diff, multinomial_mix_slug
+from artifact_configs import _dict_diff, multinomial_mix_slug, SourceCacheTracking
 
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
@@ -35,6 +35,11 @@ def _validate_source_cache(untokenized_path: str, current: dict) -> None:
     Pre-refactor caches without tracking are allowed through with a warning
     so existing data isn't invalidated on upgrade; mismatches from that point
     on require an explicit regeneration (e.g. fresh_dataset=true).
+
+    Tracked parameters added after a cache was built are tolerated via
+    SourceCacheTracking (keyed by dataset ``type``): a parameter the cached
+    config lacks is forgiven when the current value equals its registered
+    historical default, while a genuinely different value still mismatches.
     """
     config_path = os.path.join(untokenized_path, SOURCE_CONFIG_FILENAME)
     if not os.path.exists(config_path):
@@ -48,6 +53,18 @@ def _validate_source_cache(untokenized_path: str, current: dict) -> None:
 
     with open(config_path, 'r') as f:
         cached = yaml.safe_load(f) or {}
+
+    legacy_defaults = SourceCacheTracking.legacy_defaults(current.get('type'))
+    if legacy_defaults:
+        current = {
+            key: value
+            for key, value in current.items()
+            if not (
+                key in legacy_defaults
+                and key not in cached
+                and value == legacy_defaults[key]
+            )
+        }
 
     diffs = _dict_diff(cached, current)
     if not diffs:
