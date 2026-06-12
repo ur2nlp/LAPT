@@ -1425,10 +1425,23 @@ TRAIN_PLAN_FILENAME = "train_plan.npz"
 DEV_SUBDIR = "dev"
 
 
-def _tokenized_source_dirname(tokenizer_id: str, max_length: int, add_labels: bool) -> str:
-    """Build the per-source tokenized cache directory name."""
+def _tokenized_source_dirname(
+    tokenizer_id: str,
+    max_length: int,
+    add_labels: bool,
+    variant_suffix: str = "",
+) -> str:
+    """
+    Build the per-source tokenized cache directory name.
+
+    The optional ``variant_suffix`` carries the untokenized variant (e.g.
+    ``_sub_<hash>`` for a substituted source) so a substituted source tokenizes
+    into a distinct cache rather than colliding with the raw one. An empty
+    suffix reproduces the original ``tokenized_<id>_ml<L>_<labels>`` name, so
+    pre-existing raw caches stay valid.
+    """
     label_suffix = "labels" if add_labels else "nolabels"
-    return f"tokenized_{tokenizer_id}_ml{max_length}_{label_suffix}"
+    return f"tokenized{variant_suffix}_{tokenizer_id}_ml{max_length}_{label_suffix}"
 
 
 def _source_has_instruction_columns(untokenized_path: str) -> bool:
@@ -1443,7 +1456,7 @@ def _source_has_instruction_columns(untokenized_path: str) -> bool:
 
 
 def tokenize_source(
-    source_cache_dir: str,
+    untokenized_path: str,
     tokenizer: PreTrainedTokenizer,
     tokenizer_id: str,
     max_length: int,
@@ -1461,8 +1474,11 @@ def tokenize_source(
     Train/dev partitioning is a mix-time concern and does not affect this cache.
 
     Args:
-        source_cache_dir: Directory holding the source's 'untokenized/' subdirectory.
-            The tokenized output is written as a sibling directory.
+        untokenized_path: Path to the source's untokenized dataset, as returned by
+            load_untokenized_dataset. This is the raw 'untokenized/' dir for an
+            unmodified source, or an 'untokenized_sub_<hash>/' sibling when the
+            source declares regex substitutions; the tokenized output is written
+            as a sibling whose name encodes that variant.
         tokenizer: Tokenizer to use.
         tokenizer_id: Stable identifier embedded in the cache directory name.
         max_length: Truncation length for tokenization.
@@ -1473,14 +1489,21 @@ def tokenize_source(
     Returns:
         Path to the tokenized cache directory.
     """
-    untokenized_path = os.path.join(source_cache_dir, "untokenized")
     if not os.path.exists(untokenized_path):
         raise FileNotFoundError(
             f"Source untokenized cache missing at {untokenized_path}; "
             "load the source via load_untokenized_dataset first."
         )
 
-    dirname = _tokenized_source_dirname(tokenizer_id, max_length, add_labels)
+    source_cache_dir = os.path.dirname(untokenized_path)
+    # Derive the variant suffix from the untokenized dir name so substituted
+    # sources ('untokenized_sub_<hash>') tokenize into their own cache and don't
+    # collide with the raw 'untokenized' cache.
+    untokenized_name = os.path.basename(untokenized_path)
+    variant_suffix = untokenized_name[len("untokenized"):]
+    dirname = _tokenized_source_dirname(
+        tokenizer_id, max_length, add_labels, variant_suffix
+    )
     tokenized_path = os.path.join(source_cache_dir, dirname)
 
     tracked = {
@@ -1683,7 +1706,6 @@ def load_tokenized_multinomial_dataset(
     # Step 1: ensure per-source untokenized caches exist.
     source_ids = []
     source_untokenized_paths = []
-    source_cache_dirs = []
     source_dev_sizes = []
     for idx, source_config in enumerate(sources):
         source_dict = DictConfig(source_config)
@@ -1694,7 +1716,6 @@ def load_tokenized_multinomial_dataset(
             cache_dir=source_cache,
         )
         source_ids.append(source_id)
-        source_cache_dirs.append(source_cache)
         source_untokenized_paths.append(untokenized_path)
         per_source_dev_size = getattr(source_dict, 'dev_size', dev_size)
         source_dev_sizes.append(per_source_dev_size)
@@ -1710,16 +1731,18 @@ def load_tokenized_multinomial_dataset(
             file=sys.stderr,
         )
 
-    # Step 3: tokenize each source (cache-aware).
+    # Step 3: tokenize each source (cache-aware). Tokenize the exact untokenized
+    # path returned above, which is the substituted variant when a source declares
+    # regex substitutions (not the raw 'untokenized' dir).
     source_tokenized_paths = [
         tokenize_source(
-            source_cache_dir=cache_dir,
+            untokenized_path=untokenized_path,
             tokenizer=tokenizer,
             tokenizer_id=tokenizer_id,
             max_length=max_length,
             add_labels=add_labels,
         )
-        for cache_dir in source_cache_dirs
+        for untokenized_path in source_untokenized_paths
     ]
     per_source_tokenized = [load_from_disk(p) for p in source_tokenized_paths]
     source_sizes = [len(d) for d in per_source_tokenized]
