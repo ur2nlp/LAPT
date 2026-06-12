@@ -32,6 +32,11 @@ sources:
     split: train
     dev_size: -1
     upsampling_factor: 32
+    # Collapse newline runs (plus surrounding whitespace) into a single space so
+    # the chat data matches the single-line formatting of the Gothic tasks.
+    substitutions:
+      - pattern: '\s*\n+\s*'
+        replacement: ' '
   - type: plaintext
     id: got
     dev_size: -1  # Using external holdout
