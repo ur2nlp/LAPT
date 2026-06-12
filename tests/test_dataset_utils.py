@@ -1662,6 +1662,47 @@ class TestLoadTokenizedMultinomialDataset:
         )
         assert len(underlying) == 3
 
+    def test_substitutions_applied_before_tokenization(self, tmp_path, base_tokenizer):
+        """
+        A source declaring substitutions must be tokenized from the substituted
+        variant, not the raw 'untokenized' dir. This is the regression that the
+        index-based path originally missed: load_untokenized_dataset returns the
+        substituted path, so tokenize_source must consume that exact path.
+        """
+        cache_dir = tmp_path / "cache"
+        self._write_source(cache_dir, "chat", ["hello\nworld", "foo\n\nbar"])
+
+        sources = [{
+            'id': 'chat',
+            'type': 'plaintext',
+            'path': 'unused',
+            'substitutions': [{'pattern': r'\s*\n+\s*', 'replacement': ' '}],
+        }]
+        load_tokenized_multinomial_dataset(
+            sources=sources, alpha=0.5, total_samples=4, dev_size=-1,
+            base_cache_dir=str(cache_dir), tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m", max_length=64,
+        )
+
+        chat_dir = cache_dir / "chat"
+        # The substituted untokenized variant was materialized with newlines gone.
+        sub_untok = [p for p in chat_dir.iterdir() if p.name.startswith("untokenized_sub_")]
+        assert len(sub_untok) == 1
+        sub_text = load_from_disk(str(sub_untok[0]))['train']['text']
+        assert sub_text == ['hello world', 'foo bar']
+
+        # Tokenization routed to the substituted variant's cache, NOT the raw name.
+        tok_sub = [p for p in chat_dir.iterdir() if p.name.startswith("tokenized_sub_")]
+        assert len(tok_sub) == 1
+        assert not (chat_dir / "tokenized_xglm564m_ml64_nolabels").exists()
+
+        # The tokenized rows encode the substituted (newline-free) text.
+        tokenized = load_from_disk(str(tok_sub[0]))
+        decoded = base_tokenizer.batch_decode(
+            tokenized['input_ids'], skip_special_tokens=True
+        )
+        assert all("\n" not in d for d in decoded)
+
 
 def _make_msgs(*pairs):
     """Build a messages list from (role, content) tuples."""
