@@ -44,8 +44,11 @@ from dataset_utils import (
     _load_plaintext_dataset,
     _load_plaintext_dir_dataset,
     _load_concat_dataset,
+    _load_huggingface_dataset,
     _load_instruction_hf_dataset,
     _compute_sampling_probs,
+    _parse_substitutions,
+    _apply_substitutions,
     load_untokenized_dataset,
     load_external_eval_set,
     load_tokenized_multinomial_dataset,
@@ -1899,3 +1902,219 @@ class TestInstructionHFLoader:
         assert len(ds) == 1
         assert ds[0]['prompt'] == 'Hi Response:'
         assert ds[0]['response'] == ' Hello.'
+
+
+class TestSubstitutions:
+    """
+    Tests for the optional per-dataset regex substitution layer.
+
+    Substitutions are applied generically by load_untokenized_dataset after the
+    type-specific loader runs, to every string column of the untokenized
+    dataset. The canonical use case is collapsing newlines to spaces in chat
+    data so it matches the single-line formatting of other sources.
+    """
+
+    def test_parse_substitutions_empty(self):
+        """None or an empty list yields no substitutions."""
+        assert _parse_substitutions(None) == []
+        assert _parse_substitutions([]) == []
+
+    def test_parse_substitutions_default_replacement(self):
+        """A missing 'replacement' defaults to deletion (empty string)."""
+        parsed = _parse_substitutions([{'pattern': r'\d+'}])
+        assert parsed == [(r'\d+', '')]
+
+    def test_parse_substitutions_rejects_bad_regex(self):
+        """A malformed pattern fails at parse time, not at map time."""
+        with pytest.raises(Exception):
+            _parse_substitutions([{'pattern': '([unclosed'}])
+
+    def test_parse_substitutions_requires_pattern(self):
+        """A substitution entry without a 'pattern' is rejected."""
+        with pytest.raises(ValueError):
+            _parse_substitutions([{'replacement': ' '}])
+
+    def test_apply_substitutions_collapses_newlines(self, tmp_path):
+        """
+        Newline runs (with surrounding whitespace) collapse to a single space
+        across all string columns, leaving newline-free values untouched.
+        """
+        base_path = tmp_path / "untokenized"
+        DatasetDict({'train': Dataset.from_dict({
+            'prompt': ['Hello\nworld', 'no newline'],
+            'response': ['line1\n\n  line2', 'plain'],
+        })}).save_to_disk(str(base_path))
+
+        substitutions = _parse_substitutions(
+            [{'pattern': r'\s*\n+\s*', 'replacement': ' '}]
+        )
+        out_path = _apply_substitutions(str(base_path), substitutions)
+
+        result = load_from_disk(out_path)['train']
+        assert result['prompt'] == ['Hello world', 'no newline']
+        assert result['response'] == ['line1 line2', 'plain']
+
+    def test_apply_substitutions_leaves_base_untouched(self, tmp_path):
+        """The raw cache is preserved; the substituted copy lives elsewhere."""
+        base_path = tmp_path / "untokenized"
+        DatasetDict({'train': Dataset.from_dict({
+            'text': ['a\nb'],
+        })}).save_to_disk(str(base_path))
+
+        substitutions = _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
+        out_path = _apply_substitutions(str(base_path), substitutions)
+
+        assert out_path != str(base_path)
+        assert load_from_disk(str(base_path))['train']['text'] == ['a\nb']
+        assert load_from_disk(out_path)['train']['text'] == ['a b']
+
+    def test_apply_substitutions_cached(self, tmp_path):
+        """A second call with identical patterns reuses the cached path."""
+        base_path = tmp_path / "untokenized"
+        DatasetDict({'train': Dataset.from_dict({
+            'text': ['x\ny'],
+        })}).save_to_disk(str(base_path))
+
+        substitutions = _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
+        first = _apply_substitutions(str(base_path), substitutions)
+        second = _apply_substitutions(str(base_path), substitutions)
+        assert first == second
+
+    def test_apply_substitutions_distinct_patterns_distinct_paths(self, tmp_path):
+        """Different patterns hash to different cache directories."""
+        base_path = tmp_path / "untokenized"
+        DatasetDict({'train': Dataset.from_dict({
+            'text': ['x\ny'],
+        })}).save_to_disk(str(base_path))
+
+        path_a = _apply_substitutions(
+            str(base_path), _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
+        )
+        path_b = _apply_substitutions(
+            str(base_path), _parse_substitutions([{'pattern': r'x', 'replacement': 'z'}])
+        )
+        assert path_a != path_b
+
+    def test_dispatcher_applies_substitutions(self, tmp_path):
+        """
+        load_untokenized_dataset wires substitutions through for any type:
+        here a plaintext source with a word-level substitution.
+        """
+        test_file = tmp_path / "data.txt"
+        test_file.write_text("the colour of honour")
+
+        dataset_config = DictConfig({
+            'type': 'plaintext',
+            'path': str(test_file),
+            'substitutions': [
+                {'pattern': 'ou', 'replacement': 'o'},
+            ],
+        })
+        result_path = load_untokenized_dataset(
+            dataset_config, cache_dir=str(tmp_path / 'cache')
+        )
+
+        text = load_from_disk(result_path)['train']['text']
+        assert text == ['the color of honor']
+
+
+class TestHuggingFaceSplitIntoLines:
+    """
+    Tests for the optional document->line splitting in the non-instruction
+    HuggingFace loader. Default (True) preserves the historical behavior;
+    False keeps each document as a single example, parallel to the instruction
+    loaders.
+    """
+
+    def _docs(self):
+        return Dataset.from_dict({'content': [
+            'line one\nline two\nshort',
+            'single line doc with many words here',
+        ]})
+
+    def test_split_into_lines_default(self, tmp_path):
+        """By default each document is split into one example per line."""
+        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+            path = _load_huggingface_dataset(
+                str(tmp_path / 'cache'), 'fake/ds', text_column='content',
+            )
+        texts = load_from_disk(path)['train']['text']
+        assert texts == [
+            'line one', 'line two', 'short',
+            'single line doc with many words here',
+        ]
+
+    def test_no_split_keeps_documents_whole(self, tmp_path):
+        """split_into_lines=False keeps documents intact with newlines preserved."""
+        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+            path = _load_huggingface_dataset(
+                str(tmp_path / 'cache'), 'fake/ds', text_column='content',
+                split_into_lines=False,
+            )
+        texts = load_from_disk(path)['train']['text']
+        assert texts == [
+            'line one\nline two\nshort',
+            'single line doc with many words here',
+        ]
+
+    def test_no_split_min_words_filters_per_document(self, tmp_path):
+        """With no splitting, min_words_per_line filters whole documents."""
+        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+            path = _load_huggingface_dataset(
+                str(tmp_path / 'cache'), 'fake/ds', text_column='content',
+                min_words_per_line=6, split_into_lines=False,
+            )
+        texts = load_from_disk(path)['train']['text']
+        # First doc has 5 whitespace-separated words; second has 7.
+        assert texts == ['single line doc with many words here']
+
+    def test_no_split_skips_estimation_phase(self, tmp_path):
+        """
+        When not splitting, the streaming path downloads max_samples *
+        oversampling_factor documents directly, with no estimation pre-pass.
+        """
+        docs = Dataset.from_dict({'text': [f'doc {i}\nbody {i}' for i in range(50)]})
+        collect_limits = []
+
+        def fake_collect(stream, limit):
+            collect_limits.append(limit)
+            return docs.select(range(min(limit, len(docs))))
+
+        with patch('dataset_utils.load_dataset', return_value='STREAM'), \
+             patch('dataset_utils.collect_from_stream', side_effect=fake_collect):
+            _load_huggingface_dataset(
+                str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
+                oversampling_factor=3, split_into_lines=False,
+            )
+        # A single download of max_samples * oversampling_factor, no estimation call.
+        assert collect_limits == [30]
+
+    def test_split_uses_estimation_phase(self, tmp_path):
+        """The default (splitting) path still runs the two-phase estimation."""
+        docs = Dataset.from_dict({'text': [f'doc {i}\nbody {i}' for i in range(50)]})
+        collect_limits = []
+
+        def fake_collect(stream, limit):
+            collect_limits.append(limit)
+            return docs.select(range(min(limit, len(docs))))
+
+        with patch('dataset_utils.load_dataset', return_value='STREAM'), \
+             patch('dataset_utils.collect_from_stream', side_effect=fake_collect):
+            _load_huggingface_dataset(
+                str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
+                oversampling_factor=3, split_into_lines=True,
+            )
+        # Two calls: a small estimation sample, then the sized download.
+        assert len(collect_limits) == 2
+
+    def test_split_into_lines_tracked_in_cache(self, tmp_path):
+        """Changing split_into_lines invalidates the per-source cache."""
+        cache = str(tmp_path / 'cache')
+        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+            _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
+                                      split_into_lines=True)
+        # Same cache dir, different split flag -> mismatch error.
+        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+            with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
+                _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
+                                          split_into_lines=False)

@@ -217,6 +217,7 @@ def multinomial_mix_slug(dataset_config: dict) -> str:
                 'sampling_prob': source.get('sampling_prob'),
                 'upsampling_factor': source.get('upsampling_factor'),
                 'dev_size': source.get('dev_size'),
+                'substitutions': source.get('substitutions'),
             }
             for source in dataset_config.get('sources', [])
         ],
