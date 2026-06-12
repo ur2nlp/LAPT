@@ -6,16 +6,18 @@ tokenizing with provided tokenizers, and caching results.
 """
 
 import glob
+import hashlib
 import json
 import os
 import random
+import re
 import sys
 from itertools import chain
 
 import numpy as np
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
 from artifact_configs import _dict_diff, multinomial_mix_slug
@@ -145,6 +147,121 @@ def collect_from_stream(stream, limit: int) -> Dataset:
     return Dataset.from_list(samples)
 
 
+def _parse_substitutions(raw) -> list[tuple[str, str]]:
+    """
+    Normalize a dataset's optional ``substitutions`` config into (pattern,
+    replacement) pairs.
+
+    Accepts a list of ``{pattern, replacement}`` mappings (the YAML form). The
+    ``replacement`` defaults to an empty string if omitted. Returns an empty
+    list when no substitutions are configured.
+
+    Args:
+        raw: The raw ``substitutions`` value from the dataset config (a
+            ListConfig, list, or None).
+
+    Returns:
+        List of (pattern, replacement) string tuples, in declaration order.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, (ListConfig, DictConfig)):
+        raw = OmegaConf.to_container(raw, resolve=True)
+
+    substitutions = []
+    for item in raw:
+        if 'pattern' not in item:
+            raise ValueError(
+                f"Each substitution must specify a 'pattern' (got {item!r})."
+            )
+        pattern = item['pattern']
+        replacement = item.get('replacement', '')
+        # Fail fast on a malformed regex rather than at map time.
+        re.compile(pattern)
+        substitutions.append((pattern, replacement))
+    return substitutions
+
+
+def _apply_substitutions(
+    base_path: str,
+    substitutions: list[tuple[str, str]],
+) -> str:
+    """
+    Apply a sequence of regex substitutions to every string column of an
+    untokenized dataset, caching the result in a sibling directory.
+
+    The substitutions are applied in order to each value of each string-valued
+    column (e.g. 'text', or 'prompt'/'response' for instruction sources), so a
+    pattern like ``\\n+`` -> ``' '`` collapses newlines to spaces across any
+    dataset type. The original (raw) cache at ``base_path`` is left untouched;
+    the substituted copy lives at ``{base_path}_sub_{hash}`` keyed on the
+    substitution list so changing the patterns rebuilds rather than clobbers.
+
+    Args:
+        base_path: Path to the untokenized DatasetDict to transform.
+        substitutions: Ordered (pattern, replacement) pairs to apply.
+
+    Returns:
+        Path to the substituted untokenized dataset.
+    """
+    normalized = [
+        {'pattern': pattern, 'replacement': replacement}
+        for pattern, replacement in substitutions
+    ]
+    digest = hashlib.sha256(
+        json.dumps(normalized, sort_keys=True).encode()
+    ).hexdigest()[:8]
+    substituted_path = f"{base_path}_sub_{digest}"
+    tracked = {
+        'type': 'substituted',
+        'base': os.path.basename(base_path),
+        'substitutions': normalized,
+    }
+
+    if os.path.exists(substituted_path):
+        _validate_source_cache(substituted_path, tracked)
+        return substituted_path
+
+    print(
+        f"Applying {len(substitutions)} regex substitution(s) to {base_path}",
+        file=sys.stderr,
+    )
+    compiled = [(re.compile(pattern), replacement) for pattern, replacement in substitutions]
+    dataset_dict = load_from_disk(base_path)
+
+    def substitute_batch(examples, string_columns):
+        for column in string_columns:
+            new_values = []
+            for value in examples[column]:
+                for pattern, replacement in compiled:
+                    value = pattern.sub(replacement, value)
+                new_values.append(value)
+            examples[column] = new_values
+        return examples
+
+    substituted_splits = {}
+    for split_name, split_dataset in dataset_dict.items():
+        string_columns = [
+            name
+            for name, feature in split_dataset.features.items()
+            if getattr(feature, 'dtype', None) == 'string'
+        ]
+        substituted_splits[split_name] = split_dataset.map(
+            lambda examples: substitute_batch(examples, string_columns),
+            batched=True,
+        )
+
+    substituted_dict = DatasetDict(substituted_splits)
+    substituted_dict.save_to_disk(substituted_path)
+    _save_source_cache_config(substituted_path, tracked)
+    print(
+        f"Substituted untokenized dataset saved to {substituted_path}",
+        file=sys.stderr,
+    )
+
+    return substituted_path
+
+
 def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = None) -> str:
     """
     Load untokenized dataset based on configuration.
@@ -162,13 +279,18 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
     NOTE: Parameters affecting the dataset artifact vary by type (language for OSCAR, path for
     plaintext, alpha/total_samples for multinomial, etc.). When adding new dataset types or
     parameters, update DatasetConfig in artifact_configs.py to track them.
+
+    Any dataset may also carry an optional ``substitutions`` field — a list of
+    ``{pattern, replacement}`` regexes applied to every string column after the
+    type-specific loader runs (see ``_apply_substitutions``). This is type-agnostic
+    because all loaders funnel through this dispatcher.
     """
     # Default to oscar for backward compatibility if type not specified
     dataset_type = getattr(dataset_config, 'type', 'oscar')
 
     if dataset_type == 'oscar':
         language_code = dataset_config.language
-        return _load_oscar_dataset(cache_dir, language_code)
+        untokenized_path = _load_oscar_dataset(cache_dir, language_code)
     elif dataset_type == 'huggingface':
         name = dataset_config.name
         config = getattr(dataset_config, 'config', None)
@@ -177,31 +299,32 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         max_samples = getattr(dataset_config, 'max_samples', None)
         min_words_per_line = getattr(dataset_config, 'min_words_per_line', None)
         oversampling_factor = getattr(dataset_config, 'oversampling_factor', 3)
-        return _load_huggingface_dataset(
+        split_into_lines = getattr(dataset_config, 'split_into_lines', True)
+        untokenized_path = _load_huggingface_dataset(
             cache_dir, name, config, split, text_column, max_samples, min_words_per_line,
-            oversampling_factor
+            oversampling_factor, split_into_lines
         )
     elif dataset_type == 'plaintext':
         file_path = dataset_config.path
-        return _load_plaintext_dataset(cache_dir, file_path)
+        untokenized_path = _load_plaintext_dataset(cache_dir, file_path)
     elif dataset_type == 'plaintext_dir':
         directory = dataset_config.directory
         pattern = getattr(dataset_config, 'pattern', '*.txt')
-        return _load_plaintext_dir_dataset(cache_dir, directory, pattern)
+        untokenized_path = _load_plaintext_dir_dataset(cache_dir, directory, pattern)
     elif dataset_type == 'concat':
         sources = dataset_config.sources
         parent_id = _get_source_id(dataset_config, fallback=None)
-        return _load_concat_dataset(cache_dir, sources, parent_id)
+        untokenized_path = _load_concat_dataset(cache_dir, sources, parent_id)
     elif dataset_type == 'multinomial':
         sources = dataset_config.sources
         alpha = dataset_config.alpha
         total_samples = dataset_config.total_samples
-        return _load_multinomial_dataset(
+        untokenized_path = _load_multinomial_dataset(
             cache_dir, sources, alpha, total_samples, dev_size,
         )
     elif dataset_type == 'instruction_jsonl':
         file_path = dataset_config.path
-        return _load_instruction_jsonl_dataset(cache_dir, file_path)
+        untokenized_path = _load_instruction_jsonl_dataset(cache_dir, file_path)
     elif dataset_type == 'instruction_hf':
         name = dataset_config.name
         config = getattr(dataset_config, 'config', None)
@@ -210,7 +333,7 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         prompt_template = getattr(dataset_config, 'prompt_template', '{user} Response:')
         response_template = getattr(dataset_config, 'response_template', ' {assistant}')
         max_samples = getattr(dataset_config, 'max_samples', None)
-        return _load_instruction_hf_dataset(
+        untokenized_path = _load_instruction_hf_dataset(
             cache_dir,
             name,
             config,
@@ -222,6 +345,12 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         )
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
+
+    substitutions = _parse_substitutions(getattr(dataset_config, 'substitutions', None))
+    if substitutions:
+        untokenized_path = _apply_substitutions(untokenized_path, substitutions)
+
+    return untokenized_path
 
 
 def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
@@ -268,7 +397,8 @@ def _load_huggingface_dataset(
     text_column: str = 'text',
     max_samples: int = None,
     min_words_per_line: int = None,
-    oversampling_factor: int = 3
+    oversampling_factor: int = 3,
+    split_into_lines: bool = True,
 ) -> str:
     """
     Load a generic HuggingFace dataset.
@@ -279,13 +409,19 @@ def _load_huggingface_dataset(
         config: Dataset configuration/subset (e.g., 'wikitext-103-v1'), optional
         split: Which split to load (default: 'train')
         text_column: Name of the column containing text (default: 'text')
-        max_samples: Maximum number of LINES to load (after splitting docs), uses streaming
-            if specified (optional)
-        min_words_per_line: Minimum number of space-separated words per line
-            (filters out titles/headers)
+        max_samples: Maximum number of examples to load, uses streaming if specified
+            (optional). An "example" is a line when split_into_lines is True, else a
+            whole document.
+        min_words_per_line: Minimum number of space-separated words per example
+            (filters out titles/headers). Applies per line when splitting, per
+            document otherwise.
         oversampling_factor: When max_samples specified, download this many times more documents
             than estimated needed to maintain document diversity (default: 3). Higher values =
             better diversity but more memory.
+        split_into_lines: If True (default), split each document into one example
+            per line (the historical behavior). If False, keep each document as a
+            single example with newlines preserved, parallel to the instruction
+            loaders (combine with ``substitutions`` to normalize whitespace).
 
     Returns:
         Path to the untokenized dataset
@@ -300,6 +436,7 @@ def _load_huggingface_dataset(
         'max_samples': max_samples,
         'min_words_per_line': min_words_per_line,
         'oversampling_factor': oversampling_factor,
+        'split_into_lines': split_into_lines,
     }
 
     if os.path.exists(untokenized_path):
@@ -309,57 +446,70 @@ def _load_huggingface_dataset(
         if config:
             print(f"  Config: {config}", file=sys.stderr)
         print(f"  Split: {split}", file=sys.stderr)
+        example_unit = "lines" if split_into_lines else "documents"
         if max_samples:
-            print(f"  Max samples (lines): {max_samples}", file=sys.stderr)
+            print(f"  Max samples ({example_unit}): {max_samples}", file=sys.stderr)
             print(f"  Oversampling factor: {oversampling_factor}x", file=sys.stderr)
 
         # Use streaming if max_samples specified to avoid downloading entire dataset
         if max_samples:
-            stream = load_dataset(
-                name,
-                config,
-                split=split,
-                streaming=True
-            )
-
-            # Phase 1: Sample a small batch to estimate lines per document
-            # This helps us download the right number of documents
-            estimation_sample_size = min(1000, max_samples // 10)
-            print(
-                f"  Phase 1: Sampling {estimation_sample_size} documents to estimate lines/doc",
-                file=sys.stderr
-            )
-
-            # Convert estimation batch to dataset and measure lines/doc
-            # Use same processing pipeline as main data for accurate estimation
-            estimation_dataset = collect_from_stream(stream, estimation_sample_size)
-            num_estimation_docs = len(estimation_dataset)
-            estimation_dataset = _docs_to_filtered_lines(
-                estimation_dataset, text_column, min_words_per_line
-            )
-
-            lines_per_doc = len(estimation_dataset) / num_estimation_docs if num_estimation_docs else 1
-            print(
-                f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)",
-                file=sys.stderr
-            )
-
-            # Check if estimation found any valid lines
-            if lines_per_doc == 0:
-                raise ValueError(
-                    f"Estimation phase found 0 lines per document after filtering. "
-                    f"This suggests min_words_per_line={min_words_per_line} is too strict, "
-                    f"or the dataset has no suitable content."
+            if split_into_lines:
+                # Estimate lines/doc so we download enough documents to yield
+                # max_samples lines. When not splitting, each document is exactly
+                # one example, so this estimation is unnecessary (see else branch).
+                stream = load_dataset(
+                    name,
+                    config,
+                    split=split,
+                    streaming=True
                 )
 
-            # Phase 2: Calculate how many documents to download with oversampling
-            # We oversample to maintain document diversity, then randomly sample lines at the end
-            docs_needed = int((max_samples / lines_per_doc) * oversampling_factor)
+                # Phase 1: Sample a small batch to estimate lines per document
+                # This helps us download the right number of documents
+                estimation_sample_size = min(1000, max_samples // 10)
+                print(
+                    f"  Phase 1: Sampling {estimation_sample_size} documents to estimate lines/doc",
+                    file=sys.stderr
+                )
 
-            print(f"  Phase 2: Downloading {docs_needed} documents total", file=sys.stderr)
+                # Convert estimation batch to dataset and measure lines/doc
+                # Use same processing pipeline as main data for accurate estimation
+                estimation_dataset = collect_from_stream(stream, estimation_sample_size)
+                num_estimation_docs = len(estimation_dataset)
+                estimation_dataset = _docs_to_filtered_lines(
+                    estimation_dataset, text_column, min_words_per_line, split_into_lines
+                )
 
-            # Download all documents from fresh stream
-            # (Restarting stream is simpler than trying to resume/combine with estimation samples)
+                lines_per_doc = (
+                    len(estimation_dataset) / num_estimation_docs if num_estimation_docs else 1
+                )
+                print(
+                    f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)",
+                    file=sys.stderr
+                )
+
+                # Check if estimation found any valid lines
+                if lines_per_doc == 0:
+                    raise ValueError(
+                        f"Estimation phase found 0 lines per document after filtering. "
+                        f"This suggests min_words_per_line={min_words_per_line} is too strict, "
+                        f"or the dataset has no suitable content."
+                    )
+
+                # Calculate how many documents to download with oversampling.
+                # We oversample to maintain document diversity, then randomly
+                # sample lines at the end.
+                docs_needed = int((max_samples / lines_per_doc) * oversampling_factor)
+            else:
+                # One example per document: download max_samples documents, plus
+                # the oversampling headroom for diversity and any min-words filtering.
+                docs_needed = max_samples * oversampling_factor
+
+            print(f"  Downloading {docs_needed} documents total", file=sys.stderr)
+
+            # Download all documents from a fresh stream.
+            # (Restarting the stream is simpler than resuming/combining with the
+            # estimation samples consumed above.)
             stream = load_dataset(
                 name,
                 config,
@@ -372,12 +522,18 @@ def _load_huggingface_dataset(
         else:
             dataset = load_dataset(name, config, split=split)
 
-        # Convert to line-based format (rename column if needed, split docs on newlines)
+        # Convert to the target schema (rename column if needed; split docs on
+        # newlines unless split_into_lines is False).
         # Note: Could also pass min_words_per_line here if detailed filtering logs aren't needed
-        dataset = _docs_to_filtered_lines(dataset, text_column, min_words_per_line=None)
-        print(f"  Converted to {len(dataset)} lines from documents", file=sys.stderr)
+        dataset = _docs_to_filtered_lines(
+            dataset, text_column, min_words_per_line=None, split_into_lines=split_into_lines
+        )
+        if split_into_lines:
+            print(f"  Converted to {len(dataset)} lines from documents", file=sys.stderr)
+        else:
+            print(f"  Kept {len(dataset)} documents (no line splitting)", file=sys.stderr)
 
-        # Filter out short lines (e.g., section titles) if min_words_per_line specified
+        # Filter out short examples (e.g., section titles) if min_words_per_line specified
         if min_words_per_line is not None:
             original_size = len(dataset)
             dataset = dataset.filter(
@@ -385,32 +541,34 @@ def _load_huggingface_dataset(
             )
             filtered_size = len(dataset)
             print(
-                f"  Filtered {original_size - filtered_size} lines with < {min_words_per_line} words "
-                f"({filtered_size} lines remaining)",
+                f"  Filtered {original_size - filtered_size} {example_unit} with "
+                f"< {min_words_per_line} words ({filtered_size} {example_unit} remaining)",
                 file=sys.stderr
             )
 
-            # Check if we have enough lines after filtering
+            # Check if we have enough examples after filtering
             if max_samples and filtered_size < max_samples:
                 print(
-                    f"Warning: After filtering, only {filtered_size} lines remain, but "
+                    f"Warning: After filtering, only {filtered_size} {example_unit} remain, but "
                     f"{max_samples} requested. Consider increasing oversampling_factor "
                     f"(current: {oversampling_factor}) or reducing min_words_per_line.",
                     file=sys.stderr
                 )
 
-        # If max_samples specified, randomly sample to exactly that many lines
+        # If max_samples specified, randomly sample to exactly that many examples
         # This maintains document diversity from oversampling while controlling final size
         if max_samples and len(dataset) > max_samples:
             print(
-                f"  Randomly sampling {max_samples} lines from {len(dataset)} available lines",
+                f"  Randomly sampling {max_samples} {example_unit} from {len(dataset)} "
+                f"available {example_unit}",
                 file=sys.stderr
             )
             indices = random.sample(range(len(dataset)), max_samples)
             dataset = dataset.select(sorted(indices))
         elif max_samples and len(dataset) < max_samples:
             print(
-                f"  Note: Got {len(dataset)} lines, which is less than requested {max_samples}",
+                f"  Note: Got {len(dataset)} {example_unit}, which is less than requested "
+                f"{max_samples}",
                 file=sys.stderr
             )
 
@@ -426,34 +584,46 @@ def _load_huggingface_dataset(
 def _docs_to_filtered_lines(
     dataset: Dataset,
     text_column: str = 'text',
-    min_words_per_line: int = None
+    min_words_per_line: int = None,
+    split_into_lines: bool = True,
 ) -> Dataset:
     """
-    Convert document-based dataset to line-based format with optional filtering.
+    Convert document-based dataset to (optionally) line-based format with filtering.
 
     This helper standardizes the transformation pipeline used by HuggingFace dataset loaders.
 
     Args:
         dataset: Dataset with document text
         text_column: Name of the text column (will be renamed to 'text' if different)
-        min_words_per_line: Minimum words per line to keep (None to skip filtering)
+        min_words_per_line: Minimum words per kept example (None to skip filtering).
+            Applies per line when splitting, per document otherwise.
+        split_into_lines: If True (default), split each document on newlines into
+            one example per line. If False, keep each document as a single example
+            (newlines preserved), parallel to the instruction-data loaders.
 
     Returns:
-        Dataset with one line per example
+        Dataset with one example per line (or per document when
+        ``split_into_lines`` is False).
     """
     # Standardize column name to 'text' if needed
     if text_column != 'text':
         dataset = dataset.rename_column(text_column, 'text')
 
     # Convert to line-based format (split documents on newlines)
-    original_columns = dataset.column_names
-    dataset = dataset.map(
-        docs_to_lines,
-        batched=True,
-        remove_columns=original_columns
-    )
+    if split_into_lines:
+        original_columns = dataset.column_names
+        dataset = dataset.map(
+            docs_to_lines,
+            batched=True,
+            remove_columns=original_columns
+        )
+    elif set(dataset.column_names) != {'text'}:
+        # Drop any extra metadata columns so the schema matches other loaders.
+        dataset = dataset.remove_columns(
+            [column for column in dataset.column_names if column != 'text']
+        )
 
-    # Filter short lines if specified
+    # Filter short examples if specified
     if min_words_per_line is not None:
         dataset = dataset.filter(
             lambda x: len(x['text'].split()) >= min_words_per_line
