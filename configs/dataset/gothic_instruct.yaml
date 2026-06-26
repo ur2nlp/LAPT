@@ -37,6 +37,20 @@ sources:
     substitutions:
       - pattern: '\s*\n+\s*'
         replacement: ' '
+  # English input-grounded extractive tasks, to push the model to attend to the
+  # prompt rather than emit memorized text. Built by
+  # gothic/data/prepare_english_grounded.py.
+  - type: instruction_jsonl
+    id: eng-dolly-grounded
+    dev_size: -1
+    upsampling_factor: 32
+    path: data/english_instruct/dolly-grounded_closed-qa-extract-summ_train.jsonl
+  - type: instruction_jsonl
+    id: eng-squad
+    dev_size: -1
+    # Raw count (~130k) already dwarfs the other sources, so keep the factor at 1.
+    upsampling_factor: 1
+    path: data/english_instruct/squad-v2_extractive-qa_train.jsonl
   - type: plaintext
     id: got
     dev_size: -1  # Using external holdout

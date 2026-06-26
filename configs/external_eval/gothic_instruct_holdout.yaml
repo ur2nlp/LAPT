@@ -16,3 +16,12 @@ external_eval_sets:
   - name: got_holdout
     path: data/gothic_prepared/monolingual_all-codices_both-scripts_test.txt
     format: plaintext
+  # Answerable-only SQuAD v2 (from its own validation split) as an upstream
+  # tripwire for whether the English input-grounding objective is training.
+  # Unanswerable questions are excluded: their targets are all the identical
+  # canonical decline string, so their bpc measures phrase memorization, not
+  # abstention. This is a diagnostic on the English lever, NOT a measure of
+  # Gothic translation input-attention.
+  - name: squad-answerable_holdout
+    path: data/english_instruct/squad-v2_answerable_holdout.jsonl
+    format: instruction_jsonl
