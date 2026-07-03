@@ -9,7 +9,7 @@ sources:
   - type: instruction_jsonl
     id: got-translation-cot
     dev_size: -1  # Using external holdout (test split)
-    upsampling_factor: 16
+    upsampling_factor: 32
     path: data/gothic_instruct/translation-cot_both-scripts_both-directions_train_v2.0.0.jsonl
   - type: instruction_jsonl
     id: got-transliteration
@@ -37,9 +37,6 @@ sources:
     substitutions:
       - pattern: '\s*\n+\s*'
         replacement: ' '
-  # English input-grounded extractive tasks, to push the model to attend to the
-  # prompt rather than emit memorized text. Built by
-  # gothic/data/prepare_english_grounded.py.
   - type: instruction_jsonl
     id: eng-dolly-grounded
     dev_size: -1
@@ -48,14 +45,8 @@ sources:
   - type: instruction_jsonl
     id: eng-squad
     dev_size: -1
-    # Raw count (~130k) already dwarfs the other sources, so keep the factor at 1.
-    upsampling_factor: 1
+    upsampling_factor: 8
     path: data/english_instruct/squad-v2_extractive-qa_train.jsonl
-  - type: plaintext
-    id: got
-    dev_size: -1  # Using external holdout
-    upsampling_factor: 16
-    path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
   - type: huggingface
     id: eng
     name: allenai/c4
