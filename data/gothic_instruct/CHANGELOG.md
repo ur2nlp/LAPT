@@ -4,6 +4,37 @@ Human-readable history of the instruction-tuning artifacts in this folder.
 `MANIFEST.yaml` is the machine-readable companion (sha256, per-file provenance,
 `used_by`). Newest first.
 
+## 2026-07-03 — new artifact: oov-hedge-instruct 2.0.0
+
+**New OOV-robustness (hedging) artifact**, teaching the model to flag an
+unrecognized source word and translate the rest rather than hallucinate a
+fluent-but-wrong verse. Built from the v0.5 canonical alignments
+(`data/gothic_word_spotting/{train,test}_alignments.jsonl` at `cf21d31`), same
+source facts as the alignment/CoT 2.0.0 family — so it **starts at 2.0.0** (not
+1.0.0) to co-version with them, despite having no literal 1.0.0 predecessor.
+
+Mechanism: for each `{verified_correct, kept_edited}` aligned word, replace it in
+the Gothic sentence with a **generated non-word** (novel stem + the replaced
+word's own grafted prefix/suffix, so it reads as unknown-but-well-formed Gothic,
+not gibberish — see `.claude/gothic/oov_robustness_augmentation.md`), and emit a
+got->eng target that names the non-word as unrecognized and blanks its aligned
+English span. The response always **falls back to CoT**: it glosses the verse's
+other trainable words before hedging. Emitted under **both** the plain
+translation prompt (same distribution as `translation-instruct`, so a bare
+"Translate: X" prompt sometimes translates and sometimes hedges) and the CoT
+prompt.
+
+- **`oov-hedge-instruct` 2.0.0** — `gothic.oov_augmentation.augment`,
+  `script=both`, `prompt-style=both`, one example per trainable word, `min-gloss=1`,
+  non-word T=0.6, seed 1 → **16,487 train / 4,088 test** examples. got2eng only.
+  Not yet trained on / not yet wired into any train config.
+
+Eval caveat carried into the manifest: once mixed in, **plain-translation bpc is
+no longer cross-regime comparable** (the same prompt now branches to a hedge).
+The discriminating signals are clean-holdout over-hedge rate + the `saijands` OOV
+probe, **not** a synthetic non-word holdout (a spelling-cue heuristic would ace
+the latter while failing real OOV).
+
 ## 2026-06-11 — v0.5 regeneration: alignment 2.0.0, CoT 2.0.0
 
 **MAJOR bumps for both word-spotting-derived artifacts**, regenerated from the

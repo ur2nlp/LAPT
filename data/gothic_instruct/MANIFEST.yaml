@@ -234,3 +234,34 @@ artifacts:
           - word-spotting_both-scripts_test_a.jsonl
         used_by: [v139-ib..is]
         notes: "Older legacy expansion; superseded well before v0.4. aliases include the even-older word-spotting_*_a names."
+
+  oov-hedge-instruct:
+    description: >-
+      OOV-robustness hedging: a verified-correct aligned Gothic word is replaced
+      with a generated non-word, and the got->eng target flags it as unrecognized
+      and blanks its English span while translating the rest. CoT-fallback response
+      (glosses the verse's other trainable words), emitted under both the plain
+      translation prompt and the CoT prompt. Morphology-silent (whole-word hedge).
+    current: 2.0.0
+    releases:
+      - version: 2.0.0
+        files:
+          train: {path: oov-hedge_both-scripts_got2eng_train_v2.0.0.jsonl, sha256: 515f2fbefd97e59b4feb4eafdd9271f8f91e6c808ba31c3353abdb2ee40f92fd, n: 16487}
+          test:  {path: oov-hedge_both-scripts_got2eng_test_v2.0.0.jsonl,  sha256: 8065790f24842d6c9df79afe63e3b2bc2208937f5d63c904a53c41ccf76d7f3e, n: 4088}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.5", path: "data/gothic_word_spotting/{train,test}_alignments.jsonl", git_sha: cf21d31}
+        generator: {module: gothic.oov_augmentation.augment, args: "script=both, prompt-style=both, max-per-verse=all, min-gloss=1, temperature=0.6, top-p=1.0", seed: 1, note: "non-word via gothic.oov_augmentation.stems (T=0.6 knee); trainable filter {verified_correct, kept_edited} via gothic.word_spotting.canonical"}
+        used_by: []
+        notes: >-
+          New artifact, started at 2.0.0 (not 1.0.0) to co-version with the
+          v0.5-alignment-derived family (alignment 2.0.0, translation-cot 2.0.0):
+          same source facts, no literal 1.0.0 predecessor. got2eng only (hedging
+          presupposes an unknown *source* word). One example per trainable word
+          (each corrupts a different word); both scripts x both prompt styles ->
+          16,487 train / 4,088 test. Non-word carries the replaced word's grafted
+          prefix/suffix but a novel stem, so it flags as unknown-but-well-formed
+          Gothic, not spelling-gibberish. NOTE: bpc on plain translation is no
+          longer cross-regime comparable once this is mixed in (same prompt now
+          branches to a hedge); judge by clean-holdout over-hedge rate + the
+          saijands OOV probe, not a non-word holdout (gameable by spelling cues).
+          Not yet trained on. See .claude/gothic/oov_robustness_augmentation.md.

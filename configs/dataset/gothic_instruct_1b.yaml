@@ -26,6 +26,17 @@ sources:
     dev_size: -1
     upsampling_factor: 32
     path: data/gothic_instruct/dictionary-lookup_both-scripts_both-directions_train_v1.0.0.jsonl
+  # OOV-robustness (hedging): got->eng where a source word is a generated non-word;
+  # target flags it and blanks its English span. Deliberately low factor (×4 vs the
+  # ×32 clean sources): the hedge branches off the same got->eng prompt, and a large
+  # clean fraction is what keeps the model from learning to over-hedge (disclaim on
+  # good input). Raise only if the model under-hedges. See
+  # .claude/gothic/oov_robustness_augmentation.md.
+  - type: instruction_jsonl
+    id: got-oov-hedge
+    dev_size: -1
+    upsampling_factor: 4
+    path: data/gothic_instruct/oov-hedge_both-scripts_got2eng_train_v2.0.0.jsonl
   - type: instruction_hf
     id: eng-chat
     name: HuggingFaceH4/no_robots
