@@ -22,9 +22,11 @@ import argparse
 import json
 import random
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from datasets import load_dataset
+from transformers import AutoTokenizer
 
 from gothic.instruction_format import flatten_prompt
 
@@ -70,6 +72,44 @@ def lowercase_first(text: str) -> str:
     return text[0].lower() + text[1:]
 
 
+def make_length_filter(
+    tokenizer_path: str | None,
+    max_length: int,
+) -> Callable[[str, str], bool] | None:
+    """Build a predicate that keeps only examples surviving truncation intact.
+
+    Extractive prompts embed a passage and can exceed ``max_length``; the
+    trainer front-truncates ``prompt + response`` to ``max_length``, so a long
+    prompt silently masks away part or all of the response (and a wholly-masked
+    eval batch yields a NaN loss). This predicate drops any example whose
+    tokenized ``prompt + response + EOS`` exceeds ``max_length``, so every kept
+    response survives in full.
+
+    The tokenization mirrors ``_tokenize_instruction_examples`` in
+    ``src/dataset_utils.py``: prompt with special tokens, response without, plus
+    one appended EOS. The filter is therefore tokenizer-specific.
+
+    Args:
+        tokenizer_path: Path/name of the tokenizer to measure lengths with, or
+            None to disable filtering.
+        max_length: The training/eval ``max_length`` to enforce.
+
+    Returns:
+        A ``(prompt, response) -> bool`` predicate (True = keep), or None if no
+        tokenizer was given.
+    """
+    if tokenizer_path is None:
+        return None
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
+    def fits(prompt: str, response: str) -> bool:
+        prompt_length = len(tokenizer(prompt, add_special_tokens=True)["input_ids"])
+        response_length = len(tokenizer(response, add_special_tokens=False)["input_ids"]) + 1
+        return prompt_length + response_length <= max_length
+
+    return fits
+
+
 def make_example(prompt_body: str, response_text: str) -> dict[str, str]:
     """Assemble a single ``{prompt, response}`` example in canonical shape.
 
@@ -87,11 +127,26 @@ def make_example(prompt_body: str, response_text: str) -> dict[str, str]:
     return {"prompt": prompt, "response": response}
 
 
-def prepare_dolly(output_path: Path, seed: int) -> int:
-    """Adapt the grounded Dolly subset to JSONL. Returns the example count."""
+def prepare_dolly(
+    output_path: Path,
+    seed: int,
+    length_filter: Callable[[str, str], bool] | None = None,
+) -> tuple[int, int]:
+    """Adapt the grounded Dolly subset to JSONL.
+
+    Args:
+        output_path: Destination JSONL path.
+        seed: Random seed for prompt-phrasing selection.
+        length_filter: Optional ``(prompt, response) -> bool`` predicate; when
+            given, examples for which it returns False are dropped.
+
+    Returns:
+        ``(written, dropped_for_length)``.
+    """
     rng = random.Random(seed)
     dataset = load_dataset("databricks/databricks-dolly-15k", split="train")
     written = 0
+    dropped = 0
     with open(output_path, "w", encoding="utf-8") as out_file:
         for example in dataset:
             category = example["category"]
@@ -109,9 +164,12 @@ def prepare_dolly(output_path: Path, seed: int) -> int:
                 context=context,
             )
             record = make_example(prompt_body, response)
+            if length_filter is not None and not length_filter(record["prompt"], record["response"]):
+                dropped += 1
+                continue
             out_file.write(json.dumps(record, ensure_ascii=False) + "\n")
             written += 1
-    return written
+    return written, dropped
 
 
 def prepare_squad(
@@ -119,8 +177,9 @@ def prepare_squad(
     seed: int,
     split: str,
     answerable_only: bool,
-) -> int:
-    """Adapt a SQuAD v2 split to JSONL. Returns the example count.
+    length_filter: Callable[[str, str], bool] | None = None,
+) -> tuple[int, int]:
+    """Adapt a SQuAD v2 split to JSONL.
 
     Args:
         output_path: Destination JSONL path.
@@ -130,9 +189,11 @@ def prepare_squad(
             holdout: unanswerable targets are all the identical canonical decline
             string, so their response bpc measures memorization of one phrase
             rather than abstention quality and is not worth tracking.
+        length_filter: Optional ``(prompt, response) -> bool`` predicate; when
+            given, examples for which it returns False are dropped.
 
     Returns:
-        The number of examples written.
+        ``(written, dropped_for_length)``.
     """
     rng = random.Random(seed)
     # Load the parquet files directly rather than via the dataset's hub
@@ -145,6 +206,7 @@ def prepare_squad(
         split="train",
     )
     written = 0
+    dropped = 0
     with open(output_path, "w", encoding="utf-8") as out_file:
         for example in dataset:
             context = example["context"].strip()
@@ -161,9 +223,12 @@ def prepare_squad(
             phrasing = rng.choice(SQUAD_PHRASINGS)
             prompt_body = phrasing.format(context=context, question=question)
             record = make_example(prompt_body, response)
+            if length_filter is not None and not length_filter(record["prompt"], record["response"]):
+                dropped += 1
+                continue
             out_file.write(json.dumps(record, ensure_ascii=False) + "\n")
             written += 1
-    return written
+    return written, dropped
 
 
 def main() -> None:
@@ -194,24 +259,50 @@ def main() -> None:
         default=1,
         help="Random seed for prompt-phrasing selection.",
     )
+    parser.add_argument(
+        "--tokenizer",
+        default=None,
+        help=(
+            "Tokenizer path/name for the length filter. When set, examples whose "
+            "tokenized prompt+response+EOS exceeds --max-length are dropped so no "
+            "response is truncated (the source of NaN eval loss). Tokenizer-specific."
+        ),
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=512,
+        help="Max sequence length enforced by the length filter (with --tokenizer).",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    length_filter = make_length_filter(args.tokenizer, args.max_length)
+
     if args.source == "dolly":
         if args.split != "train":
             parser.error("--source dolly only supports --split train")
         output_path = output_dir / "dolly-grounded_closed-qa-extract-summ_train.jsonl"
-        count = prepare_dolly(output_path, args.seed)
+        written, dropped = prepare_dolly(output_path, args.seed, length_filter)
     elif args.split == "validation":
         output_path = output_dir / "squad-v2_answerable_holdout.jsonl"
-        count = prepare_squad(output_path, args.seed, split="validation", answerable_only=True)
+        written, dropped = prepare_squad(
+            output_path, args.seed, split="validation", answerable_only=True,
+            length_filter=length_filter,
+        )
     else:
         output_path = output_dir / "squad-v2_extractive-qa_train.jsonl"
-        count = prepare_squad(output_path, args.seed, split="train", answerable_only=False)
+        written, dropped = prepare_squad(
+            output_path, args.seed, split="train", answerable_only=False,
+            length_filter=length_filter,
+        )
 
-    print(f"Wrote {count} examples to {output_path}", file=sys.stdout)
+    message = f"Wrote {written} examples to {output_path}"
+    if length_filter is not None:
+        message += f" ({dropped} dropped for length > {args.max_length})"
+    print(message, file=sys.stdout)
 
 
 if __name__ == "__main__":

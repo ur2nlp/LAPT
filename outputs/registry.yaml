@@ -13468,3 +13468,521 @@ v74L-i20:
   note: lr 2.5e-5, dropout 0.35, translation x32, CoT translation x32
   observation: 0.3 vs. 0.35 dropout makes minimal difference; 32x CoT slightly better;
     32x translation is too much
+v74L-i21:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-12T00:20:37+00:00'
+  era: instruct-v1.0.0
+  group: cot-alignment-v1.1.0
+  note: Iterated CoT translation and Alignment to v1.1.0, which guarantees at least
+    two CoT links if the example has that many aligned words
+  observation: Minimal noticeable difference in bpc; generation eval suite changed
+    from comparable v74L-i19 so hard to tell if it had the desired effect on behavior
+v74L-i22:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-14T18:33:14+00:00'
+  era: wordspotting-v0.5
+  group: batch-lr-sweep
+  note: lr2.5e-5, bsz 60
+  observation: lr1.0e-5 generally too low; higher batch size doesn't make noticeable
+    difference on bpc
+v74L-i23:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 15
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 90
+    lr: 1.0e-05
+    focus_enabled: false
+  extracted_at: '2026-06-14T18:33:16+00:00'
+  era: wordspotting-v0.5
+  group: batch-lr-sweep
+  note: lr1.0e-5, bsz 90
+  observation: lr1.0e-5 generally too low; higher batch size doesn't make noticeable
+    difference on bpc
+v74L-i24:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-14T18:33:19+00:00'
+  era: wordspotting-v0.5
+  group: batch-lr-sweep
+  note: lr2.5e-5, bsz 60, no-robots newlines converted to spaces
+  observation: lr1.0e-5 generally too low; higher batch size doesn't make noticeable
+    difference on bpc
+v74L-i25:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 15
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 90
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-23T15:38:12+00:00'
+  era: wordspotting-v0.5
+  group: batch-lr-sweep
+  note: lr2.5e-5, bsz 90, no-robots newlines converted
+  observation: lr1.0e-5 generally too low; higher batch size doesn't make noticeable
+    difference on bpc
+v74L-i26:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 20
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 120
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-06-23T15:38:15+00:00'
+  era: wordspotting-v0.5
+  group: batch-lr-sweep
+  note: lr2.5e-5, bsz 120, no-robots newlines converted
+  observation: lr1.0e-5 generally too low; higher batch size doesn't make noticeable
+    difference on bpc
+v74L-i27:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 20
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_got: 16
+    effective_batch: 120
+    lr: 1.0e-05
+    focus_enabled: false
+  extracted_at: '2026-06-23T15:38:19+00:00'
+  era: wordspotting-v0.5
+  group: batch-lr-sweep
+  note: lr1.0e-5, bsz 120, no-robots newlines converted
+  observation: lr1.0e-5 generally too low; higher batch size doesn't make noticeable
+    difference on bpc
+v74L-i28:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 16
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-01T18:11:31+00:00'
+  era: wordspotting-v0.5
+  group: add-eng-qa
+  note: Added Dolly and Squad QA data; dolly x32, squad x16, got x16
+  observation: 'v74L-i(28-30): slightly worse bpc than i24, but i29 is most encouraging
+    generations yet; i29 standing out may indicate eng (c4) shouldn''t be reduced
+    too much?'
+v74L-i29:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-01T18:11:34+00:00'
+  era: wordspotting-v0.5
+  group: add-eng-qa
+  note: dolly x32, squad x16, got x0 (removed)
+  observation: 'v74L-i(28-30): slightly worse bpc than i24, but i29 is most encouraging
+    generations yet; i29 standing out may indicate eng (c4) shouldn''t be reduced
+    too much?'
+v74L-i30:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 20
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-01T18:11:38+00:00'
+  era: wordspotting-v0.5
+  group: add-eng-qa
+  note: dolly x32, squad x20, got x0
+  observation: 'v74L-i(28-30): slightly worse bpc than i24, but i29 is most encouraging
+    generations yet; i29 standing out may indicate eng (c4) shouldn''t be reduced
+    too much?'
