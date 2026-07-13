@@ -13986,3 +13986,1627 @@ v74L-i30:
   observation: 'v74L-i(28-30): slightly worse bpc than i24, but i29 is most encouraging
     generations yet; i29 standing out may indicate eng (c4) shouldn''t be reduced
     too much?'
+v74L-i31:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 12
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-06T15:33:38+00:00'
+  era: wordspotting-v0.5
+  group: add-eng-qa
+  note: dolly x32, squad x12, got x0
+  observation: little difference in bpc i28-33; squad x20 (i30) seems to overfit;
+    if you squint, higher squad leads to terser question responses in generation;
+    i33 seems to have best bpc, so keeping plain gothic in the mix for now
+v74L-i32:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 8
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-06T15:33:43+00:00'
+  era: wordspotting-v0.5
+  group: add-eng-qa
+  note: dolly x32, squad x8, got x0
+  observation: little difference in bpc i28-33; squad x20 (i30) seems to overfit;
+    if you squint, higher squad leads to terser question responses in generation;
+    i33 seems to have best bpc, so keeping plain gothic in the mix for now
+v74L-i33:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 8
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-06T15:33:46+00:00'
+  era: wordspotting-v0.5
+  group: add-eng-qa
+  note: dolly x32, squad x8, got x16
+  observation: little difference in bpc i28-33; squad x20 (i30) seems to overfit;
+    if you squint, higher squad leads to terser question responses in generation;
+    i33 seems to have best bpc, so keeping plain gothic in the mix for now
+v74L-i34:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_got-oov-hedge: 4
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 8
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-06T15:33:50+00:00'
+  era: wordspotting-v0.5
+  group: add-oov-hedge
+  note: oov x4
+  observation: bare translation bpc degrades i33-36 with increasing oov data, but
+    hedging behavior doesn't show up in generations (even with non-words present);
+    alignment and CoT bpc don't degrade, perhaps because these look similar
+v74L-i35:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_got-oov-hedge: 8
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 8
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-06T15:33:54+00:00'
+  era: wordspotting-v0.5
+  group: add-oov-hedge
+  note: oov x8
+  observation: bare translation bpc degrades i33-36 with increasing oov data, but
+    hedging behavior doesn't show up in generations (even with non-words present);
+    alignment and CoT bpc don't degrade, perhaps because these look similar
+v74L-i36:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    upsampling_factor_got-translation: 16
+    upsampling_factor_got-translation-cot: 32
+    upsampling_factor_got-transliteration: 2
+    upsampling_factor_got-alignment: 32
+    upsampling_factor_got-lexicon: 32
+    upsampling_factor_got-oov-hedge: 16
+    upsampling_factor_eng-chat: 32
+    upsampling_factor_eng-dolly-grounded: 32
+    upsampling_factor_eng-squad: 8
+    upsampling_factor_got: 16
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-07T14:41:44+00:00'
+  era: wordspotting-v0.5
+  group: add-oov-hedge
+  note: oov x16
+  observation: bare translation bpc degrades i33-36 with increasing oov data, but
+    hedging behavior doesn't show up in generations (even with non-words present);
+    alignment and CoT bpc don't degrade, perhaps because these look similar
+v74L-i37:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.035
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.075
+    sampling_prob_got-oov-hedge: 0.05
+    sampling_prob_eng-chat: 0.055
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-07T14:41:48+00:00'
+  era: wordspotting-v0.5
+  group: add-oov-hedge
+  note: swithching to directly configuring sampling_prob; got-translate ->3.0% (~x16->x30),
+    got-translate-cot 3.5%, got-translit ->0.5% (x2->x4), rest rounded to close round
+    percentages from i36
+  observation: ''
+v74L-i38:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.05
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.05
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-07T14:41:51+00:00'
+  era: wordspotting-v0.5
+  group: add-oov-hedge
+  note: got-translate 5.0%, got-translate-cot 5.0%, got-lexicon 7.5->10.0%, eng-chat
+    (no-robots) 5.5->5.0%
+  observation: ''
+v74L-i39:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 20
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.05
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.05
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 120
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-07T14:41:53+00:00'
+  era: wordspotting-v0.5
+  group: add-oov-hedge
+  note: bsz 120, got-translate 5.0%, got-translate-cot 5.0%
+  observation: ''
+v74L-i40:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.04
+    sampling_prob_got-translation-cot: 0.04
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.06
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-07T15:50:42+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: got-translate 4%, got-translate-cot 4%, oov-hedge 6%
+  observation: Increasing hedge to 8-10% degrades translation bpc, even when also
+    increasing translation data
+v74L-i41:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.04
+    sampling_prob_got-translation-cot: 0.04
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.08
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-09T15:14:30+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: got-translate 4%, got-translate-cot 4%, oov-hedge 8%
+  observation: Increasing hedge to 8-10% degrades translation bpc, even when also
+    increasing translation data
+v74L-i42:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.05
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-09T15:14:32+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: got-translate 5%, got-translate-cot 5%, oov-hedge 10%
+  observation: Increasing hedge to 8-10% degrades translation bpc, even when also
+    increasing translation data
+v74L-i43:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.04
+    sampling_prob_got-translation-cot: 0.04
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.06
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-09T15:14:36+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: dropout 0.25; got-translate 4%, got-translate-cot 4%, oov-hedge 6%
+  observation: At this mix, decreasing dropout to 0.25 or 0.15 overfits by a little
+    / a lot respectively
+v74L-i44:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.15
+    attention_dropout: 0.15
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.04
+    sampling_prob_got-translation-cot: 0.04
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.06
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-10T14:23:32+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: dropout 0.15; got-translate 4%, got-translate-cot 4%, oov-hedge 6%
+  observation: At this mix, decreasing dropout to 0.25 or 0.15 overfits by a little
+    / a lot respectively
+v74L-i45:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.35
+    attention_dropout: 0.35
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.04
+    sampling_prob_got-translation-cot: 0.04
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.06
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 0.0001
+    focus_enabled: false
+  extracted_at: '2026-07-10T14:23:34+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: lr1e-4; dropout 0.35; got-translate 4%, got-translate-cot 4%, oov-hedge 6%
+  observation: lr1e-4 is too high
+v74L-i46:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.04
+    sampling_prob_got-translation-cot: 0.04
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.06
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 0.0001
+    focus_enabled: false
+  extracted_at: '2026-07-10T14:23:37+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: lr1e-4; dropout 0.25; got-translate 4%, got-translate-cot 4%, oov-hedge 6%
+  observation: lr1e-4 is too high
+v74L-i47:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.05
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-10T14:23:40+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: dropout 0.25; got-translate 3%, got-translate-cot 5%, oov-hedge 5%
+  observation: v74L-i47 noticeably better than previous best i40; indicates that lower
+    dropout can be appropriate for less-upsampled got-translation and/or oov-hedge;
+    in contrast, increasing CoT data is absorbed without a problem
+v74L-i48:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.06
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.05
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-10T14:23:43+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: dropout 0.25; got-translate 3%, got-translate-cot 6%, oov-hedge 5%
+  observation: Increasing CoT data 5%->6% is too much at this dropout
+v74L-i49:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.2
+    attention_dropout: 0.2
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.05
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-11T13:33:12+00:00'
+  era: wordspotting-v0.5
+  group: lr-dropout-mix-sweep
+  note: dropout 0.2; got-translate 3%, got-translate-cot 5%, oov-hedge 5%
+  observation: Decreasing dropout to 0.2 leads to overfitting on got-translation again;
+    using dropout 0.25, got-translate 3%, got-translate-cot 5% as defaults going forward
+v74L-i50:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.0
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.03
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-11T13:33:15+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.25, activation_dropout 0.0; starting dropout
+    sweep with 3% got-translate and 3% oov-hedge as baseline
+  observation: Adding activation dropout leads to notable improvement in translation
+    bpc (though not as much for alignment or CoT); increasing activation dropout in
+    v74L-i50-55 up to 0.25 continues improvement
+v74L-i51:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.1
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_got-oov-hedge: 0.03
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-11T13:33:17+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.25, activation_dropout 0.1 (first time adding
+    activation dropout)
+  observation: Adding activation dropout leads to notable improvement in translation
+    bpc (though not as much for alignment or CoT); increasing activation dropout in
+    v74L-i50-55 up to 0.25 continues improvement
+v74L-i52:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.1
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-11T23:54:18+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.25, activation_dropout 0.1; oov-hedge 3%->0%
+    (removing oov as confound to dropout as default for now)
+  observation: Adding activation dropout leads to notable improvement in translation
+    bpc (though not as much for alignment or CoT); increasing activation dropout in
+    v74L-i50-55 up to 0.25 continues improvement
+v74L-i53:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.15
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-11T23:54:20+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.25, activation_dropout 0.15
+  observation: Adding activation dropout leads to notable improvement in translation
+    bpc (though not as much for alignment or CoT); increasing activation dropout in
+    v74L-i50-55 up to 0.25 continues improvement
+v74L-i54:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.2
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-11T23:54:23+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.25, activation_dropout 0.2
+  observation: Adding activation dropout leads to notable improvement in translation
+    bpc (though not as much for alignment or CoT); increasing activation dropout in
+    v74L-i50-55 up to 0.25 continues improvement
+v74L-i55:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.25
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-11T23:54:26+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.25, activation_dropout 0.25
+  observation: Adding activation dropout leads to notable improvement in translation
+    bpc (though not as much for alignment or CoT); increasing activation dropout in
+    v74L-i50-55 up to 0.25 continues improvement
+v74L-i56:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.2
+    activation_dropout: 0.25
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-13T12:00:53+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.2, activation_dropout 0.25
+  observation: Toggling each of three dropout types down to 0.2 (v74L-i55-59) has
+    minimal effect on bpc, but v74L-i57 (dropout->0.2) slightly edges out others;
+    having all three at 0.25 doesn't seem to add capacity for increased translation
+    upsampling (v74L-i58)
+v74L-i57:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.2
+    attention_dropout: 0.25
+    activation_dropout: 0.25
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-13T12:00:55+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.2, attention_dropout 0.25, activation_dropout 0.25
+  observation: Toggling each of three dropout types down to 0.2 (v74L-i55-59) has
+    minimal effect on bpc, but v74L-i57 (dropout->0.2) slightly edges out others;
+    having all three at 0.25 doesn't seem to add capacity for increased translation
+    upsampling (v74L-i58)
+v74L-i58:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.25
+    attention_dropout: 0.25
+    activation_dropout: 0.25
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.04
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-13T12:01:00+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.25, attention_dropout 0.25, activation_dropout 0.25; got-translate
+    3%->4% (checking for increased upsampling capacity)
+  observation: Toggling each of three dropout types down to 0.2 (v74L-i55-59) has
+    minimal effect on bpc, but v74L-i57 (dropout->0.2) slightly edges out others;
+    having all three at 0.25 doesn't seem to add capacity for increased translation
+    upsampling (v74L-i58)
+v74L-i59:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.2
+    attention_dropout: 0.2
+    activation_dropout: 0.25
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-13T14:27:07+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.2, attention_dropout 0.2, activation_dropout 0.25
+  observation: ''
+v74L-i60:
+  params:
+    hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+    max_length: 512
+    num_train_epochs: 1.0
+    max_steps: 100000
+    train_batch_size: 6
+    gradient_accumulation_steps: 10
+    gradient_checkpointing: false
+    warmup_ratio: 0.005
+    max_grad_norm: 4.0
+    bf16: true
+    dataloader_num_workers: 4
+    torch_compile: false
+    dropout: 0.2
+    attention_dropout: 0.2
+    activation_dropout: 0.2
+    weight_decay: 0.0
+    loss_type: per_example
+    per_example_loss_floor: 8
+    logging_steps: 100
+    eval_strategy: steps
+    eval_steps: 1000
+    eval_batch_size: 12
+    compute_ttr: true
+    save_steps: 1000
+    save_total_limit: 2
+    early_stopping_patience: 10
+    early_stopping_delay_ratio: 0.0
+    freeze_main_model: false
+    unfreeze_step_ratio: 0.05
+    correct_pruned_gradients: false
+    dev_size: 0.1
+    alpha: 0.5
+    total_samples: 9000000
+    sampling_prob_got-translation: 0.03
+    sampling_prob_got-translation-cot: 0.05
+    sampling_prob_got-transliteration: 0.005
+    sampling_prob_got-alignment: 0.2
+    sampling_prob_got-lexicon: 0.1
+    sampling_prob_eng-chat: 0.05
+    sampling_prob_eng-dolly-grounded: 0.025
+    sampling_prob_eng-squad: 0.2
+    sampling_prob_got: 0.02
+    effective_batch: 60
+    lr: 2.5e-05
+    focus_enabled: false
+  extracted_at: '2026-07-13T14:27:11+00:00'
+  era: wordspotting-v0.5
+  group: dropout-tune
+  note: dropout 0.2, attention_dropout 0.2, activation_dropout 0.2
+  observation: ''

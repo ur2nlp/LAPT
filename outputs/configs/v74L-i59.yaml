@@ -1,0 +1,132 @@
+seed: 1
+hf_model: models/old_germanic/xglm1b_ptex-c4-nv5k-p999-nrn-s5m_l40-optimized_v74L/best-checkpoint
+dataset:
+  type: multinomial
+  language: gothic_instruct
+  cache_dir: data/gothic_instruct
+  dev_size: 0.1
+  sources:
+  - type: instruction_jsonl
+    id: got-translation
+    dev_size: -1
+    sampling_prob: 0.03
+    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train_v1.0.0.jsonl
+  - type: instruction_jsonl
+    id: got-translation-cot
+    dev_size: -1
+    sampling_prob: 0.05
+    path: data/gothic_instruct/translation-cot_both-scripts_both-directions_train_v2.0.0.jsonl
+  - type: instruction_jsonl
+    id: got-transliteration
+    dev_size: -1
+    sampling_prob: 0.005
+    path: data/gothic_instruct/transliteration_all-codices_both-directions_train_v1.0.0.jsonl
+  - type: instruction_jsonl
+    id: got-alignment
+    dev_size: -1
+    sampling_prob: 0.2
+    path: data/gothic_instruct/alignment_both-scripts_train_v2.0.0.jsonl
+  - type: instruction_jsonl
+    id: got-lexicon
+    dev_size: -1
+    sampling_prob: 0.1
+    path: data/gothic_instruct/dictionary-lookup_both-scripts_both-directions_train_v1.0.0.jsonl
+  - type: instruction_hf
+    id: eng-chat
+    name: HuggingFaceH4/no_robots
+    split: train
+    dev_size: -1
+    sampling_prob: 0.05
+    substitutions:
+    - pattern: \s*\n+\s*
+      replacement: ' '
+  - type: instruction_jsonl
+    id: eng-dolly-grounded
+    dev_size: -1
+    sampling_prob: 0.025
+    path: data/english_instruct/dolly-grounded_closed-qa-extract-summ_train.jsonl
+  - type: instruction_jsonl
+    id: eng-squad
+    dev_size: -1
+    sampling_prob: 0.2
+    path: data/english_instruct/squad-v2_extractive-qa_train.jsonl
+  - type: plaintext
+    id: got
+    dev_size: -1
+    sampling_prob: 0.02
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
+  - type: huggingface
+    id: eng
+    name: allenai/c4
+    config: en
+    split: train
+    max_samples: 5020000
+    min_words_per_line: 8
+    oversampling_factor: 8
+    dev_size: 20000
+  alpha: 0.5
+  total_samples: 9000000
+output_dir: models
+model_name: null
+init_model_id: v74L
+resume_from_checkpoint: null
+preempt_resume: true
+training:
+  name: l40_optimized
+  max_length: 512
+  num_train_epochs: 1.0
+  max_steps: 100000
+  train_batch_size: 6
+  gradient_accumulation_steps: 10
+  gradient_checkpointing: false
+  learning_rate: 2.5e-05
+  lr_scheduler_type: linear
+  warmup_ratio: 0.005
+  max_grad_norm: 4.0
+  bf16: true
+  optim: adamw_torch_fused
+  dataloader_num_workers: 4
+  torch_compile: false
+  dropout: 0.2
+  attention_dropout: 0.2
+  activation_dropout: 0.25
+  weight_decay: 0.0
+  loss_type: per_example
+  per_example_loss_floor: 8
+  logging_steps: 100
+  eval_strategy: steps
+  metric_for_best_model: got-translation_holdout_loss
+  eval_steps: 1000
+  eval_batch_size: 12
+  compute_ttr: true
+  save_steps: 1000
+  save_total_limit: 2
+  early_stopping_patience: 10
+  early_stopping_delay_ratio: 0.0
+  freeze_main_model: false
+  model_freeze_prefix: model.layer
+  unfreeze_step_ratio: 0.05
+  correct_pruned_gradients: false
+focus:
+  enabled: false
+external_eval:
+  external_eval_sets:
+  - name: got-translation_holdout
+    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_test_v1.0.0.jsonl
+    format: instruction_jsonl
+  - name: got-translation-cot_holdout
+    path: data/gothic_instruct/translation-cot_both-scripts_both-directions_test_v2.0.0.jsonl
+    format: instruction_jsonl
+  - name: got-transliteration_holdout
+    path: data/gothic_instruct/transliteration_all-codices_both-directions_test_v1.0.0.jsonl
+    format: instruction_jsonl
+  - name: got-alignment_holdout
+    path: data/gothic_instruct/alignment_both-scripts_test_v2.0.0.jsonl
+    format: instruction_jsonl
+  - name: got_holdout
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_test.txt
+    format: plaintext
+  - name: squad-answerable_holdout
+    path: data/english_instruct/squad-v2_answerable_holdout.jsonl
+    format: instruction_jsonl
+experiment_id: v74L-i59
