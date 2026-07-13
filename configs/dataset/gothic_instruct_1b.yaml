@@ -4,45 +4,39 @@ sources:
   - type: instruction_jsonl
     id: got-translation
     dev_size: -1  # Using external holdout (test split)
-    upsampling_factor: 16
+    sampling_prob: 0.03 #(~x30)
     path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train_v1.0.0.jsonl
   - type: instruction_jsonl
     id: got-translation-cot
     dev_size: -1  # Using external holdout (test split)
-    upsampling_factor: 32
+    sampling_prob: 0.05 #(~x45)
     path: data/gothic_instruct/translation-cot_both-scripts_both-directions_train_v2.0.0.jsonl
   - type: instruction_jsonl
     id: got-transliteration
     dev_size: -1  # Using external holdout (test split)
-    upsampling_factor: 2
+    sampling_prob: 0.005 #(~x4)
     path: data/gothic_instruct/transliteration_all-codices_both-directions_train_v1.0.0.jsonl
   - type: instruction_jsonl
     id: got-alignment
     dev_size: -1
-    upsampling_factor: 32
+    sampling_prob: 0.2 #(~x32)
     path: data/gothic_instruct/alignment_both-scripts_train_v2.0.0.jsonl
   - type: instruction_jsonl
     id: got-lexicon
     dev_size: -1
-    upsampling_factor: 32
+    sampling_prob: 0.1 #(~x42)
     path: data/gothic_instruct/dictionary-lookup_both-scripts_both-directions_train_v1.0.0.jsonl
-  # OOV-robustness (hedging): got->eng where a source word is a generated non-word;
-  # target flags it and blanks its English span. Deliberately low factor (×4 vs the
-  # ×32 clean sources): the hedge branches off the same got->eng prompt, and a large
-  # clean fraction is what keeps the model from learning to over-hedge (disclaim on
-  # good input). Raise only if the model under-hedges. See
-  # .claude/gothic/oov_robustness_augmentation.md.
   - type: instruction_jsonl
     id: got-oov-hedge
     dev_size: -1
-    upsampling_factor: 4
+    sampling_prob: 0.03 #(~x9)
     path: data/gothic_instruct/oov-hedge_both-scripts_got2eng_train_v2.0.0.jsonl
   - type: instruction_hf
     id: eng-chat
     name: HuggingFaceH4/no_robots
     split: train
     dev_size: -1
-    upsampling_factor: 32
+    sampling_prob: 0.05 #(~x32)
     # Collapse newline runs (plus surrounding whitespace) into a single space so
     # the chat data matches the single-line formatting of the Gothic tasks.
     substitutions:
@@ -51,13 +45,18 @@ sources:
   - type: instruction_jsonl
     id: eng-dolly-grounded
     dev_size: -1
-    upsampling_factor: 32
+    sampling_prob: 0.025 #(~x32)
     path: data/english_instruct/dolly-grounded_closed-qa-extract-summ_train.jsonl
   - type: instruction_jsonl
     id: eng-squad
     dev_size: -1
-    upsampling_factor: 8
+    sampling_prob: 0.2 #(~x8)
     path: data/english_instruct/squad-v2_extractive-qa_train.jsonl
+  - type: plaintext
+    id: got
+    dev_size: -1
+    sampling_prob: 0.02 #(~x16)
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
   - type: huggingface
     id: eng
     name: allenai/c4
