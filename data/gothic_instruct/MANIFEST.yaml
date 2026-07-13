@@ -43,8 +43,27 @@ artifacts:
 
   translation-instruct:
     description: English<->Gothic full-sentence translation, prompt-diversified.
-    current: 1.0.0
+    current: 1.1.0
     releases:
+      - version: 1.1.0
+        files:
+          train: {path: translation_all-codices_both-scripts_both-directions_train_v1.1.0.jsonl, sha256: 8c8614dcd17101753395251135ccfed01b9263784ad6e31de9b737d56a63852f, n: 5400}
+          test:  {path: translation_all-codices_both-scripts_both-directions_test_v1.1.0.jsonl,  sha256: 800d273bfd3cce908373b40b4d490137e20287ec402295f07ef1c6c36a61b117, n: 1332}
+        aliases: []
+        source: {name: gothic-bible-parallel-all-codices, version: unversioned}
+        generator: {module: gothic.data.prepare_gothic_data, args: "--data-types translation transliteration --instruction-format --output-format jsonl --splits train test --train-ratio 0.8 --test-ratio 0.2", seed: 1, note: "translation is the FIRST prompt_rng consumer (shared stream, translation before transliteration); clean_gothic_artifacts now runs in parse_gothic_bible"}
+        used_by: []
+        notes: >-
+          MINOR bump over 1.0.0: same source facts (same verses, all-codices, 80/20
+          seed-1 split), only the Gothic surface rendering changed. Editorial artifacts
+          are now stripped at parse time via gothic.orthography.clean_gothic_artifacts
+          (restoration parens unwrapped, Arabic-numeral glosses + enclitic tildes +
+          trailing dashes removed) and the rare editorial diacritics u-circumflex/
+          i-diaeresis normalized to base letters -- which also fixes those two leaking
+          untransliterated into the Gothic-script side (re-transliterated to real
+          Gothic letters here). Example count unchanged (5400 train / 1332 test).
+          Verified: the unmodified pipeline reproduces 1.0.0 byte-for-byte, so the diff
+          is provably only the cleanup. Not yet trained on.
       - version: 1.0.0
         files:
           train: {path: translation_all-codices_both-scripts_both-directions_train_v1.0.0.jsonl, sha256: 6aa648e1c83c2be2786274d1115099a9399ae23e19176222821338f1f4a0bd36, n: 5400}
@@ -69,8 +88,24 @@ artifacts:
 
   transliteration-instruct:
     description: Latin<->Gothic-script transliteration, prompt-diversified.
-    current: 1.0.0
+    current: 1.1.0
     releases:
+      - version: 1.1.0
+        files:
+          train: {path: transliteration_all-codices_both-directions_train_v1.1.0.jsonl, sha256: 5419db83f9fa2d8c23b8a9e7a85f8111f2eb37aeba749f44f34459a3552f7bfd, n: 6750}
+          test:  {path: transliteration_all-codices_both-directions_test_v1.1.0.jsonl,  sha256: 7049ac26baa077b5ada1d6a0c6230f20cb4d5214c28ee381e2f893a1bb81c9f4, n: 1680}
+        aliases: []
+        source: {name: gothic-bible-parallel-all-codices, version: unversioned}
+        generator: {module: gothic.data.prepare_gothic_data, args: "--data-types translation transliteration --instruction-format --output-format jsonl --splits train test --train-ratio 0.8 --test-ratio 0.2", seed: 1, note: "generated in the same invocation as translation-instruct 1.1.0 (translation first in the shared prompt_rng stream); clean_gothic_artifacts now runs in parse_gothic_bible"}
+        used_by: []
+        notes: >-
+          MINOR bump over 1.0.0: same source facts, only Gothic surface rendering
+          changed (see translation-instruct 1.1.0). Editorial artifacts stripped at
+          parse time and rare diacritics (u-circumflex/i-diaeresis) normalized before
+          transliteration -- so the Gothic-script side no longer carries stray
+          untransliterated Latin letters. Example count unchanged (6750 train / 1680
+          test). Unmodified pipeline reproduces 1.0.0 byte-for-byte; diff is provably
+          only the cleanup. Not yet trained on.
       - version: 1.0.0
         files:
           train: {path: transliteration_all-codices_both-directions_train_v1.0.0.jsonl, sha256: ea8b61fbcfe22ba28104715bb4250be5b9e0ab6713b130b0c2c8a0a25b0a9365, n: 6750}
@@ -95,8 +130,27 @@ artifacts:
 
   translation-cot-instruct:
     description: Chain-of-thought translation (key words first, then full sentence).
-    current: 2.0.0
+    current: 2.1.0
     releases:
+      - version: 2.1.0
+        files:
+          train: {path: translation-cot_both-scripts_both-directions_train_v2.1.0.jsonl, sha256: 89489b2255c5a5880d2d9cc6923e74062c8eba106db15fa3bca99e7abfc8414a, n: 5312}
+          test:  {path: translation-cot_both-scripts_both-directions_test_v2.1.0.jsonl,  sha256: 5c33b109fb03cd9f970606e9aacebc1a7170a310b80637804e342ea885a19cea, n: 1312}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.5.1", path: "data/gothic_word_spotting/{train,test}_alignments.jsonl", note: "v0.5 canonical with a diacritics-only surgical clean (û→u, ï→i); no dedupe"}
+        generator: {module: gothic.word_spotting.expand_to_cot, args: "script=both, directions=both, variants=1, min_words=2", seed: 1, note: "trainable filter {verified_correct, kept_edited} via gothic.word_spotting.canonical"}
+        used_by: []
+        notes: >-
+          MINOR bump over 2.0.0: same source facts (same verses, same trainable set,
+          same sampler/seed → identical counts 5312/1312), only the Gothic surface
+          rendering changed. The canonical alignments were surgically cleaned of the
+          rare editorial diacritics û/ï (base-letter normalization; these had also been
+          leaking untransliterated into the Gothic-script side, now re-transliterated to
+          real Gothic letters). Diff vs 2.0.0 is provably diacritic-only: 52 train / 8
+          test lines change, every one carrying û/ï on the 2.0.0 side, pure 1:1
+          substitution (no add/drop). Deliberately NOT deduped (a pre-existing exact
+          word-pair duplicate in train_1261 remains) to avoid a shared-RNG-stream
+          reshuffle. Not yet trained on.
       - version: 2.0.0
         files:
           train: {path: translation-cot_both-scripts_both-directions_train_v2.0.0.jsonl, sha256: d8fc1a456ef139c4c34183a19b9851c10fe2a685e97542b1959cdbf762bcd725, n: 5312}
@@ -169,8 +223,24 @@ artifacts:
 
   alignment-instruct:
     description: Word-spotting alignment instruction tasks (forward/reverse/cloze/discrimination).
-    current: 2.0.0
+    current: 2.1.0
     releases:
+      - version: 2.1.0
+        files:
+          train: {path: alignment_both-scripts_train_v2.1.0.jsonl, sha256: 6d668261611e27152bde0061d398bd31da5db1783c158a45c66bcd2515de8417, n: 33049}
+          test:  {path: alignment_both-scripts_test_v2.1.0.jsonl,  sha256: 3bf272076bf28c3e5c8855f718197f8a993186283d0898805d9a97f2fb72eb45, n: 8172}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.5.1", path: "data/gothic_word_spotting/{train,test}_alignments.jsonl", note: "v0.5 canonical with a diacritics-only surgical clean (û→u, ï→i); no dedupe"}
+        generator: {module: gothic.word_spotting.expand_to_instruction, args: "projections=all, script=both", seed: 1, note: "trainable filter {verified_correct, kept_edited} via gothic.word_spotting.canonical"}
+        used_by: []
+        notes: >-
+          MINOR bump over 2.0.0: same source facts (same trainable set, same
+          projections/seed → identical counts 33049/8172), only the Gothic surface
+          rendering changed. Canonical surgically cleaned of rare editorial diacritics
+          û/ï (base-letter normalization; also fixes their untransliterated leak into
+          the Gothic-script side). Diff vs 2.0.0 is provably diacritic-only: 280 train /
+          48 test lines change, all carrying û/ï on the 2.0.0 side, pure 1:1
+          substitution. Not deduped (see translation-cot 2.1.0). Not yet trained on.
       - version: 2.0.0
         files:
           train: {path: alignment_both-scripts_train_v2.0.0.jsonl, sha256: 097ed9386b5078495018c5892d2531c9edae55345473e651088362e6990af022, n: 33049}
@@ -242,8 +312,30 @@ artifacts:
       and blanks its English span while translating the rest. CoT-fallback response
       (glosses the verse's other trainable words), emitted under both the plain
       translation prompt and the CoT prompt. Morphology-silent (whole-word hedge).
-    current: 2.0.0
+    current: 3.0.0
     releases:
+      - version: 3.0.0
+        files:
+          train: {path: oov-hedge_both-scripts_got2eng_train_v3.0.0.jsonl, sha256: 582d8e64c1233c0149669001cfb23381d4ccb94d5dea886bf994e643d1906cfd, n: 16488}
+          test:  {path: oov-hedge_both-scripts_got2eng_test_v3.0.0.jsonl,  sha256: 197cee1162ea784e2ffbe368b1db99f98f782aa3a7cc3d23b4437a8298284cde, n: 4088}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.5.1", path: "data/gothic_word_spotting/{train,test}_alignments.jsonl", note: "v0.5 canonical with the diacritics-only surgical clean (û→u, ï→i); no dedupe"}
+        generator: {module: gothic.oov_augmentation.augment, args: "script=both, prompt-style=both, max-per-verse=all, min-gloss=1, temperature=0.6, top-p=1.0", seed: 1, note: "trainable filter {verified_correct, kept_edited} via gothic.word_spotting.canonical; regenerated 2026-07-13 at c307b87 code"}
+        used_by: []
+        notes: >-
+          MAJOR bump over 2.0.0, for two compounding reasons. (1) The committed 2.0.0
+          bytes were NOT reproducible from the committed generator: both the lapt and
+          gothic-data envs deterministically emit 16488 train (vs the file's 16487) with
+          entirely different non-words at the same seed — the c307b87 commit bundled the
+          generator with an artifact that predates a final generator edit. (2) This
+          release also folds in the diacritics-only canonical clean. The net effect is a
+          wholesale change to the generated non-words (the substantive content a model
+          must flag as OOV), not a cosmetic re-rendering — and registered (uncommitted)
+          models were already trained on 2.0.0, so MAJOR is the honest signal that this
+          is NOT comparable to what those runs consumed. This 3.0.0 is the new
+          reproducible baseline (deterministic under current code). Diverges in version
+          from the alignment/cot 2.1.0 diacritic bumps by design: those were provably
+          diacritic-only, this is a generator swap. Not yet trained on (by a committed run).
       - version: 2.0.0
         files:
           train: {path: oov-hedge_both-scripts_got2eng_train_v2.0.0.jsonl, sha256: 515f2fbefd97e59b4feb4eafdd9271f8f91e6c808ba31c3353abdb2ee40f92fd, n: 16487}

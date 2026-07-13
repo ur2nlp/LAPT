@@ -5,22 +5,22 @@ sources:
     id: got-translation
     dev_size: -1  # Using external holdout (test split)
     sampling_prob: 0.03 #(~x30)
-    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train_v1.0.0.jsonl
+    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train_v1.1.0.jsonl
   - type: instruction_jsonl
     id: got-translation-cot
     dev_size: -1  # Using external holdout (test split)
     sampling_prob: 0.05 #(~x45)
-    path: data/gothic_instruct/translation-cot_both-scripts_both-directions_train_v2.0.0.jsonl
+    path: data/gothic_instruct/translation-cot_both-scripts_both-directions_train_v2.1.0.jsonl
   - type: instruction_jsonl
     id: got-transliteration
     dev_size: -1  # Using external holdout (test split)
     sampling_prob: 0.005 #(~x4)
-    path: data/gothic_instruct/transliteration_all-codices_both-directions_train_v1.0.0.jsonl
+    path: data/gothic_instruct/transliteration_all-codices_both-directions_train_v1.1.0.jsonl
   - type: instruction_jsonl
     id: got-alignment
     dev_size: -1
     sampling_prob: 0.2 #(~x32)
-    path: data/gothic_instruct/alignment_both-scripts_train_v2.0.0.jsonl
+    path: data/gothic_instruct/alignment_both-scripts_train_v2.1.0.jsonl
   - type: instruction_jsonl
     id: got-lexicon
     dev_size: -1
@@ -30,7 +30,7 @@ sources:
     id: got-oov-hedge
     dev_size: -1
     sampling_prob: 0.03 #(~x9)
-    path: data/gothic_instruct/oov-hedge_both-scripts_got2eng_train_v2.0.0.jsonl
+    path: data/gothic_instruct/oov-hedge_both-scripts_got2eng_train_v3.0.0.jsonl
   - type: instruction_hf
     id: eng-chat
     name: HuggingFaceH4/no_robots

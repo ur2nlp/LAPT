@@ -19,7 +19,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from gothic.orthography import transliterate_latin_to_gothic
+from gothic.orthography import clean_gothic_artifacts, transliterate_latin_to_gothic
 
 # Mapping from Gothic abbreviations to WEB book names (for translation alignment)
 GOTHIC_TO_WEB_BOOKS = {
@@ -64,6 +64,12 @@ def parse_gothic_bible(gothic_file: str) -> Dict[Tuple[str, int, int], List[str]
                 # Remove meta-brackets
                 text = text.replace('<', '').replace('>', '')
                 text = text.replace('[', '').replace(']', '')
+
+                # Strip editorial artifacts (restoration parens, numeral glosses,
+                # enclitic tildes, rare diacritics) from the Gothic surface. Runs
+                # before transliteration so nothing leaks untransliterated into
+                # the Gothic-script outputs. See gothic.orthography.
+                text = clean_gothic_artifacts(text)
 
                 if text and text != '...':
                     # Use standardized book name if available

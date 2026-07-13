@@ -207,6 +207,23 @@ _ARABIC_NUMERAL_PAREN = re.compile(r"\s*\(\d+\)")
 # A trailing fragment-continuation dash left at the end of a genealogy line.
 _TRAILING_DASH = re.compile(r"\s*-\s*$")
 
+# Rare editorial diacritics attested in the gotica corpus, mapped to their base
+# letter. Two independent reasons to strip them:
+#   1. They are generation attractors — û (a long-vowel editor's mark, only þû/jû)
+#      and ï (the hiatus/word-initial diaeresis, saïas/gaïddjedun) are exceptional
+#      enough that the model latches onto them and emits them spuriously.
+#   2. transliterate_latin_to_gothic has no mapping for them, so any that survive
+#      leak *untransliterated* into the Gothic-script side (raw Latin letters
+#      inside a Gothic-script string). Normalizing here, before transliteration,
+#      fixes both the Roman surface and that leak.
+# Extend this map if further such diacritics appear in the source.
+_EDITORIAL_DIACRITICS = str.maketrans(
+    {
+        "û": "u", "Û": "U",
+        "ï": "i", "Ï": "I",
+    }
+)
+
 
 def clean_gothic_artifacts(text: str) -> str:
     """Strip editorial annotation artifacts from a Gothic surface string.
@@ -226,6 +243,8 @@ def clean_gothic_artifacts(text: str) -> str:
     - **Enclitic tildes** ``~`` mark the boundary of an assimilated enclitic
       (Streitberg notation), e.g. ``qaþuþ~þan`` = qaþ+uh+þan. The manuscript
       writes a single word, so the tilde is dropped (join).
+    - **Rare editorial diacritics** ``û`` and ``ï`` are stripped to their base
+      letter (``û``→``u``, ``ï``→``i``); see ``_EDITORIAL_DIACRITICS``.
     - A trailing fragment-continuation dash (`` -``) is stripped.
 
     Genuine Gothic letter-numerals (``·b·``, ``·x·``, ``·{90}·``) are preserved.
@@ -243,6 +262,9 @@ def clean_gothic_artifacts(text: str) -> str:
     text = text.replace("(", "").replace(")", "")
     # Join assimilated enclitics written across a tilde.
     text = text.replace("~", "")
+    # Normalize rare editorial diacritics to their base letter. Must run before
+    # transliteration so they never leak untransliterated into Gothic script.
+    text = text.translate(_EDITORIAL_DIACRITICS)
     # Drop a trailing fragment-continuation dash and collapse leftover whitespace.
     text = _TRAILING_DASH.sub("", text)
     text = re.sub(r"\s{2,}", " ", text).strip()

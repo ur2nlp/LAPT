@@ -4,6 +4,65 @@ Human-readable history of the instruction-tuning artifacts in this folder.
 `MANIFEST.yaml` is the machine-readable companion (sha256, per-file provenance,
 `used_by`). Newest first.
 
+## 2026-07-13 — editorial cleanup: translation/transliteration 1.1.0, alignment/cot 2.1.0, oov-hedge 3.0.0
+
+**MINOR bumps for both `prepare_gothic_data`-derived artifacts**, regenerated with
+Gothic-side editorial cleanup folded into the source parse. Same source facts (same
+verses, all-codices, 80/20 seed-1 split, unchanged example counts: 5400/1332
+translation, 6750/1680 transliteration) — only the Gothic surface rendering changed,
+so MINOR by the settled semantics.
+
+The cleanup now runs inside `parse_gothic_bible` via
+`gothic.orthography.clean_gothic_artifacts` (the same transform used for the v0.5
+word-spotting pass), *before* transliteration:
+- restoration parentheses unwrapped (`wa(i)ros` → `wairos`), Arabic-numeral glosses,
+  enclitic tildes (`niþ~þan` → `niþþan`), and trailing dashes removed;
+- rare editorial diacritics normalized to base letters (`û`→`u` in `þû`/`jû`;
+  `ï`→`i` in `saïas`/`gaïddjedun`). These were generation attractors *and* had no
+  transliteration mapping, so they had been leaking untransliterated into the
+  Gothic-script side (`𐌸û`, `𐌲𐌰ï𐌿`); regenerating from the cleaned Roman source
+  re-transliterates them to real Gothic letters (`𐌸𐌿`, `𐌲𐌰𐌹𐌿`).
+
+Verification: the *unmodified* pipeline reproduces 1.0.0 byte-for-byte (canonical
+invocation now recorded in `MANIFEST.yaml`: `--data-types translation transliteration`,
+translation first in the shared `prompt_rng` stream), so the 1.1.0 diff is provably
+nothing but the cleanup. The untracked CPT input
+`data/gothic_prepared/monolingual_all-codices_both-scripts_{train,test}.txt` was
+regenerated in the same pass (same fix at the source). Neither 1.1.0 is trained on yet;
+repoint live train configs before the next run.
+
+**Same-session follow-through on the word-spotting-derived artifacts** (they carried
+`û`/`ï` too — the v0.5 cleanup stripped parens/tildes but predated diacritic
+normalization):
+
+- **`alignment-instruct` 2.1.0**, **`translation-cot-instruct` 2.1.0** — MINOR bumps.
+  The canonical `data/gothic_word_spotting/{train,test}_alignments.jsonl` got a
+  **surgical, diacritics-only** clean (`û`→`u`, `ï`→`i` via `clean_gothic_artifacts`,
+  **dedupe deliberately skipped**), and both artifacts were regenerated with unchanged
+  args/seed. Counts are identical to 2.0.0 (33049/8172 alignment, 5312/1312 cot) and
+  the diff is provably diacritic-only (alignment: 280 train / 48 test changed lines;
+  cot: 52 / 8 — every changed line carries `û`/`ï` on the 2.0.0 side, pure 1:1
+  substitution). Dedupe was skipped on purpose: `clean_alignments`' dedupe would drop a
+  **pre-existing exact word-pair duplicate** in verse `train_1261` (`'someone else'` →
+  `anþara`, two alignments identical but for `status` — *not* diacritic-induced), and
+  dropping any alignment reshuffles the expanders' shared RNG stream downstream (~300
+  otherwise-unaffected cot lines). Keeping the surgical scope trades that reshuffle for
+  one latent duplicate in ~33k examples. The duplicate is filed in `.claude/TODO.md`.
+
+- **`oov-hedge-instruct` 3.0.0** — MAJOR bump, and the new reproducible baseline.
+  Discovery: the committed 2.0.0 bytes (16487 train) **do not regenerate** from the
+  committed generator — both the `lapt` and `gothic-data` envs deterministically produce
+  16488 with wholly different non-words at seed 1, so c307b87 bundled the generator with
+  pre-edit data. Rather than leave a dangling investigation, cut 3.0.0 from the cleaned
+  canonical with current code (`16488` train / `4088` test, `û`/`ï`-free). **MAJOR, not a
+  2.1.0-style diacritic bump**, because the non-words — the substantive OOV content — change
+  wholesale (generator swap, not a re-rendering), and registered models already trained on
+  2.0.0, so the version must signal a hard break, not comparability. This is why oov diverges
+  from the alignment/cot `2.1.0` diacritic bumps.
+
+The canonical alignments files are themselves modified by this surgical clean (source of
+truth); commit them alongside the regenerated artifacts.
+
 ## 2026-07-03 — new artifact: oov-hedge-instruct 2.0.0
 
 **New OOV-robustness (hedging) artifact**, teaching the model to flag an
