@@ -28,9 +28,15 @@ Usage:
     # Save to file instead of showing
     python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --output plot.png
 
-    # Set y-axis limits
+    # Set y-axis limits shared by all subplots
     python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --ylim 0 5
     python tools/training_plot.py --metric loss --state-file path/to/trainer_state.json --ylim 0  # lower bound only
+
+    # Set per-subplot y-axis limits (METRIC:LOWER[:UPPER]; "none" for an auto bound)
+    python tools/training_plot.py --metrics loss eval_loss --state-file path/to/trainer_state.json --ylims loss:0:5 eval_loss:none:3
+
+    # Mix a shared default (--ylim) with per-metric overrides (--ylims wins for named metrics)
+    python tools/training_plot.py --metrics loss eval_loss grad_norm --state-file path/to/trainer_state.json --ylim 0 10 --ylims eval_loss:1:3
 """
 
 import argparse
@@ -45,6 +51,7 @@ from plotnine import (
     element_rect,
     element_text,
     facet_wrap,
+    geom_blank,
     geom_line,
     geom_point,
     ggplot,
@@ -270,12 +277,73 @@ def print_metric_summary(data, metrics, x_axis='step'):
     print("\n" + "="*80 + "\n")
 
 
-def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=None):
+def _clip_to_window(long_data, metric, lower, upper):
+    """Drop rows of a single metric whose value falls outside [lower, upper].
+
+    Rows belonging to other metrics are left untouched. Either bound may be
+    None to leave that side unclipped.
+    """
+    is_metric = long_data['metric_name'] == metric
+    out_of_range = pd.Series(False, index=long_data.index)
+    if lower is not None:
+        out_of_range |= is_metric & (long_data['metric_value'] < lower)
+    if upper is not None:
+        out_of_range |= is_metric & (long_data['metric_value'] > upper)
+    return long_data[~out_of_range]
+
+
+def parse_per_metric_ylims(specs):
+    """Parse ``METRIC:LOWER:UPPER`` strings into a {metric: (lower, upper)} dict.
+
+    Each spec is ``METRIC:LOWER[:UPPER]``. A bound of ``none`` or an empty
+    string means auto for that side. Examples::
+
+        loss:0:5        -> {'loss': (0.0, 5.0)}
+        eval_loss:none:3 -> {'eval_loss': (None, 3.0)}
+        grad_norm:1      -> {'grad_norm': (1.0, None)}
+    """
+    def parse_bound(token):
+        token = token.strip().lower()
+        if token in ('', 'none'):
+            return None
+        return float(token)
+
+    per_metric_limits = {}
+    for spec in specs:
+        parts = spec.split(':')
+        if len(parts) == 2:
+            metric, lower_token = parts
+            upper_token = 'none'
+        elif len(parts) == 3:
+            metric, lower_token, upper_token = parts
+        else:
+            raise ValueError(
+                f"Invalid --ylims spec '{spec}'. Expected METRIC:LOWER[:UPPER]."
+            )
+        per_metric_limits[metric] = (parse_bound(lower_token), parse_bound(upper_token))
+    return per_metric_limits
+
+
+def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=None, per_metric_limits=None):
     """Create subplots for multiple metrics.
 
     Args:
-        y_limits: Tuple of (lower, upper) for y-axis. Either can be None for auto.
+        y_limits: Tuple of (lower, upper) applied to *every* subplot. Either
+            bound can be None for auto.
+        per_metric_limits: Optional dict mapping a metric name to its own
+            (lower, upper) tuple. Overrides ``y_limits`` for that subplot.
+            Metrics absent from the dict fall back to ``y_limits`` (or auto).
     """
+    per_metric_limits = per_metric_limits or {}
+
+    # Resolve the effective (lower, upper) window for each subplot: a
+    # per-metric override wins, otherwise the shared y_limits, otherwise auto.
+    effective_limits = {}
+    for metric in metrics:
+        limits = per_metric_limits.get(metric, y_limits)
+        if limits:
+            effective_limits[metric] = limits
+
     # Reshape data for faceting
     plot_data = []
     extrema_data = []
@@ -296,6 +364,26 @@ def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=No
 
     plot_data = pd.concat(plot_data, ignore_index=True)
     extrema_data = pd.concat(extrema_data, ignore_index=True)
+
+    # plotnine's ylim() sets a single scale shared by every facet panel, so it
+    # cannot express different windows per subplot. Instead we clip the plotted
+    # points to each metric's window and add invisible geom_blank anchors to
+    # pin the panel range to the requested bounds. With scales='free_y' this
+    # yields independent per-subplot limits.
+    blank_rows = []
+    for metric, (lower, upper) in effective_limits.items():
+        plot_data = _clip_to_window(plot_data, metric, lower, upper)
+        extrema_data = _clip_to_window(extrema_data, metric, lower, upper)
+        anchor_x = plot_data[x_axis].min() if len(plot_data) else 0
+        anchor_run = plot_data['run'].iloc[0] if len(plot_data) else metric
+        for bound in (lower, upper):
+            if bound is not None:
+                blank_rows.append({
+                    x_axis: anchor_x,
+                    'run': anchor_run,
+                    'metric_name': metric,
+                    'metric_value': bound,
+                })
 
     multiple_runs = len(plot_data['run'].unique()) > 1
 
@@ -319,8 +407,8 @@ def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=No
         )
     )
 
-    if y_limits:
-        plot = plot + ylim(y_limits)
+    if blank_rows:
+        plot = plot + geom_blank(data=pd.DataFrame(blank_rows))
 
     if output:
         plot.save(output, dpi=300, verbose=False, transparent=False)
@@ -358,7 +446,11 @@ def main():
     parser.add_argument('--run-names', nargs='+', help='Custom names for runs (in order of matched files)')
     parser.add_argument('--list-metrics', action='store_true', help='List available metrics and exit')
     parser.add_argument('--ylim', nargs='+', type=float, metavar='VALUE',
-                       help='Y-axis limits: one value for lower bound, two for (lower, upper). Use "none" for auto.')
+                       help='Y-axis limits shared by all subplots: one value for lower bound, '
+                            'two for (lower, upper).')
+    parser.add_argument('--ylims', nargs='+', metavar='METRIC:LOWER[:UPPER]',
+                       help='Per-subplot y-axis limits, e.g. "loss:0:5 eval_loss:none:3". '
+                            'Overrides --ylim for the named metrics; use "none" for an auto bound.')
 
     args = parser.parse_args()
 
@@ -378,6 +470,14 @@ def main():
             y_limits = (args.ylim[0], args.ylim[1])
         else:
             parser.error("--ylim accepts 1 or 2 values")
+
+    # Parse per-metric y-axis limits
+    per_metric_limits = None
+    if args.ylims:
+        try:
+            per_metric_limits = parse_per_metric_ylims(args.ylims)
+        except ValueError as error:
+            parser.error(str(error))
 
     # Load data
     data = load_data(
@@ -413,9 +513,21 @@ def main():
     print(f"Plotting {len(metrics)} metric(s): {', '.join(metrics)}", file=sys.stderr)
 
     if len(metrics) == 1:
-        plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title, y_limits=y_limits)
+        # A single plot has one panel, so a per-metric override collapses to
+        # that plot's y-limits; fall back to the shared --ylim otherwise.
+        single_limits = y_limits
+        if per_metric_limits and metrics[0] in per_metric_limits:
+            single_limits = per_metric_limits[metrics[0]]
+        plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title, y_limits=single_limits)
     else:
-        plot_multiple_metrics(data, metrics, x_axis=args.x_axis, output=args.output, y_limits=y_limits)
+        plot_multiple_metrics(
+            data,
+            metrics,
+            x_axis=args.x_axis,
+            output=args.output,
+            y_limits=y_limits,
+            per_metric_limits=per_metric_limits,
+        )
 
     print_metric_summary(data, metrics, x_axis=args.x_axis)
 
