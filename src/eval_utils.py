@@ -321,6 +321,10 @@ def generate_greedy_batched(
                 max_length=max_prompt_length,
             ).to(device)
 
+            # Some tokenizers emit token_type_ids, which decoder-only models like
+            # XGLM do not accept; generate() rejects unused model kwargs, so drop it.
+            encoded.pop('token_type_ids', None)
+
             with torch.no_grad():
                 # Pass EOS/PAD explicitly from the tokenizer so a stale
                 # generation_config (e.g. a base-model EOS id surviving a vocab
