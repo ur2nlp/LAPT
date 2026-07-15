@@ -396,6 +396,10 @@ class GenerationChrfCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.max_prompt_length = max_prompt_length
 
+        # Track the last step generation ran, so a multi-dataset eval (which fires
+        # on_evaluate once per split) generates each spec only once per cycle.
+        self._last_generated_step = -1
+
         # Pre-load prompts/references once so we don't re-read files every eval.
         self.specs = []
         for eval_config in chrf_eval_sets:
@@ -425,6 +429,16 @@ class GenerationChrfCallback(TrainerCallback):
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if metrics is None:
             return
+
+        # With a dict eval_dataset, HuggingFace evaluates each split in a separate
+        # recursive evaluate() call, so on_evaluate fires once per split at the same
+        # global_step. Generate only on the first firing of each cycle; otherwise
+        # every chrF spec would be regenerated once per eval dataset, multiplying
+        # cost by their count. Gating on the step (not on which split fired) also
+        # lets a chrF set have no forward-pass loss/bpc twin among the eval splits.
+        if state.global_step == self._last_generated_step:
+            return
+        self._last_generated_step = state.global_step
 
         was_training = self.model.training
         self.model.eval()
