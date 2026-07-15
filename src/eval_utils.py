@@ -7,11 +7,14 @@ high-frequency tokens. Also provides bits-per-character (BPC) computation for
 tokenizer-agnostic evaluation.
 """
 
+import json
 import math
 import sys
+from pathlib import Path
 
 import numpy as np
 import torch
+from sacrebleu.metrics import CHRF
 from transformers import TrainerCallback
 from typing import Dict
 
@@ -202,3 +205,237 @@ class BPCCallback(TrainerCallback):
         # recent log_history entry so BPC appears in saved trainer state
         if bpc_values and state.log_history:
             state.log_history[-1].update(bpc_values)
+
+
+def load_instruction_prompts(file_path: str) -> tuple[list[str], list[str]]:
+    """Load prompts and reference responses from an instruction JSONL file.
+
+    Each line is a JSON object with 'prompt' and 'response' fields, the same
+    format consumed by ``tools/chrf_eval.py`` and the instruction-tuning
+    collator.
+
+    Args:
+        file_path: Path to the JSONL instruction file.
+
+    Returns:
+        Tuple of (prompts, references) lists, parallel.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If a line is missing 'prompt' or 'response', or the file is
+            empty.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"chrF eval data file not found: {file_path}")
+
+    prompts = []
+    references = []
+    with path.open(encoding='utf-8') as handle:
+        for line_num, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            obj = json.loads(line)
+            if 'prompt' not in obj or 'response' not in obj:
+                raise ValueError(
+                    f"Line {line_num} of {file_path} missing 'prompt' or 'response'."
+                )
+            prompts.append(obj['prompt'])
+            references.append(obj['response'])
+
+    if not prompts:
+        raise ValueError(f"No examples loaded from {file_path}")
+    return prompts, references
+
+
+def truncate_at_stop(text: str, stop_strings: list[str]) -> str:
+    """Truncate text at the first occurrence of any stop string."""
+    cut = len(text)
+    for stop in stop_strings:
+        index = text.find(stop)
+        if index != -1:
+            cut = min(cut, index)
+    return text[:cut]
+
+
+def generate_greedy_batched(
+    model,
+    tokenizer,
+    prompts: list[str],
+    max_new_tokens: int,
+    max_prompt_length: int,
+    batch_size: int,
+    stop_strings: list[str],
+) -> list[str]:
+    """Greedily generate a continuation for each prompt using an in-memory model.
+
+    This is the training-loop counterpart to ``tools/chrf_eval.py``'s pipeline
+    generation: it drives the already-loaded ``model`` directly (no reload, no
+    ``pipeline`` wrapper) so it can be called from a Trainer callback. Decoding
+    is greedy for run-to-run reproducibility.
+
+    Only the newly generated text is returned (the prompt tokens are sliced off),
+    stripped and truncated at any stop string.
+
+    Args:
+        model: A causal-LM model (the unwrapped ``trainer.model``).
+        tokenizer: The matching tokenizer.
+        prompts: Prompts to continue.
+        max_new_tokens: Maximum number of new tokens per generation.
+        max_prompt_length: Truncate encoded prompts to this many tokens.
+        batch_size: Number of prompts to generate in parallel.
+        stop_strings: Substrings at which to truncate each generated response.
+
+    Returns:
+        List of generated response strings, parallel to ``prompts``.
+    """
+    device = next(model.parameters()).device
+
+    # Decoder-only batched generation requires left padding so that generation
+    # continues from the true end of each (right-aligned) prompt.
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = 'left'
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id
+
+    # gradient_checkpointing runs force use_cache=False; generation needs the KV
+    # cache, so enable it for the duration and restore afterward.
+    original_use_cache = getattr(model.config, 'use_cache', None)
+    model.config.use_cache = True
+
+    responses = []
+    try:
+        for start in range(0, len(prompts), batch_size):
+            batch = prompts[start:start + batch_size]
+            encoded = tokenizer(
+                batch,
+                return_tensors='pt',
+                padding=True,
+                truncation=True,
+                max_length=max_prompt_length,
+            ).to(device)
+
+            with torch.no_grad():
+                # Pass EOS/PAD explicitly from the tokenizer so a stale
+                # generation_config (e.g. a base-model EOS id surviving a vocab
+                # swap) cannot silently prevent the model from halting.
+                generated = model.generate(
+                    **encoded,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=pad_token_id,
+                )
+
+            prompt_length = encoded['input_ids'].shape[1]
+            new_tokens = generated[:, prompt_length:]
+            decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+            for text in decoded:
+                responses.append(truncate_at_stop(text.strip(), stop_strings))
+    finally:
+        tokenizer.padding_side = original_padding_side
+        if original_use_cache is not None:
+            model.config.use_cache = original_use_cache
+
+    return responses
+
+
+class GenerationChrfCallback(TrainerCallback):
+    """Trainer callback that injects generation chrF into eval metrics.
+
+    On every evaluation, this generates greedy continuations for each configured
+    holdout set and scores them against their reference responses with chrF
+    (sacrebleu), injecting ``eval_<name>_chrf`` so the surface-adequacy metric
+    sits alongside the forward-pass ``eval_<name>_bpc`` (see ``BPCCallback``).
+
+    bpc is a weakly-correct proxy for generation quality (right sign, low
+    magnitude, and it misranks eras where a task mix inflates translation bpc
+    without hurting output; see ``.claude/gothic/bpc_vs_chrf.md``); chrF closes
+    that gap for run selection. Generation is far slower than the bpc forward
+    pass, but the holdouts are small (tens of examples), so cost is bounded.
+
+    The metric is *logged* by default, not selected. To make it drive
+    best-model selection, set ``metric_for_best_model`` to an
+    ``eval_<name>_chrf`` key and ``greater_is_better: true``.
+
+    Args:
+        model: The causal-LM model to generate with (unwrapped ``trainer.model``).
+        tokenizer: The matching tokenizer.
+        chrf_eval_sets: List of per-holdout config dicts. Each requires 'name'
+            (matching its bpc holdout so metrics align) and 'path' (an
+            instruction JSONL), with optional 'max_new_tokens', 'word_order'
+            (0 = plain chrF, 2 = chrF++), 'batch_size', 'max_examples', and
+            'stop' (list of stop substrings).
+        max_prompt_length: Token cap for encoded prompts (typically the training
+            max_length).
+    """
+
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        chrf_eval_sets: list[dict],
+        max_prompt_length: int,
+    ):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.max_prompt_length = max_prompt_length
+
+        # Pre-load prompts/references once so we don't re-read files every eval.
+        self.specs = []
+        for eval_config in chrf_eval_sets:
+            name = eval_config['name']
+            prompts, references = load_instruction_prompts(eval_config['path'])
+            max_examples = eval_config.get('max_examples')
+            if max_examples is not None:
+                prompts = prompts[:max_examples]
+                references = references[:max_examples]
+            references = [reference.strip() for reference in references]
+            self.specs.append({
+                'name': name,
+                'prompts': prompts,
+                'references': references,
+                'max_new_tokens': eval_config.get('max_new_tokens', 128),
+                'word_order': eval_config.get('word_order', 0),
+                'batch_size': eval_config.get('batch_size', 16),
+                'stop': list(eval_config.get('stop') or []),
+            })
+            print(
+                f"  chrF eval '{name}': {len(prompts)} examples from {eval_config['path']}",
+                file=sys.stderr,
+            )
+
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        if metrics is None:
+            return
+
+        was_training = self.model.training
+        self.model.eval()
+
+        chrf_values = {}
+        try:
+            for spec in self.specs:
+                hypotheses = generate_greedy_batched(
+                    model=self.model,
+                    tokenizer=self.tokenizer,
+                    prompts=spec['prompts'],
+                    max_new_tokens=spec['max_new_tokens'],
+                    max_prompt_length=self.max_prompt_length,
+                    batch_size=spec['batch_size'],
+                    stop_strings=spec['stop'],
+                )
+                chrf = CHRF(word_order=spec['word_order'])
+                corpus_result = chrf.corpus_score(hypotheses, [spec['references']])
+                chrf_key = f"eval_{spec['name']}_chrf"
+                chrf_values[chrf_key] = corpus_result.score
+        finally:
+            if was_training:
+                self.model.train()
+
+        metrics.update(chrf_values)
+
+        # Trainer logs metrics before on_evaluate fires, so patch the most
+        # recent log_history entry so chrF appears in the saved trainer state.
+        if chrf_values and state.log_history:
+            state.log_history[-1].update(chrf_values)
