@@ -30,7 +30,7 @@ from artifact_configs import (
 )
 from eval_utils import (
     compute_ttr_metrics, preprocess_logits_for_metrics,
-    compute_chars_per_token, BPCCallback,
+    compute_chars_per_token, BPCCallback, GenerationChrfCallback,
 )
 
 
@@ -471,6 +471,7 @@ def lapt(args: DictConfig):
         logging_steps=args.training.logging_steps,
         eval_strategy=args.training.eval_strategy,
         metric_for_best_model=args.training.metric_for_best_model,
+        greater_is_better=args.training.get('greater_is_better', None),
         per_device_eval_batch_size=args.training.eval_batch_size,
         eval_steps=args.training.eval_steps,
         save_steps=args.training.save_steps,
@@ -541,6 +542,21 @@ def lapt(args: DictConfig):
 
     bpc_callback = BPCCallback(chars_per_token_ratios)
     trainer.add_callback(bpc_callback)
+
+    # Generation chrF: score greedy generations on held-out instruction sets and
+    # log eval_<name>_chrf alongside the forward-pass bpc. Off unless configured.
+    # Check both a direct override and the config group, mirroring external_eval.
+    chrf_eval_sets = args.get('chrf_eval_sets', None)
+    if chrf_eval_sets is None and hasattr(args, 'chrf_eval'):
+        chrf_eval_sets = args.chrf_eval.get('chrf_eval_sets', None)
+    if chrf_eval_sets:
+        chrf_callback = GenerationChrfCallback(
+            model=model,
+            tokenizer=tokenizer,
+            chrf_eval_sets=OmegaConf.to_container(chrf_eval_sets, resolve=True),
+            max_prompt_length=args.training.max_length,
+        )
+        trainer.add_callback(chrf_callback)
 
     if gradient_correction_enabled:
         trainer.add_callback(GradientCorrectionLogCallback(model))

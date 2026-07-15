@@ -1,0 +1,5 @@
+# No generation chrF during training (default).
+# When set, GenerationChrfCallback greedily generates on each held-out
+# instruction set every evaluation and logs eval_<name>_chrf alongside the
+# forward-pass eval_<name>_bpc. See configs/chrf_eval/ for enabled variants.
+chrf_eval_sets: null
