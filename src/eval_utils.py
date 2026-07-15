@@ -266,6 +266,8 @@ def generate_greedy_batched(
     max_prompt_length: int,
     batch_size: int,
     stop_strings: list[str],
+    repetition_penalty: float = 1.0,
+    no_repeat_ngram_size: int = 0,
 ) -> list[str]:
     """Greedily generate a continuation for each prompt using an in-memory model.
 
@@ -285,6 +287,9 @@ def generate_greedy_batched(
         max_prompt_length: Truncate encoded prompts to this many tokens.
         batch_size: Number of prompts to generate in parallel.
         stop_strings: Substrings at which to truncate each generated response.
+        repetition_penalty: Repetition penalty (1.0 = off). Match this to the
+            offline ``chrf_eval.py`` protocol for comparable scores.
+        no_repeat_ngram_size: No-repeat n-gram size (0 = off).
 
     Returns:
         List of generated response strings, parallel to ``prompts``.
@@ -320,13 +325,17 @@ def generate_greedy_batched(
                 # Pass EOS/PAD explicitly from the tokenizer so a stale
                 # generation_config (e.g. a base-model EOS id surviving a vocab
                 # swap) cannot silently prevent the model from halting.
-                generated = model.generate(
-                    **encoded,
+                generate_kwargs = dict(
                     max_new_tokens=max_new_tokens,
                     do_sample=False,
                     eos_token_id=tokenizer.eos_token_id,
                     pad_token_id=pad_token_id,
                 )
+                if repetition_penalty != 1.0:
+                    generate_kwargs['repetition_penalty'] = repetition_penalty
+                if no_repeat_ngram_size > 0:
+                    generate_kwargs['no_repeat_ngram_size'] = no_repeat_ngram_size
+                generated = model.generate(**encoded, **generate_kwargs)
 
             prompt_length = encoded['input_ids'].shape[1]
             new_tokens = generated[:, prompt_length:]
@@ -365,8 +374,9 @@ class GenerationChrfCallback(TrainerCallback):
         chrf_eval_sets: List of per-holdout config dicts. Each requires 'name'
             (matching its bpc holdout so metrics align) and 'path' (an
             instruction JSONL), with optional 'max_new_tokens', 'word_order'
-            (0 = plain chrF, 2 = chrF++), 'batch_size', 'max_examples', and
-            'stop' (list of stop substrings).
+            (0 = plain chrF, 2 = chrF++), 'batch_size', 'max_examples',
+            'stop' (list of stop substrings), 'repetition_penalty', and
+            'no_repeat_ngram_size'.
         max_prompt_length: Token cap for encoded prompts (typically the training
             max_length).
     """
@@ -400,6 +410,8 @@ class GenerationChrfCallback(TrainerCallback):
                 'word_order': eval_config.get('word_order', 0),
                 'batch_size': eval_config.get('batch_size', 16),
                 'stop': list(eval_config.get('stop') or []),
+                'repetition_penalty': eval_config.get('repetition_penalty', 1.0),
+                'no_repeat_ngram_size': eval_config.get('no_repeat_ngram_size', 0),
             })
             print(
                 f"  chrF eval '{name}': {len(prompts)} examples from {eval_config['path']}",
@@ -424,6 +436,8 @@ class GenerationChrfCallback(TrainerCallback):
                     max_prompt_length=self.max_prompt_length,
                     batch_size=spec['batch_size'],
                     stop_strings=spec['stop'],
+                    repetition_penalty=spec['repetition_penalty'],
+                    no_repeat_ngram_size=spec['no_repeat_ngram_size'],
                 )
                 chrf = CHRF(word_order=spec['word_order'])
                 corpus_result = chrf.corpus_score(hypotheses, [spec['references']])
