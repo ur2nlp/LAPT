@@ -1,0 +1,19 @@
+# Generation chrF on the Gothic bare-translation holdout during training.
+#
+# Logs eval_got-translation_holdout_chrf beside the forward-pass
+# eval_got-translation_holdout_bpc every evaluation. The name matches the bpc
+# holdout so the two metrics sit together in the trainer state.
+#
+# Decoding mirrors the offline tools/chrf_eval.py protocol (greedy,
+# repetition_penalty 1.02, chrF++ word_order 2, 128 new tokens) so these
+# in-training scores are comparable to the historical generation/translation
+# reports and the bpc-vs-chrF study (.claude/gothic/bpc_vs_chrf.md).
+#
+# To also track other tasks (CoT, transliteration), add more entries pointing at
+# their test JSONLs; each yields its own eval_<name>_chrf.
+chrf_eval_sets:
+  - name: got-translation_holdout
+    path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_test_v1.1.0.jsonl
+    max_new_tokens: 128
+    word_order: 2
+    repetition_penalty: 1.02
