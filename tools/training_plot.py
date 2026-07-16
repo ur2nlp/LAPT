@@ -48,6 +48,7 @@ from pathlib import Path
 import pandas as pd
 from plotnine import (
     aes,
+    element_line,
     element_rect,
     element_text,
     facet_wrap,
@@ -61,6 +62,27 @@ from plotnine import (
     theme_minimal,
     ylim,
 )
+
+
+def theme_colors(dark):
+    """Return (background, foreground, grid, geom) colors for the plot scheme.
+
+    plotnine has no true dark-background theme (``theme_dark()`` only darkens
+    the panel), so dark mode is built by overriding the backgrounds, text,
+    grid, and default line/point colors. In light mode the returned colors
+    reproduce the original styling (grid stays at the base-theme default).
+
+    Args:
+        dark: If True, return a dark scheme; otherwise the light default.
+
+    Returns:
+        Tuple of ``(background, foreground, grid, geom)`` color strings. ``grid``
+        and ``geom`` are None in light mode, meaning "leave the base-theme /
+        geom default untouched".
+    """
+    if dark:
+        return '#1e1e1e', '#e6e6e6', '#3a3a3a', '#e6e6e6'
+    return 'white', 'black', None, None
 
 
 def load_from_trainer_state(filepath):
@@ -145,11 +167,12 @@ def load_data(state_file=None, state_pattern=None, log_file=None, log_pattern=No
     return pd.concat(dataframes, ignore_index=True)
 
 
-def plot_metric(data, metric, x_axis='step', output=None, title=None, y_limits=None):
+def plot_metric(data, metric, x_axis='step', output=None, title=None, y_limits=None, dark=False):
     """Create a plot for a single metric.
 
     Args:
         y_limits: Tuple of (lower, upper) for y-axis. Either can be None for auto.
+        dark: If True, render on a dark background with light text and lines.
     """
     # Filter to rows where metric exists
     metric_data = data[data[metric].notna()].copy()
@@ -172,27 +195,42 @@ def plot_metric(data, metric, x_axis='step', output=None, title=None, y_limits=N
     max_idx = metric_data[metric].idxmax()
     extrema_data = metric_data.loc[[min_idx, max_idx]].copy()
 
+    background, foreground, grid, geom_color = theme_colors(dark)
+
+    # In single-run mode the line/points have a fixed color; give them the
+    # light geom color under dark mode. Multi-run mode maps color to 'run'.
+    line_kwargs = {'size': 1.2}
+    point_kwargs = {'size': 4, 'shape': 'x'}
+    if geom_color is not None:
+        line_kwargs['color'] = geom_color
+        point_kwargs['color'] = geom_color
+
+    theme_kwargs = dict(
+        legend_position="bottom" if multiple_runs else "none",
+        axis_title=element_text(size=14, color=foreground),
+        legend_title=element_text(size=12, color=foreground),
+        legend_text=element_text(size=10, color=foreground),
+        axis_text=element_text(size=10, color=foreground),
+        plot_title=element_text(color=foreground),
+        figure_size=(10, 6),
+        plot_background=element_rect(fill=background, color=background),
+        panel_background=element_rect(fill=background),
+    )
+    if grid is not None:
+        theme_kwargs['panel_grid'] = element_line(color=grid)
+
     plot = (
         ggplot(metric_data, aes(x=x_axis, y=metric)) +
-        (geom_line(aes(color='run'), size=1.2) if multiple_runs else geom_line(size=1.2)) +
+        (geom_line(aes(color='run'), size=1.2) if multiple_runs else geom_line(**line_kwargs)) +
         (geom_point(aes(color='run'), data=extrema_data, size=4, shape='x') if multiple_runs
-         else geom_point(data=extrema_data, size=4, shape='x')) +
+         else geom_point(data=extrema_data, **point_kwargs)) +
         labs(
             title=title or f'{metric} over training',
             x=x_axis.capitalize(),
             y=metric
         ) +
         theme_bw() +
-        theme(
-            legend_position="bottom" if multiple_runs else "none",
-            axis_title=element_text(size=14),
-            legend_title=element_text(size=12),
-            legend_text=element_text(size=10),
-            axis_text=element_text(size=10),
-            figure_size=(10, 6),
-            plot_background=element_rect(fill='white'),
-            panel_background=element_rect(fill='white')
-        )
+        theme(**theme_kwargs)
     )
 
     if y_limits:
@@ -324,7 +362,7 @@ def parse_per_metric_ylims(specs):
     return per_metric_limits
 
 
-def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=None, per_metric_limits=None):
+def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=None, per_metric_limits=None, dark=False):
     """Create subplots for multiple metrics.
 
     Args:
@@ -333,6 +371,7 @@ def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=No
         per_metric_limits: Optional dict mapping a metric name to its own
             (lower, upper) tuple. Overrides ``y_limits`` for that subplot.
             Metrics absent from the dict fall back to ``y_limits`` (or auto).
+        dark: If True, render on a dark background with light text and lines.
     """
     per_metric_limits = per_metric_limits or {}
 
@@ -387,24 +426,38 @@ def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=No
 
     multiple_runs = len(plot_data['run'].unique()) > 1
 
+    background, foreground, grid, geom_color = theme_colors(dark)
+
+    line_kwargs = {'size': 1.0}
+    point_kwargs = {'size': 3, 'shape': 'x'}
+    if geom_color is not None:
+        line_kwargs['color'] = geom_color
+        point_kwargs['color'] = geom_color
+
+    theme_kwargs = dict(
+        legend_position="bottom" if multiple_runs else "none",
+        axis_title=element_text(size=12, color=foreground),
+        legend_title=element_text(size=10, color=foreground),
+        legend_text=element_text(size=8, color=foreground),
+        axis_text=element_text(size=8, color=foreground),
+        strip_text=element_text(color=foreground),
+        figure_size=(12, 4 * ((len(metrics) + 1) // 2)),
+        plot_background=element_rect(fill=background, color=background),
+        panel_background=element_rect(fill=background),
+    )
+    if grid is not None:
+        theme_kwargs['panel_grid'] = element_line(color=grid)
+        theme_kwargs['strip_background'] = element_rect(fill=background, color=grid)
+
     plot = (
         ggplot(plot_data, aes(x=x_axis, y='metric_value')) +
-        (geom_line(aes(color='run'), size=1.0) if multiple_runs else geom_line(size=1.0)) +
+        (geom_line(aes(color='run'), size=1.0) if multiple_runs else geom_line(**line_kwargs)) +
         (geom_point(aes(color='run'), data=extrema_data, size=3, shape='x') if multiple_runs
-         else geom_point(data=extrema_data, size=3, shape='x')) +
+         else geom_point(data=extrema_data, **point_kwargs)) +
         facet_wrap('~metric_name', scales='free_y', ncol=2) +
         labs(x=x_axis.capitalize(), y='Value') +
         theme_minimal() +
-        theme(
-            legend_position="bottom" if multiple_runs else "none",
-            axis_title=element_text(size=12),
-            legend_title=element_text(size=10),
-            legend_text=element_text(size=8),
-            axis_text=element_text(size=8),
-            figure_size=(12, 4 * ((len(metrics) + 1) // 2)),
-            plot_background=element_rect(fill='white'),
-            panel_background=element_rect(fill='white')
-        )
+        theme(**theme_kwargs)
     )
 
     if blank_rows:
@@ -451,6 +504,8 @@ def main():
     parser.add_argument('--ylims', nargs='+', metavar='METRIC:LOWER[:UPPER]',
                        help='Per-subplot y-axis limits, e.g. "loss:0:5 eval_loss:none:3". '
                             'Overrides --ylim for the named metrics; use "none" for an auto bound.')
+    parser.add_argument('--dark', action='store_true',
+                       help='Render on a dark background with light text and lines.')
 
     args = parser.parse_args()
 
@@ -518,7 +573,7 @@ def main():
         single_limits = y_limits
         if per_metric_limits and metrics[0] in per_metric_limits:
             single_limits = per_metric_limits[metrics[0]]
-        plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title, y_limits=single_limits)
+        plot_metric(data, metrics[0], x_axis=args.x_axis, output=args.output, title=args.title, y_limits=single_limits, dark=args.dark)
     else:
         plot_multiple_metrics(
             data,
@@ -527,6 +582,7 @@ def main():
             output=args.output,
             y_limits=y_limits,
             per_metric_limits=per_metric_limits,
+            dark=args.dark,
         )
 
     print_metric_summary(data, metrics, x_axis=args.x_axis)
