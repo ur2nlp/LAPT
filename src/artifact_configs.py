@@ -310,6 +310,10 @@ class TokenizerConfig(ArtifactConfig):
     # Reproducibility
     seed: int
 
+    # Fresh-tokenizer algorithm: None inherits the base tokenizer's algorithm;
+    # 'unigram' or 'bpe' overrides it when training a fresh tokenizer.
+    tokenizer_algorithm: Optional[str] = None
+
     # Model identifier (optional override for local model paths)
     init_model_id: Optional[str] = None
 
@@ -345,6 +349,15 @@ class TokenizerConfig(ArtifactConfig):
         init_model_id = getattr(args, 'init_model_id', None) or None
         tokenizer_path = getattr(args.focus, 'tokenizer_path', None) or None
 
+        tokenizer_algorithm = args.focus.get('tokenizer_algorithm', None) or None
+        if tokenizer_algorithm is not None:
+            tokenizer_algorithm = tokenizer_algorithm.lower()
+            if tokenizer_algorithm not in ('unigram', 'bpe'):
+                raise ValueError(
+                    f"focus.tokenizer_algorithm must be 'unigram' or 'bpe', "
+                    f"got {tokenizer_algorithm!r}"
+                )
+
         return cls(
             hf_model=args.hf_model,
             vocab_size=args.focus.vocab_size,
@@ -353,6 +366,7 @@ class TokenizerConfig(ArtifactConfig):
             inherit_additional_special_tokens=args.focus.get(
                 'inherit_additional_special_tokens', True
             ),
+            tokenizer_algorithm=tokenizer_algorithm,
             use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
             seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
             seed_lambda=args.focus.get('seed_lambda', 0.5),
@@ -377,6 +391,11 @@ class TokenizerConfig(ArtifactConfig):
         vocab_str = format_number(self.vocab_size)
         samples_str = format_number(self.num_samples)
         suffix = f"focus-v{vocab_str}-s{samples_str}"
+
+        # Only encode the algorithm when explicitly set, so existing inherited
+        # (None) caches keep their paths.
+        if self.tokenizer_algorithm is not None:
+            suffix += f"_{self.tokenizer_algorithm}"
 
         if not self.inherit_additional_special_tokens:
             suffix += "_no-additional"
@@ -504,6 +523,9 @@ class TokenizerConfig(ArtifactConfig):
             cached = yaml.safe_load(f) or {}
         for k in self._embedding_only_fields:
             cached.pop(k, None)
+        # Backward compat: caches predating tokenizer_algorithm were all trained
+        # with the inherited algorithm (None), so treat a missing key as such.
+        cached.setdefault('tokenizer_algorithm', None)
         # Round-trip via the base implementation by writing the filtered
         # config to a tempfile would be over-engineered; replicate the diff
         # inline.

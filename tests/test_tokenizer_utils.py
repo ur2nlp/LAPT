@@ -21,6 +21,7 @@ def make_tokenizer_config(
     seed_score_mode: str = "count",
     character_coverage: float = 1.0,
     hf_model: str = "facebook/xglm-564M",
+    tokenizer_algorithm: str = None,
 ) -> TokenizerConfig:
     """Helper to create TokenizerConfig for tests with sensible defaults."""
     return TokenizerConfig(
@@ -29,6 +30,7 @@ def make_tokenizer_config(
         num_samples=num_samples,
         character_coverage=character_coverage,
         inherit_additional_special_tokens=inherit_additional_special_tokens,
+        tokenizer_algorithm=tokenizer_algorithm,
         use_seed_vocabulary=use_seed_vocabulary,
         seed_vocab_multiplier=seed_vocab_multiplier,
         seed_lambda=seed_lambda,
@@ -272,6 +274,46 @@ class TestTokenizerTraining:
         tokens = tokenizer.tokenize(test_text)
         assert len(tokens) > 0
 
+        token_ids = tokenizer.encode(test_text)
+        assert len(token_ids) > 0
+        assert all(0 <= tid < vocab_size for tid in token_ids)
+
+    def test_train_tokenizer_bpe_override(self, sample_jsonl_path, tmp_path):
+        """
+        Test the fresh-tokenizer BPE branch via tokenizer_algorithm override.
+
+        XGLM's base algorithm is Unigram, so tokenizer_algorithm='bpe' forces the
+        override path. This is a regression guard: the BPE branch was previously
+        unreachable (PTEx is Unigram-only) and had a broken .from_file() call.
+
+        We verify the produced backend uses a BPE model and shares the same
+        SentencePiece pipeline (empty normalizer + Metaspace pre-tokenizer/decoder)
+        as the Unigram branch.
+        """
+        vocab_size = 64
+        output_dir = tmp_path / "tokenizer_bpe"
+
+        config = make_tokenizer_config(
+            vocab_size=vocab_size,
+            tokenizer_algorithm="bpe",
+        )
+        tokenizer = train_new_tokenizer(
+            config=config,
+            jsonl_path=str(sample_jsonl_path),
+            output_path=str(output_dir),
+        )
+
+        assert len(tokenizer) == vocab_size
+
+        backend = tokenizer.backend_tokenizer
+        assert type(backend.model).__name__ == "BPE"
+
+        # Shared pipeline: matches the Unigram branch for comparability
+        assert "Metaspace" in str(backend.pre_tokenizer)
+        assert "Metaspace" in str(backend.decoder)
+
+        # Tokenizer actually works and produces in-range ids
+        test_text = "This is a test sentence."
         token_ids = tokenizer.encode(test_text)
         assert len(token_ids) > 0
         assert all(0 <= tid < vocab_size for tid in token_ids)
