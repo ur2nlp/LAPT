@@ -394,8 +394,20 @@ def train_new_tokenizer(
     # Force Fast tokenizer since we need to access backend_tokenizer for algorithm detection
     base_tokenizer = AutoTokenizer.from_pretrained(config.hf_model, use_fast=True)
 
-    model_type = _detect_tokenizer_algorithm(base_tokenizer)
-    print(f"Detected tokenizer algorithm: {model_type}", file=sys.stderr)
+    detected_type = _detect_tokenizer_algorithm(base_tokenizer)
+    if config.tokenizer_algorithm is not None:
+        model_type = config.tokenizer_algorithm
+        if model_type == detected_type:
+            print(f"Tokenizer algorithm: {model_type} (explicitly set, matches base)", file=sys.stderr)
+        else:
+            print(
+                f"Tokenizer algorithm: {model_type} "
+                f"(explicitly set, overrides base's {detected_type})",
+                file=sys.stderr,
+            )
+    else:
+        model_type = detected_type
+        print(f"Tokenizer algorithm: {model_type} (inherited from base)", file=sys.stderr)
 
     special_tokens_config = _extract_special_tokens(
         base_tokenizer,
@@ -582,21 +594,18 @@ def train_new_tokenizer(
         for i in range(actual_vocab_size)
     ]
 
-    # Convert SentencePiece model to HuggingFace tokenizer backend
-    # Note: Asymmetric API - BPE can load from file, Unigram must be built manually
+    # Convert SentencePiece model to HuggingFace tokenizer backend. Both branches
+    # build the model manually and apply the same SentencePiece pipeline via
+    # _apply_spm_pipeline, so Unigram and BPE stay as comparable as possible.
     if model_type == 'bpe':
-        # SentencePieceBPETokenizer has .from_file() - can directly load .model file
-        from tokenizers import SentencePieceBPETokenizer, decoders
         model_file = os.path.join(output_path, 'spm.model')
-        backend_tokenizer = SentencePieceBPETokenizer.from_file(
-            vocab=model_file,
-            replacement="▁",
-            add_prefix_space=True
+        unk_token = special_tokens_config.get('unk_piece', base_tokenizer.unk_token)
+        backend_tokenizer = _create_bpe_tokenizer(
+            spm_model_path=model_file,
+            vocab_scores=vocab_with_scores,
+            unk_token=unk_token,
         )
-        # Add decoder to convert ▁ back to spaces
-        backend_tokenizer.decoder = decoders.Metaspace(replacement="▁", prepend_scheme="always")
     else:
-        # Unigram lacks .from_file() - must manually construct from vocab+scores
         unk_id = special_tokens_config.get('unk_id', 0)
         backend_tokenizer = _create_unigram_tokenizer(vocab_with_scores, unk_id=unk_id)
 
@@ -736,14 +745,35 @@ def _detect_tokenizer_algorithm(tokenizer: PreTrainedTokenizerFast) -> str:
         )
     
 
+def _apply_spm_pipeline(backend_tokenizer) -> None:
+    """
+    Configure the normalizer, pre-tokenizer, and decoder to match SentencePiece.
+
+    Shared by the Unigram and BPE fresh-tokenizer branches so both reproduce
+    identical text handling regardless of the underlying model:
+    - Empty normalizer: no text transformations (matches normalization_rule_name='identity')
+    - Metaspace pre-tokenizer: handle spaces as ▁ tokens (SentencePiece convention)
+    - Metaspace decoder: convert ▁ back to spaces when decoding (see
+      decisions/metaspace_decoder.md - required for FOCUS encode/decode consistency)
+
+    Args:
+        backend_tokenizer: A tokenizers.Tokenizer to configure in place
+    """
+    from tokenizers import normalizers, decoders
+    from tokenizers.pre_tokenizers import Metaspace
+
+    backend_tokenizer.normalizer = normalizers.Sequence(normalizers=[])  # type: ignore
+    backend_tokenizer.pre_tokenizer = Metaspace(replacement="▁", prepend_scheme="always")
+    backend_tokenizer.decoder = decoders.Metaspace(replacement="▁", prepend_scheme="always")
+
+
 def _create_unigram_tokenizer(vocab_scores: list[tuple[str, float]], unk_id: int = 0):
     """
     Create a HuggingFace Tokenizer with Unigram model from SentencePiece vocabulary.
 
     Builds a complete tokenization pipeline with:
     - Unigram model initialized with vocab and scores
-    - Empty normalizer (no text normalization)
-    - Metaspace pre-tokenizer for SentencePiece-style space handling
+    - Shared SentencePiece pipeline (empty normalizer + Metaspace pre-tokenizer/decoder)
 
     Args:
         vocab_scores: List of (token, score) tuples from SentencePiece model
@@ -752,22 +782,67 @@ def _create_unigram_tokenizer(vocab_scores: list[tuple[str, float]], unk_id: int
     Returns:
         Configured Tokenizer object ready for use with PreTrainedTokenizerFast
     """
-    from tokenizers import Tokenizer, normalizers, decoders
+    from tokenizers import Tokenizer
     from tokenizers.models import Unigram
-    from tokenizers.pre_tokenizers import Metaspace
 
     # Initialize Unigram model with vocabulary and scores from SentencePiece
     # byte_fallback=False: use <unk> for unknown chars (matches SentencePiece training)
     unigram_model = Unigram(vocab_scores, unk_id=unk_id, byte_fallback=False)
     backend_tokenizer = Tokenizer(unigram_model)
 
-    # Configure tokenization pipeline to match SentencePiece behavior:
-    # - Empty normalizer: no text transformations (matches normalization_rule_name='identity')
-    # - Metaspace pre-tokenizer: handle spaces as ▁ tokens (SentencePiece convention)
-    # - Metaspace decoder: convert ▁ back to spaces when decoding
-    backend_tokenizer.normalizer = normalizers.Sequence(normalizers=[])  # type: ignore
-    backend_tokenizer.pre_tokenizer = Metaspace(replacement="▁", prepend_scheme="always")
-    backend_tokenizer.decoder = decoders.Metaspace(replacement="▁", prepend_scheme="always")
+    _apply_spm_pipeline(backend_tokenizer)
+
+    return backend_tokenizer
+
+
+def _create_bpe_tokenizer(
+    spm_model_path: str,
+    vocab_scores: list[tuple[str, float]],
+    unk_token: str,
+):
+    """
+    Create a HuggingFace Tokenizer with BPE model from a SentencePiece BPE model.
+
+    A SentencePiece BPE model stores only pieces and their scores, not an explicit
+    merge list, so the merges must be reconstructed. This mirrors HuggingFace's own
+    ``SpmConverter`` (transformers.convert_slow_tokenizer): the merges are derived
+    from the piece scores via ``SentencePieceExtractor`` (higher score = earlier
+    merge), and the vocabulary IDs follow the piece order.
+
+    The same shared SentencePiece pipeline as the Unigram branch is applied so the
+    two algorithms are as comparable as possible (identical normalizer,
+    pre-tokenizer, and decoder).
+
+    Args:
+        spm_model_path: Path to the trained SentencePiece .model file
+        vocab_scores: List of (token, score) tuples from the SentencePiece model,
+            in piece-ID order
+        unk_token: Unknown-token string (e.g. base tokenizer's ``<unk>``)
+
+    Returns:
+        Configured Tokenizer object ready for use with PreTrainedTokenizerFast
+    """
+    from tokenizers import Tokenizer
+    from tokenizers.models import BPE
+    from transformers.convert_slow_tokenizer import SentencePieceExtractor
+
+    # Reconstruct merges from piece scores, exactly as transformers' SpmConverter does.
+    _, merges = SentencePieceExtractor(spm_model_path).extract(vocab_scores)
+    bpe_vocab = {piece: index for index, (piece, _score) in enumerate(vocab_scores)}
+
+    # fuse_unk=True and byte_fallback=False match the SpmConverter defaults for a
+    # (non-byte-level) SentencePiece BPE model trained with byte_fallback disabled.
+    bpe_model = BPE(
+        bpe_vocab,
+        merges,
+        unk_token=unk_token,
+        fuse_unk=True,
+        byte_fallback=False,
+        dropout=None,
+    )
+    backend_tokenizer = Tokenizer(bpe_model)
+
+    _apply_spm_pipeline(backend_tokenizer)
 
     return backend_tokenizer
 
