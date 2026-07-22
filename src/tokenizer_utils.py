@@ -698,10 +698,12 @@ def _train_sentencepiece_model(
 
     train_args.update(special_tokens_config)
 
-    train_args_str = ' '.join([f'--{k}={v}' for k, v in train_args.items()])
-    print(f"Training SentencePiece with args: {train_args_str}", file=sys.stderr)
+    # Pass args via the keyword API rather than a space-joined command-line
+    # string: user_defined_symbols is a list (see _extract_special_tokens) whose
+    # literal '\n' piece would otherwise be mangled by string arg parsing.
+    print(f"Training SentencePiece with args: {train_args}", file=sys.stderr)
 
-    spm.SentencePieceTrainer.Train(train_args_str)
+    spm.SentencePieceTrainer.Train(**train_args)
 
     # Load the trained model and validate vocab size
     sp_model = spm.SentencePieceProcessor()
@@ -911,7 +913,13 @@ def _extract_special_tokens(tokenizer: PreTrainedTokenizerBase, inherit_addition
     """
     config = {}
 
-    user_defined_symbols = []
+    # Always reserve a piece for the newline character. SentencePiece treats the
+    # training file as one sentence per line and strips '\n' as the line
+    # delimiter, so a newline piece never emerges from the corpus on its own.
+    # Modern LMs are universally expected to handle newlines (chat templates,
+    # multi-line documents, code), so inject it unconditionally as a
+    # user-defined symbol rather than gating it behind a config flag.
+    user_defined_symbols = ['\n']
 
     if tokenizer.unk_token is not None:
         config['unk_piece'] = tokenizer.unk_token
@@ -934,10 +942,15 @@ def _extract_special_tokens(tokenizer: PreTrainedTokenizerBase, inherit_addition
     # These are vocabulary reservations from the base model that may be unused
     if inherit_additional:
         if hasattr(tokenizer, 'additional_special_tokens') and tokenizer.additional_special_tokens:
-            user_defined_symbols.extend(tokenizer.additional_special_tokens)
+            # dedupe against symbols already reserved (e.g. the newline piece)
+            for token in tokenizer.additional_special_tokens:
+                if token not in user_defined_symbols:
+                    user_defined_symbols.append(token)
 
-    if user_defined_symbols:
-        config['user_defined_symbols'] = ','.join(user_defined_symbols)
+    # Return as a list (not a comma-joined string) so SentencePiece receives each
+    # symbol intact via the kwargs API — required for the literal '\n' piece,
+    # which cannot survive a space-joined command-line argument string.
+    config['user_defined_symbols'] = user_defined_symbols
 
     return config
 
