@@ -116,6 +116,8 @@ class TestSpecialTokenExtraction:
         # XGLM has <madeupword0> through <madeupword6>
         assert "user_defined_symbols" in config
         assert "<madeupword0>" in config["user_defined_symbols"]
+        # The newline piece is always reserved regardless of inherited tokens
+        assert "\n" in config["user_defined_symbols"]
 
     def test_extract_without_additional_tokens(self, base_tokenizer):
         """
@@ -132,8 +134,13 @@ class TestSpecialTokenExtraction:
         assert "unk_piece" in config
         assert "pad_piece" in config
 
-        # Additional tokens should NOT be included
-        assert "user_defined_symbols" not in config
+        # The newline piece is always reserved, so user_defined_symbols is present
+        # even without additional tokens — but the <madeupword> placeholders are not.
+        assert "user_defined_symbols" in config
+        assert "\n" in config["user_defined_symbols"]
+        assert not any(
+            token.startswith("<madeupword") for token in config["user_defined_symbols"]
+        )
 
 
 class TestTokenizerValidation:
@@ -317,6 +324,38 @@ class TestTokenizerTraining:
         token_ids = tokenizer.encode(test_text)
         assert len(token_ids) > 0
         assert all(0 <= tid < vocab_size for tid in token_ids)
+
+    def test_train_tokenizer_handles_newlines(self, sample_jsonl_path, tmp_path):
+        """
+        Test that a freshly-trained tokenizer encodes newlines as a real piece.
+
+        SentencePiece strips '\n' as the training-file line delimiter, so a
+        newline piece never emerges from the corpus on its own. We inject it as a
+        user-defined symbol unconditionally; this guards that the newline
+        survives the full pipeline (spm training -> HF backend) and does not fall
+        back to UNK.
+        """
+        vocab_size = 64
+        output_dir = tmp_path / "tokenizer_newline"
+
+        config = make_tokenizer_config(vocab_size=vocab_size)
+        tokenizer = train_new_tokenizer(
+            config=config,
+            jsonl_path=str(sample_jsonl_path),
+            output_path=str(output_dir),
+        )
+
+        # The newline must be a single dedicated piece, not the unknown token
+        newline_ids = tokenizer.encode("\n", add_special_tokens=False)
+        assert tokenizer.unk_token_id not in newline_ids
+        assert len(newline_ids) >= 1
+
+        # A newline embedded between words must be preserved, not dropped
+        embedded_ids = tokenizer.encode("alpha\nbeta", add_special_tokens=False)
+        assert any(
+            "\n" in tokenizer.convert_ids_to_tokens(tid) for tid in embedded_ids
+        )
+        assert tokenizer.unk_token_id not in embedded_ids
 
     def test_train_tokenizer_without_additional_tokens(self, sample_jsonl_path, tmp_path):
         """
