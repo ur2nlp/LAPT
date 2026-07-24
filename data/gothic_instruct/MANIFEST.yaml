@@ -130,8 +130,35 @@ artifacts:
 
   translation-cot-instruct:
     description: Chain-of-thought translation (key words first, then full sentence).
-    current: 2.1.0
+    current: 2.2.0
     releases:
+      - version: 2.2.0
+        files:
+          train: {path: translation-cot_both-scripts_both-directions_train_v2.2.0.jsonl, sha256: 299ea09402b87f560f5ab43ea65f0cf03dbe14fcf4821432f79e092dca8bc33f, n: 5312}
+          test:  {path: translation-cot_both-scripts_both-directions_test_v2.2.0.jsonl,  sha256: 9194e7599e2a8d99dcc62eb3d96377eb40c5955d5d2bc22e6f9307919012ff62, n: 1312}
+        aliases: []
+        source: {name: ws-alignments, version: "v0.5.1", path: "data/gothic_word_spotting/{train,test}_alignments.jsonl", note: "identical source to 2.1.0 (v0.5 canonical, diacritics-cleaned)"}
+        generator: {module: gothic.word_spotting.expand_to_cot, args: "script=both, directions=both, variants=1, min_words=2", seed: 1, note: "trainable filter {verified_correct, kept_edited} via gothic.word_spotting.canonical"}
+        used_by: []
+        notes: >-
+          MINOR bump over 2.1.0: same source facts (same verses, same trainable
+          alignment set, same seed -> identical counts 5312/1312), the response RENDERING
+          is unified. The output format is now a single gloss phrasing per direction, a
+          single conclusion per direction, and one comma join style, replacing the 2.1.0
+          mix of 4 gloss styles / 4 conclusions / 2 join styles. Response-side variety was
+          dropped deliberately to lower task surface for a small model; robustness now
+          rides entirely on the (unchanged) diverse input prompts. Gloss wording is
+          direction-specific so it reads naturally each way: got2eng "\"hunds\" means
+          \"dog\""; eng2got names the target language on the first gloss only ("The Gothic
+          for \"dog\" is \"hunds\"") then shortens later glosses ("\"son\" is \"sunus\"").
+          SIDE EFFECT (verified): render_response no longer draws from the shared RNG (the
+          per-example style/join choices are gone), which shifts the stream, so downstream
+          examples sample DIFFERENT word subsets of the same verse than 2.1.0 did (only
+          534/5312 examples gloss the identical subset). This is a re-sample, not a pure
+          re-render, but not a facts change: the verse/direction/script projections are an
+          identical set, and every glossed pair is a real trainable alignment from the same
+          canonical source (both versions' pair universes are subsets of it; the ~0.5%
+          universe delta is just which subset got sampled). Not yet trained on.
       - version: 2.1.0
         files:
           train: {path: translation-cot_both-scripts_both-directions_train_v2.1.0.jsonl, sha256: 89489b2255c5a5880d2d9cc6923e74062c8eba106db15fa3bca99e7abfc8414a, n: 5312}

@@ -5,7 +5,8 @@ Coverage:
 - trainable_alignments: status filtering, missing-status fallback
 - token_position: match, punctuation/case handling, miss sentinel
 - gloss_pair: direction-dependent (source_word, translation) orientation
-- render_response: join styles, gloss ordering, full translation present
+- render_response: unified format, gloss ordering, full translation present
+- render_gloss_items: direction-specific phrasing (eng2got first-item verbosity)
 - make_cot_example: both directions, min_words gating, response well-formed
 - expand_entry: direction/script fan-out and variants
 """
@@ -109,8 +110,7 @@ def test_gloss_pair_eng2got_orientation():
 
 def test_render_response_contains_full_translation_and_all_glosses():
     items = [("waurd", "word"), ("saijands", "farmer")]
-    rng = random.Random(0)
-    response = cot.render_response(items, "The farmer sows the word.", "got2eng", rng)
+    response = cot.render_response(items, "The farmer sows the word.", "got2eng")
     assert "The farmer sows the word." in response
     assert "waurd" in response and "saijands" in response
     assert "word" in response and "farmer" in response
@@ -118,9 +118,40 @@ def test_render_response_contains_full_translation_and_all_glosses():
 
 def test_render_response_single_item_has_no_dangling_and():
     items = [("waurd", "word")]
-    rng = random.Random(0)
-    response = cot.render_response(items, "the word.", "got2eng", rng)
+    response = cot.render_response(items, "the word.", "got2eng")
     assert ", and " not in response
+
+
+def test_render_response_got2eng_uses_means():
+    items = [("hunds", "dog"), ("sunus", "son")]
+    response = cot.render_response(items, "...", "got2eng")
+    assert '"hunds" means "dog"' in response
+    assert '"sunus" means "son"' in response
+    assert response.startswith('"hunds" means "dog", and "sunus" means "son", ')
+    assert 'so the sentence means: "..."' in response
+
+
+def test_render_response_eng2got_names_language_on_first_item_only():
+    """eng2got avoids the odd "dog means hunds"; only the first gloss carries the
+    verbose "The Gothic for ..." phrasing, later glosses are shortened."""
+    items = [("dog", "hunds"), ("son", "sunus"), ("angel", "aggilus")]
+    response = cot.render_response(items, "...", "eng2got")
+    assert response.startswith('The Gothic for "dog" is "hunds", ')
+    assert '"son" is "sunus"' in response
+    assert 'and "angel" is "aggilus"' in response
+    # the verbose prefix appears exactly once
+    assert response.count("The Gothic for") == 1
+    assert 'so the sentence in Gothic is: "..."' in response
+
+
+# --- render_gloss_items --------------------------------------------------
+
+
+def test_render_gloss_items_single_eng2got_still_verbose():
+    """A lone eng2got gloss is the first item, so it keeps the verbose form."""
+    assert cot.render_gloss_items([("dog", "hunds")], "eng2got") == [
+        'The Gothic for "dog" is "hunds"'
+    ]
 
 
 # --- make_cot_example ----------------------------------------------------

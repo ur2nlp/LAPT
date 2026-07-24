@@ -6,11 +6,18 @@ Where ``expand_to_instruction.py`` projects each *alignment* into a short
 vocabulary query, this module works at the *verse* level: it consumes all of a
 verse's trainable alignments to build a single chain-of-thought (CoT)
 translation example. The response first glosses a handful of the sentence's key
-words, then states the full translation, e.g.
+words, then states the full translation. The gloss wording is direction-specific
+so it reads naturally each way, e.g. for got2eng:
 
     "siponjos" means "disciples", "iddja" means "went", and "skip" means
     "boat", so the sentence means: "He went from there with his disciples by
     boat."
+
+and for eng2got (the target language is named on the first gloss only, then
+subsequent glosses are shortened):
+
+    The Gothic for "disciples" is "siponjos", "went" is "iddja", and "boat" is
+    "skip", so the sentence in Gothic is: "..."
 
 The aim is to bridge the two skills the model already half-learns separately:
 word-level alignment (word spotting) and full-sentence translation. Chaining
@@ -26,15 +33,18 @@ may be as wrong as anything else. It should be *mixed* with plain translation
 examples (from ``prepare_gothic_data.py``) rather than replacing them, so the
 CoT format carries information instead of becoming an unconditional output prior.
 
-Rigidity mitigations (so the format is not memorised as a rote template):
+The *output* format is deliberately unified (as of v2.2.0): a single gloss
+phrasing per direction, a single conclusion per direction, and one join style
+(comma / "a, b, and c"). Keeping the response shape consistent lowers the
+task's surface variability so a small model can learn one target form rather
+than reverse-engineering an interchangeable set of templates. Robustness is
+instead carried on the *input* side, which stays diverse:
+    - Several prompt templates per direction, chosen with the seeded RNG.
     - The number of glossed words is sampled per example, with a floor of
       ``min_words`` (default 2) up to all trainable alignments. The floor skews
       the chain toward 2-3 anchors; it is softened to the available count so a
       single-alignment verse still emits a one-word example.
-    - Gloss items are rendered with several phrasings, some with quotes and some
-      without, since the model is observably sensitive to quote presence.
-    - Two join styles ("a, b, and c" vs. "a. b. c.") and several prompt and
-      conclusion templates, all chosen with the seeded RNG.
+    - Which words are glossed is a random subset per example.
 
 Input format (canonical {train,test}_alignments.jsonl from assign_alignment_ids):
     {"sentence_id": "...", "english_sentence": "...",
@@ -118,29 +128,11 @@ PROMPT_TEMPLATES = {
     ],
 }
 
-# Gloss-item phrasings. {a} is the source-language word, {b} its translation.
-# Quote presence is varied deliberately.
-GLOSS_ITEM_STYLES = [
-    '"{a}" means "{b}"',
-    '"{a}" means {b}',
-    '{a} means "{b}"',
-    '{a} = {b}',
-]
-
-# Conclusion templates per direction. {full} is the full target translation.
+# Single canonical conclusion per direction. {full} is the full target
+# translation. (Unified in v2.2.0; see module docstring.)
 CONCLUSION_TEMPLATES = {
-    "got2eng": [
-        'so the sentence means: "{full}"',
-        'so in English this is: "{full}"',
-        'therefore the full translation is "{full}"',
-        "so the whole sentence means {full}",
-    ],
-    "eng2got": [
-        'so the sentence in Gothic is: "{full}"',
-        'so in Gothic: "{full}"',
-        'therefore the full Gothic translation is "{full}"',
-        "so the whole sentence is {full}",
-    ],
+    "got2eng": 'so the sentence means: "{full}"',
+    "eng2got": 'so the sentence in Gothic is: "{full}"',
 }
 
 
@@ -193,52 +185,66 @@ def gloss_pair(
     return english_word, gothic_word
 
 
+def render_gloss_items(
+    items: list[tuple[str, str]],
+    direction: str,
+) -> list[str]:
+    """Render each (source_word, translation) pair as a gloss clause.
+
+    The phrasing is direction-specific so it reads naturally each way. For
+    got2eng, ``"a" means "b"`` reads correctly ("hunds" means "dog"). For
+    eng2got the same phrasing reads oddly ("dog" means "hunds"), so the target
+    language is named explicitly -- but only on the first gloss, with subsequent
+    glosses shortened to avoid a repetitive "The Gothic for ..." on every item.
+
+    Args:
+        items: Ordered (source_word, translation) gloss pairs.
+        direction: "got2eng" or "eng2got".
+
+    Returns:
+        The rendered gloss clauses, one per item, in the given order.
+    """
+    rendered_items: list[str] = []
+    for index, (source_word, translation) in enumerate(items):
+        if direction == "got2eng":
+            rendered_items.append(f'"{source_word}" means "{translation}"')
+        elif index == 0:
+            rendered_items.append(
+                f'The Gothic for "{source_word}" is "{translation}"'
+            )
+        else:
+            rendered_items.append(f'"{source_word}" is "{translation}"')
+    return rendered_items
+
+
 def render_response(
     items: list[tuple[str, str]],
     full_translation: str,
     direction: str,
-    rng: random.Random,
 ) -> str:
     """Render the CoT response: a gloss chain followed by the full translation.
 
-    A single gloss-item style and a single join style are chosen per response
-    (consistency reads more naturally than mixing styles within one sentence),
-    while the choices vary across examples.
+    The output format is unified (v2.2.0): one gloss phrasing per direction, one
+    conclusion per direction, joined in a single comma / "a, b, and c" style. No
+    per-example randomness is consumed here -- response variability was moved to
+    the input side (see module docstring).
 
     Args:
         items: Ordered (source_word, translation) gloss pairs.
         full_translation: The full target-language sentence.
         direction: "got2eng" or "eng2got".
-        rng: Seeded RNG.
 
     Returns:
         The response string (without the leading space added by the caller).
     """
-    item_style = rng.choice(GLOSS_ITEM_STYLES)
-    rendered_items = [
-        item_style.format(a=source_word, b=translation)
-        for source_word, translation in items
-    ]
+    rendered_items = render_gloss_items(items, direction)
+    conclusion = CONCLUSION_TEMPLATES[direction].format(full=full_translation)
 
-    conclusion = rng.choice(CONCLUSION_TEMPLATES[direction]).format(
-        full=full_translation,
-    )
-
-    join_style = rng.choice(["comma_and", "period"])
-    if join_style == "comma_and":
-        if len(rendered_items) == 1:
-            gloss_clause = rendered_items[0]
-        else:
-            gloss_clause = (
-                ", ".join(rendered_items[:-1]) + ", and " + rendered_items[-1]
-            )
-        return f"{gloss_clause}, {conclusion}"
-
-    # period style: each gloss is its own sentence and the conclusion is
-    # capitalised to start a new one.
-    gloss_clause = ". ".join(rendered_items)
-    capitalised_conclusion = conclusion[0].upper() + conclusion[1:]
-    return f"{gloss_clause}. {capitalised_conclusion}"
+    if len(rendered_items) == 1:
+        gloss_clause = rendered_items[0]
+    else:
+        gloss_clause = ", ".join(rendered_items[:-1]) + ", and " + rendered_items[-1]
+    return f"{gloss_clause}, {conclusion}"
 
 
 def make_cot_example(
@@ -302,7 +308,7 @@ def make_cot_example(
             source_sentence=source_sentence,
         )
     )
-    response = render_response(items, full_translation, direction, rng)
+    response = render_response(items, full_translation, direction)
     return {"prompt": prompt, "response": f" {response}"}
 
 
