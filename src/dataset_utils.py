@@ -1489,6 +1489,25 @@ def _tokenized_source_dirname(
     return f"tokenized{variant_suffix}_{tokenizer_id}_ml{max_length}_{label_suffix}"
 
 
+def _dev_splits_dirname(
+    tokenizer_id: str,
+    max_length: int,
+    add_labels: bool,
+) -> str:
+    """
+    Build the mix-level tokenized dev-splits cache directory name.
+
+    The dev splits hold token ids, so the cache must be keyed by the same
+    parameters as the per-source tokenized caches. The mix slug that names the
+    parent directory deliberately excludes the tokenizer (sources and plans are
+    shared across tokenizers), so without this suffix a dev cache written by one
+    model's tokenizer would be silently reused by a model with a different
+    tokenizer.
+    """
+    label_suffix = "labels" if add_labels else "nolabels"
+    return f"{DEV_SUBDIR}_{tokenizer_id}_ml{max_length}_{label_suffix}"
+
+
 def _source_has_instruction_columns(untokenized_path: str) -> bool:
     """Return True if the source's untokenized 'train' split has prompt/response columns."""
     data = load_from_disk(untokenized_path)
@@ -1873,8 +1892,20 @@ def load_tokenized_multinomial_dataset(
         )
     global_indices = plan['global_indices']
 
-    # Step 7: build or load the dev DatasetDict.
-    dev_path = os.path.join(mix_dir, DEV_SUBDIR)
+    # Step 7: build or load the dev DatasetDict. The dev cache is keyed by
+    # tokenizer/max_length/labels because it stores token ids, unlike the
+    # tokenizer-agnostic mix slug naming the parent directory.
+    dev_path = os.path.join(
+        mix_dir, _dev_splits_dirname(tokenizer_id, max_length, add_labels)
+    )
+    legacy_dev_path = os.path.join(mix_dir, DEV_SUBDIR)
+    if os.path.exists(legacy_dev_path):
+        print(
+            f"Warning: ignoring legacy dev cache at {legacy_dev_path}; it was written "
+            f"without a tokenizer key and may hold token ids from a different "
+            f"tokenizer. Delete it once no runs depend on it.",
+            file=sys.stderr,
+        )
     if not os.path.exists(dev_path):
         dev_dict = {}
         for src_id, ds, dev_idx in zip(
