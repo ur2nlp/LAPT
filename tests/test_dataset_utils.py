@@ -39,6 +39,7 @@ from unittest.mock import patch, MagicMock
 
 from datasets import Dataset, DatasetDict, load_from_disk
 from omegaconf import DictConfig
+from transformers import AutoTokenizer
 
 from dataset_utils import (
     _validate_source_cache,
@@ -1704,6 +1705,51 @@ class TestLoadTokenizedMultinomialDataset:
             tokenized['input_ids'], skip_special_tokens=True
         )
         assert all("\n" not in d for d in decoded)
+
+    def test_dev_splits_are_keyed_by_tokenizer(self, tmp_path, base_tokenizer):
+        """
+        The mix directory is tokenizer-agnostic, so the dev cache inside it must
+        carry a tokenizer key. Without one, the second model to use a mix silently
+        inherits the first model's dev token ids.
+        """
+        other_tokenizer = AutoTokenizer.from_pretrained("gpt2", use_fast=True)
+
+        cache_dir = tmp_path / "cache"
+        lines = [f"dev line {i}" for i in range(10)]
+        self._write_source(cache_dir, "src", lines)
+        sources = [{'id': 'src', 'type': 'plaintext', 'path': 'unused'}]
+
+        first = load_tokenized_multinomial_dataset(
+            sources=sources, alpha=0.5, total_samples=10, dev_size=0.5,
+            base_cache_dir=str(cache_dir), tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m", max_length=64,
+        )
+        second = load_tokenized_multinomial_dataset(
+            sources=sources, alpha=0.5, total_samples=10, dev_size=0.5,
+            base_cache_dir=str(cache_dir), tokenizer=other_tokenizer,
+            tokenizer_id="gpt2", max_length=64,
+        )
+
+        mix_dirs = [
+            p for p in cache_dir.iterdir()
+            if p.is_dir() and p.name.startswith("mix_")
+        ]
+        assert len(mix_dirs) == 1
+        dev_dirs = sorted(p.name for p in mix_dirs[0].iterdir() if p.name.startswith("dev"))
+        assert dev_dirs == [
+            "dev_gpt2_ml64_nolabels",
+            "dev_xglm564m_ml64_nolabels",
+        ]
+
+        # Each model's dev rows decode back to the same text under its own tokenizer.
+        first_decoded = base_tokenizer.batch_decode(
+            first['src']['input_ids'], skip_special_tokens=True
+        )
+        second_decoded = other_tokenizer.batch_decode(
+            second['src']['input_ids'], skip_special_tokens=True
+        )
+        assert [d.strip() for d in first_decoded] == [d.strip() for d in second_decoded]
+        assert first['src']['input_ids'] != second['src']['input_ids']
 
 
 def _make_msgs(*pairs):
