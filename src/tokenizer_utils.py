@@ -411,7 +411,8 @@ def train_new_tokenizer(
 
     special_tokens_config = _extract_special_tokens(
         base_tokenizer,
-        inherit_additional=config.inherit_additional_special_tokens
+        inherit_additional=config.inherit_additional_special_tokens,
+        vocab_size=config.vocab_size,
     )
 
     # Convert JSONL to plain text for SentencePiece training (cached alongside JSONL)
@@ -599,30 +600,35 @@ def train_new_tokenizer(
     # _apply_spm_pipeline, so Unigram and BPE stay as comparable as possible.
     if model_type == 'bpe':
         model_file = os.path.join(output_path, 'spm.model')
-        unk_token = special_tokens_config.get('unk_piece', base_tokenizer.unk_token)
         backend_tokenizer = _create_bpe_tokenizer(
             spm_model_path=model_file,
             vocab_scores=vocab_with_scores,
-            unk_token=unk_token,
+            unk_token=special_tokens_config['unk_piece'],
         )
     else:
-        unk_id = special_tokens_config.get('unk_id', 0)
-        backend_tokenizer = _create_unigram_tokenizer(vocab_with_scores, unk_id=unk_id)
+        backend_tokenizer = _create_unigram_tokenizer(
+            vocab_with_scores,
+            unk_id=special_tokens_config['unk_id'],
+        )
 
-    # Copy the post-processor from base tokenizer to preserve special token behavior
-    # This is critical for models like XGLM that prepend EOS to inputs
-    if hasattr(base_tokenizer, '_tokenizer') and hasattr(base_tokenizer._tokenizer, 'post_processor'):
-        if base_tokenizer._tokenizer.post_processor is not None:
-            backend_tokenizer.post_processor = base_tokenizer._tokenizer.post_processor
-            print("Copied post-processor from base tokenizer (preserves special token handling)", file=sys.stderr)
+    _copy_base_post_processor(backend_tokenizer, base_tokenizer, special_tokens_config)
 
-    # Wrap in PreTrainedTokenizerFast with special tokens from base model
+    # Wrap in PreTrainedTokenizerFast with special tokens resolved against the
+    # trained vocabulary rather than read straight off the base tokenizer, whose
+    # roles may have been renamed, aliased, or synthesized during training.
+    trained_vocab = {piece for piece, _score in vocab_with_scores}
+    hf_special_tokens = _resolve_hf_special_tokens(
+        base_tokenizer,
+        special_tokens_config,
+        trained_vocab,
+    )
+    print(f"Registering special tokens on the new tokenizer: {hf_special_tokens}", file=sys.stderr)
     new_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=backend_tokenizer,
-        bos_token=base_tokenizer.bos_token,
-        eos_token=base_tokenizer.eos_token,
-        unk_token=base_tokenizer.unk_token,
-        pad_token=base_tokenizer.pad_token,
+        bos_token=hf_special_tokens['bos_token'],
+        eos_token=hf_special_tokens['eos_token'],
+        unk_token=hf_special_tokens['unk_token'],
+        pad_token=hf_special_tokens['pad_token'],
         clean_up_tokenization_spaces=True,
     )
 
@@ -849,6 +855,58 @@ def _create_bpe_tokenizer(
     return backend_tokenizer
 
 
+def _copy_base_post_processor(
+    backend_tokenizer,
+    base_tokenizer: PreTrainedTokenizerBase,
+    special_tokens_config: dict,
+) -> None:
+    """
+    Copy the base tokenizer's post-processor onto the new backend, when portable.
+
+    Only a ``TemplateProcessing`` post-processor is portable, and only if the base
+    special tokens kept their ids. It is defined over special-token strings and
+    their ids — XGLM's prepends ``</s>`` to every input, which the adapted model
+    still expects. Other post-processors belong to their own pipeline: Qwen3's
+    ``ByteLevel`` post-processor assumes byte-level pre-tokenization and would
+    corrupt offsets on the metaspace pipeline ``_apply_spm_pipeline`` installs.
+
+    Args:
+        backend_tokenizer: Newly built ``tokenizers.Tokenizer`` to modify in place
+        base_tokenizer: Base tokenizer to copy from
+        special_tokens_config: Output of _extract_special_tokens
+    """
+    from tokenizers.processors import TemplateProcessing
+
+    base_post_processor = getattr(base_tokenizer, '_tokenizer', None)
+    if base_post_processor is not None:
+        base_post_processor = getattr(base_post_processor, 'post_processor', None)
+
+    if base_post_processor is None:
+        return
+
+    if not isinstance(base_post_processor, TemplateProcessing):
+        print(
+            f"Skipping base post-processor ({type(base_post_processor).__name__}): only "
+            "TemplateProcessing is portable across tokenization pipelines",
+            file=sys.stderr,
+        )
+        return
+
+    if not _base_special_token_ids_preserved(base_tokenizer, special_tokens_config):
+        print(
+            "Skipping base TemplateProcessing post-processor: special-token ids were "
+            "reassigned during training, so the template's hard-coded ids no longer match",
+            file=sys.stderr,
+        )
+        return
+
+    backend_tokenizer.post_processor = base_post_processor
+    print(
+        "Copied post-processor from base tokenizer (preserves special token handling)",
+        file=sys.stderr,
+    )
+
+
 def _validate_tokenizer(tokenizer: PreTrainedTokenizerBase, expected_vocab_size: int):
     """
     Validate that a tokenizer has the expected vocab size and contiguous token IDs.
@@ -899,7 +957,128 @@ def _validate_tokenizer(tokenizer: PreTrainedTokenizerBase, expected_vocab_size:
     print(f"Tokenizer validation passed: vocab_size={actual_vocab_size}, token IDs: {min_id}-{max_id}", file=sys.stderr)
 
 
-def _extract_special_tokens(tokenizer: PreTrainedTokenizerBase, inherit_additional: bool = True) -> dict:
+SPECIAL_TOKEN_ROLES = ('unk', 'bos', 'eos', 'pad')
+DEFAULT_UNK_PIECE = '<unk>'
+
+
+def _assign_special_token_ids(
+    tokenizer: PreTrainedTokenizerBase,
+    role_pieces: dict[str, str],
+    vocab_size: Optional[int],
+) -> dict[str, int]:
+    """
+    Choose SentencePiece ids for the special-token roles that have a piece.
+
+    The base model's own ids are preserved whenever SentencePiece can accept them,
+    so tokenizers built against bases like XGLM (unk/bos/eos/pad at 3/0/2/1) are
+    unchanged. They are unusable when a role has no id, when two roles share an
+    id, or when an id falls outside the target vocabulary — the last case is the
+    norm for a large-vocab base such as Qwen3, whose eos id is 151643. Then ids
+    are reassigned positionally from 0 in SPECIAL_TOKEN_ROLES order.
+
+    Args:
+        tokenizer: Base tokenizer to read ids from
+        role_pieces: Mapping of role name to the piece string it owns
+        vocab_size: Target vocabulary size, or None to skip the range check
+
+    Returns:
+        Mapping of role name to SentencePiece id, covering exactly role_pieces
+    """
+    base_ids = {}
+    for role in role_pieces:
+        base_id = getattr(tokenizer, f'{role}_token_id')
+        if base_id is not None:
+            base_ids[role] = base_id
+
+    base_ids_usable = (
+        len(base_ids) == len(role_pieces)
+        and len(set(base_ids.values())) == len(base_ids)
+        and all(base_id >= 0 for base_id in base_ids.values())
+        and (vocab_size is None or all(base_id < vocab_size for base_id in base_ids.values()))
+    )
+    if base_ids_usable:
+        return base_ids
+
+    assigned_ids = {}
+    next_id = 0
+    for role in SPECIAL_TOKEN_ROLES:
+        if role in role_pieces:
+            assigned_ids[role] = next_id
+            next_id += 1
+
+    print(
+        "Base special-token ids are not usable for SentencePiece "
+        f"(base: {base_ids}, vocab_size: {vocab_size}); "
+        f"reassigning positionally: {assigned_ids}",
+        file=sys.stderr,
+    )
+    return assigned_ids
+
+
+def _base_special_token_ids_preserved(
+    tokenizer: PreTrainedTokenizerBase,
+    special_tokens_config: dict,
+) -> bool:
+    """
+    Report whether every special token the base model has kept its original id.
+
+    Used to decide whether artifacts that hard-code base ids — notably a
+    ``TemplateProcessing`` post-processor — can be copied onto the new tokenizer.
+
+    Args:
+        tokenizer: Base tokenizer
+        special_tokens_config: Output of _extract_special_tokens
+
+    Returns:
+        True if no base special token was reassigned to a different id
+    """
+    for role in SPECIAL_TOKEN_ROLES:
+        base_id = getattr(tokenizer, f'{role}_token_id')
+        if base_id is None:
+            continue
+        if special_tokens_config.get(f'{role}_id') != base_id:
+            return False
+    return True
+
+
+def _resolve_hf_special_tokens(
+    tokenizer: PreTrainedTokenizerBase,
+    special_tokens_config: dict,
+    vocab: set[str],
+) -> dict[str, Optional[str]]:
+    """
+    Choose the special-token strings to register on the new ``PreTrainedTokenizerFast``.
+
+    A role resolves to the piece SentencePiece was told to mint for it, falling
+    back to the base tokenizer's string. The fallback is what re-attaches an
+    aliased role: Qwen3 sets ``pad_token == eos_token``, which SentencePiece
+    cannot accept twice, so ``pad`` is trained with id -1 and recovered here as
+    the same string — HuggingFace then resolves it to the eos id. A role whose
+    string is absent from the trained vocabulary resolves to None rather than
+    silently registering a token that would be added to the vocab.
+
+    Args:
+        tokenizer: Base tokenizer
+        special_tokens_config: Output of _extract_special_tokens
+        vocab: Piece strings present in the trained SentencePiece model
+
+    Returns:
+        Mapping of ``<role>_token`` to a piece string or None
+    """
+    resolved = {}
+    for role in SPECIAL_TOKEN_ROLES:
+        piece = special_tokens_config.get(f'{role}_piece')
+        if piece is None:
+            piece = getattr(tokenizer, f'{role}_token')
+        resolved[f'{role}_token'] = piece if piece in vocab else None
+    return resolved
+
+
+def _extract_special_tokens(
+    tokenizer: PreTrainedTokenizerBase,
+    inherit_additional: bool = True,
+    vocab_size: Optional[int] = None,
+) -> dict:
     """
     Extract special token configuration from a tokenizer for SentencePiece training.
 
@@ -907,6 +1086,9 @@ def _extract_special_tokens(tokenizer: PreTrainedTokenizerBase, inherit_addition
         tokenizer: HuggingFace tokenizer to extract special tokens from
         inherit_additional: Whether to inherit additional special tokens (e.g., <madeupword0-6>)
             from the base tokenizer (default: True)
+        vocab_size: Target vocabulary size. Used only to check that the base
+            model's special-token ids fit; pass it whenever it is known, or
+            SentencePiece training will fail on a large-vocab base.
 
     Returns:
         Dictionary of SentencePiece training arguments for special tokens
@@ -921,22 +1103,38 @@ def _extract_special_tokens(tokenizer: PreTrainedTokenizerBase, inherit_addition
     # user-defined symbol rather than gating it behind a config flag.
     user_defined_symbols = ['\n']
 
-    if tokenizer.unk_token is not None:
-        config['unk_piece'] = tokenizer.unk_token
-        config['unk_id'] = tokenizer.unk_token_id if tokenizer.unk_token_id is not None else 0
+    # Work out which role owns which piece string. A base tokenizer may alias two
+    # roles to one string (Qwen3 sets pad_token == eos_token), but SentencePiece
+    # rejects a duplicate meta piece outright. The earlier role in
+    # SPECIAL_TOKEN_ROLES order keeps the string; the later one is disabled here
+    # and re-attached to the HuggingFace wrapper by _resolve_hf_special_tokens.
+    claimed_pieces = set()
+    role_pieces = {}
+    for role in SPECIAL_TOKEN_ROLES:
+        piece = getattr(tokenizer, f'{role}_token')
+        if piece is None or piece in claimed_pieces:
+            continue
+        claimed_pieces.add(piece)
+        role_pieces[role] = piece
 
-    if tokenizer.bos_token is not None:
-        config['bos_piece'] = tokenizer.bos_token
-        config['bos_id'] = tokenizer.bos_token_id if tokenizer.bos_token_id is not None else 1
+    # SentencePiece always mints an unknown piece and both backend models index it
+    # by id, so synthesize one when the base has none. Byte-level BPE bases such
+    # as Qwen3 cannot produce UNK at all and expose unk_token=None, but the
+    # non-byte-level tokenizer trained here does need a real unknown piece.
+    if 'unk' not in role_pieces and DEFAULT_UNK_PIECE not in claimed_pieces:
+        role_pieces['unk'] = DEFAULT_UNK_PIECE
+        claimed_pieces.add(DEFAULT_UNK_PIECE)
 
-    if tokenizer.eos_token is not None:
-        config['eos_piece'] = tokenizer.eos_token
-        config['eos_id'] = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 2
+    role_ids = _assign_special_token_ids(tokenizer, role_pieces, vocab_size)
 
-    if tokenizer.pad_token is not None:
-        config['pad_piece'] = tokenizer.pad_token
-        # Default to -1 if pad_token_id is None (SentencePiece convention for "no padding")
-        config['pad_id'] = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else -1
+    for role in SPECIAL_TOKEN_ROLES:
+        if role in role_pieces:
+            config[f'{role}_piece'] = role_pieces[role]
+        # Emit an id for every role, including -1 for roles the base model lacks.
+        # Leaving one out lets SentencePiece apply its own defaults (<s> at id 1,
+        # </s> at id 2), which would either invent a special token the base model
+        # has no notion of or collide with a reassigned id.
+        config[f'{role}_id'] = role_ids.get(role, -1)
 
     # Optionally inherit additional special tokens like <madeupword0-6>
     # These are vocabulary reservations from the base model that may be unused

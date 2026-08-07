@@ -6,9 +6,53 @@ from artifact_configs import TokenizerConfig
 from tokenizer_utils import (
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
+    _resolve_hf_special_tokens,
     _validate_tokenizer,
     train_new_tokenizer,
 )
+
+
+class StubTokenizer:
+    """
+    Minimal stand-in exposing only the attributes _extract_special_tokens reads.
+
+    Used to cover base tokenizers whose special-token layout differs from XGLM's
+    without downloading them. The Qwen3 values below were read off
+    ``Qwen/Qwen3-0.6B-Base`` with transformers 4.57.6 (2026-08-07).
+    """
+
+    def __init__(
+        self,
+        unk_token=None,
+        unk_token_id=None,
+        bos_token=None,
+        bos_token_id=None,
+        eos_token=None,
+        eos_token_id=None,
+        pad_token=None,
+        pad_token_id=None,
+        additional_special_tokens=None,
+    ):
+        self.unk_token = unk_token
+        self.unk_token_id = unk_token_id
+        self.bos_token = bos_token
+        self.bos_token_id = bos_token_id
+        self.eos_token = eos_token
+        self.eos_token_id = eos_token_id
+        self.pad_token = pad_token
+        self.pad_token_id = pad_token_id
+        self.additional_special_tokens = additional_special_tokens or []
+
+
+def make_qwen_stub() -> StubTokenizer:
+    """Stub matching Qwen3's layout: no unk, no bos, pad aliased to eos at 151643."""
+    return StubTokenizer(
+        eos_token="<|endoftext|>",
+        eos_token_id=151643,
+        pad_token="<|endoftext|>",
+        pad_token_id=151643,
+        additional_special_tokens=["<|im_start|>", "<|im_end|>"],
+    )
 
 
 def make_tokenizer_config(
@@ -141,6 +185,92 @@ class TestSpecialTokenExtraction:
         assert not any(
             token.startswith("<madeupword") for token in config["user_defined_symbols"]
         )
+
+    def test_base_ids_preserved_when_usable(self, base_tokenizer):
+        """
+        XGLM's own ids fit in the target vocab and are unique, so they survive.
+
+        This pins the backward-compatibility guarantee: adapting the extraction
+        logic for other base models must not silently renumber XGLM tokenizers,
+        which would invalidate every cached tokenizer and FOCUS embedding artifact.
+        """
+        config = _extract_special_tokens(base_tokenizer, vocab_size=32768)
+
+        assert config["unk_id"] == base_tokenizer.unk_token_id
+        assert config["bos_id"] == base_tokenizer.bos_token_id
+        assert config["eos_id"] == base_tokenizer.eos_token_id
+        assert config["pad_id"] == base_tokenizer.pad_token_id
+
+
+class TestSpecialTokensNonXglmBase:
+    """
+    Tests for base tokenizers that do not have XGLM's special-token layout.
+
+    Qwen3 is the motivating case: byte-level BPE with no unk and no bos, pad
+    aliased to eos, and ids far outside any target vocab size. Passing those
+    values to SentencePiece verbatim is a hard training crash, so this class
+    covers the three ways the extraction has to diverge from the base.
+    """
+
+    def test_out_of_range_ids_are_reassigned(self):
+        """Base ids beyond vocab_size are replaced with positional ids from 0."""
+        config = _extract_special_tokens(make_qwen_stub(), vocab_size=32768)
+
+        emitted_ids = [
+            config[f"{role}_id"]
+            for role in ("unk", "bos", "eos", "pad")
+            if config[f"{role}_id"] >= 0
+        ]
+        assert all(token_id < 32768 for token_id in emitted_ids)
+        assert len(set(emitted_ids)) == len(emitted_ids)
+
+    def test_aliased_pad_is_disabled_not_duplicated(self):
+        """
+        pad_token == eos_token must yield one piece, since SentencePiece rejects
+        a duplicate meta piece ("<|endoftext|> is already defined").
+        """
+        config = _extract_special_tokens(make_qwen_stub(), vocab_size=32768)
+
+        assert config["eos_piece"] == "<|endoftext|>"
+        assert "pad_piece" not in config
+        assert config["pad_id"] == -1
+
+    def test_missing_unk_is_synthesized_and_missing_bos_disabled(self):
+        """
+        A byte-level base has no unk, but the trained non-byte tokenizer needs one;
+        it has no real bos, and inventing one is worse than disabling it.
+        """
+        config = _extract_special_tokens(make_qwen_stub(), vocab_size=32768)
+
+        assert config["unk_piece"] == "<unk>"
+        assert config["unk_id"] >= 0
+        assert "bos_piece" not in config
+        assert config["bos_id"] == -1
+
+    def test_aliased_pad_recovered_for_huggingface_wrapper(self):
+        """
+        The pad role is dropped for SentencePiece but re-attached on the wrapper,
+        where HuggingFace resolves the shared string to the eos id.
+        """
+        stub = make_qwen_stub()
+        config = _extract_special_tokens(stub, vocab_size=32768)
+        vocab = {"<unk>", "<|endoftext|>", "▁a", "▁b"}
+
+        resolved = _resolve_hf_special_tokens(stub, config, vocab)
+
+        assert resolved["eos_token"] == "<|endoftext|>"
+        assert resolved["pad_token"] == "<|endoftext|>"
+        assert resolved["unk_token"] == "<unk>"
+        assert resolved["bos_token"] is None
+
+    def test_roles_absent_from_trained_vocab_resolve_to_none(self):
+        """A piece missing from the trained vocab must not be registered."""
+        stub = make_qwen_stub()
+        config = _extract_special_tokens(stub, vocab_size=32768)
+
+        resolved = _resolve_hf_special_tokens(stub, config, {"▁a", "▁b"})
+
+        assert all(token is None for token in resolved.values())
 
 
 class TestTokenizerValidation:

@@ -32,6 +32,8 @@ from tokenizer_utils import (
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _create_unigram_tokenizer,
+    _copy_base_post_processor,
+    _resolve_hf_special_tokens,
     _validate_tokenizer,
 )
 
@@ -80,7 +82,8 @@ def train_from_seed(
 
     special_tokens_config = _extract_special_tokens(
         base_tokenizer,
-        inherit_additional=inherit_additional_special_tokens
+        inherit_additional=inherit_additional_special_tokens,
+        vocab_size=vocab_size,
     )
 
     os.makedirs(output_path, exist_ok=True)
@@ -114,21 +117,25 @@ def train_from_seed(
         )
         backend_tokenizer.decoder = decoders.Metaspace(replacement="▁", prepend_scheme="always")
     else:
-        unk_id = special_tokens_config.get('unk_id', 0)
-        backend_tokenizer = _create_unigram_tokenizer(vocab_with_scores, unk_id=unk_id)
+        backend_tokenizer = _create_unigram_tokenizer(
+            vocab_with_scores,
+            unk_id=special_tokens_config['unk_id'],
+        )
 
-    # Copy post-processor from base tokenizer
-    if hasattr(base_tokenizer, '_tokenizer') and hasattr(base_tokenizer._tokenizer, 'post_processor'):
-        if base_tokenizer._tokenizer.post_processor is not None:
-            backend_tokenizer.post_processor = base_tokenizer._tokenizer.post_processor
-            print("Copied post-processor from base tokenizer")
+    _copy_base_post_processor(backend_tokenizer, base_tokenizer, special_tokens_config)
 
+    trained_vocab = {piece for piece, _score in vocab_with_scores}
+    hf_special_tokens = _resolve_hf_special_tokens(
+        base_tokenizer,
+        special_tokens_config,
+        trained_vocab,
+    )
     new_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=backend_tokenizer,
-        bos_token=base_tokenizer.bos_token,
-        eos_token=base_tokenizer.eos_token,
-        unk_token=base_tokenizer.unk_token,
-        pad_token=base_tokenizer.pad_token,
+        bos_token=hf_special_tokens['bos_token'],
+        eos_token=hf_special_tokens['eos_token'],
+        unk_token=hf_special_tokens['unk_token'],
+        pad_token=hf_special_tokens['pad_token'],
         clean_up_tokenization_spaces=True,
     )
 
