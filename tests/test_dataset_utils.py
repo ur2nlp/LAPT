@@ -910,7 +910,10 @@ class TestTokenizeInstructionExamples:
         """
         Test handling of empty response (edge case).
 
-        With empty response, all labels should be -100.
+        The response contributes no tokens of its own, but an EOS is still
+        appended and left trainable so the model learns to terminate
+        immediately rather than continuing the prompt. So every label is -100
+        except a final EOS.
         """
         from dataset_utils import _tokenize_instruction_examples
 
@@ -923,8 +926,10 @@ class TestTokenizeInstructionExamples:
 
         labels = result['labels'][0]
 
-        # All labels should be -100 (no response tokens)
-        assert all(l == -100 for l in labels), "All labels should be -100 for empty response"
+        assert all(label == -100 for label in labels[:-1]), \
+            "All prompt labels should be -100 for empty response"
+        assert labels[-1] == base_tokenizer.eos_token_id, \
+            "The appended EOS should stay trainable"
 
     def test_response_starts_with_space(self, base_tokenizer):
         """
