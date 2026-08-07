@@ -252,6 +252,11 @@ class _FakeModel:
             tie_word_embeddings=True,
             pad_token_id=0, bos_token_id=1, eos_token_id=2, vocab_size=vocab_size,
         )
+        # The generation config is a separate object that the FOCUS init syncs
+        # alongside model.config; without it the sync raises AttributeError.
+        self.generation_config = SimpleNamespace(
+            pad_token_id=0, bos_token_id=1, eos_token_id=2,
+        )
         self._embed = _FakeEmbed(vocab_size, hidden)
 
     def get_input_embeddings(self): return self._embed

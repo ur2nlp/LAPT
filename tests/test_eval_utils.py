@@ -231,10 +231,11 @@ class TestComputeCharsPerToken:
 
         result = compute_chars_per_token(ds, tokenizer)
 
-        # chars = "ab"+"cd"+"ef"+"gh" = 8 chars (decode uses all input_ids)
+        # Only non-masked positions are decoded, so prompt characters cannot
+        # inflate the ratio: chars = "ef"+"gh" = 4
         # non-masked labels = 2 (tokens 3 and 4), loss tokens = 2-1 = 1
-        # ratio = 8/1 = 8.0
-        assert result == {"eval": 8.0}
+        # ratio = 4/1 = 4.0
+        assert result == {"eval": 4.0}
 
     def test_empty_dataset(self):
         """Test with an empty dataset."""
