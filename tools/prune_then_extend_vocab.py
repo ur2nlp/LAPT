@@ -273,6 +273,7 @@ def train_novel_spm(
     special_tokens_config = _extract_special_tokens(
         base_tokenizer,
         inherit_additional=False,
+        vocab_size=vocab_size,
     )
 
     print(
