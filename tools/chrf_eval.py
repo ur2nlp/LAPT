@@ -49,6 +49,11 @@ from pathlib import Path
 # trip an OpenMP duplicate-runtime abort.
 from interactive_prompt import load_model, resolve_device, resolve_dtype
 
+# Share the token-counting definition with the training-loop chrF callback so
+# the offline and in-training non-halting rates cannot drift apart.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
+from eval_utils import count_new_tokens
+
 import torch
 from sacrebleu.metrics import CHRF
 from tqdm import tqdm
@@ -97,31 +102,6 @@ def truncate_at_stop(text: str, stop_strings: list[str]) -> str:
         if index != -1:
             cut = min(cut, index)
     return text[:cut]
-
-
-def count_new_tokens(row_ids, eos_token_id: int) -> tuple[int, bool]:
-    """Measure how many tokens a single generation actually produced.
-
-    ``generate`` right-pads every finished sequence out to the length of the
-    longest one in the batch, so the raw row length overstates a short
-    generation. The true length is the number of tokens up to and including the
-    first EOS; if no EOS is present the model never halted and was cut off by
-    ``max_new_tokens``.
-
-    Args:
-        row_ids: 1-D tensor of the newly generated token ids for one example
-            (the prompt already sliced off).
-        eos_token_id: The EOS id that was passed to ``generate``.
-
-    Returns:
-        Tuple of (number of tokens generated, whether the generation hit the
-        ``max_new_tokens`` cap without emitting EOS).
-    """
-    eos_positions = (row_ids == eos_token_id).nonzero()
-    if eos_positions.numel() == 0:
-        return int(row_ids.shape[0]), True
-    first_eos_index = int(eos_positions[0].item())
-    return first_eos_index + 1, False
 
 
 def generate_responses(

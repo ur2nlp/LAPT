@@ -258,6 +258,32 @@ def truncate_at_stop(text: str, stop_strings: list[str]) -> str:
     return text[:cut]
 
 
+def count_new_tokens(row_ids, eos_token_id: int) -> tuple[int, bool]:
+    """Measure how many tokens a single generation actually produced.
+
+    ``generate`` right-pads every finished sequence out to the length of the
+    longest one in the batch, so the raw row length overstates a short
+    generation. The true length is the number of tokens up to and including the
+    first EOS; if no EOS is present the model never halted and was cut off by
+    ``max_new_tokens``. Counting to the first EOS also stays correct when PAD is
+    EOS, which is the usual setup here.
+
+    Args:
+        row_ids: 1-D tensor of the newly generated token ids for one example
+            (the prompt already sliced off).
+        eos_token_id: The EOS id that was passed to ``generate``.
+
+    Returns:
+        Tuple of (number of tokens generated, whether the generation hit the
+        ``max_new_tokens`` cap without emitting EOS).
+    """
+    eos_positions = (row_ids == eos_token_id).nonzero()
+    if eos_positions.numel() == 0:
+        return int(row_ids.shape[0]), True
+    first_eos_index = int(eos_positions[0].item())
+    return first_eos_index + 1, False
+
+
 def generate_greedy_batched(
     model,
     tokenizer,
@@ -268,7 +294,7 @@ def generate_greedy_batched(
     stop_strings: list[str],
     repetition_penalty: float = 1.0,
     no_repeat_ngram_size: int = 0,
-) -> list[str]:
+) -> tuple[list[str], list[int], list[bool]]:
     """Greedily generate a continuation for each prompt using an in-memory model.
 
     This is the training-loop counterpart to ``tools/chrf_eval.py``'s pipeline
@@ -277,7 +303,10 @@ def generate_greedy_batched(
     is greedy for run-to-run reproducibility.
 
     Only the newly generated text is returned (the prompt tokens are sliced off),
-    stripped and truncated at any stop string.
+    stripped and truncated at any stop string. Per-example token counts are
+    returned alongside it, measured *before* stop-string truncation so that a
+    generation which rambled to the cap but happened to emit a stop string early
+    is still counted as having rambled.
 
     Args:
         model: A causal-LM model (the unwrapped ``trainer.model``).
@@ -292,7 +321,8 @@ def generate_greedy_batched(
         no_repeat_ngram_size: No-repeat n-gram size (0 = off).
 
     Returns:
-        List of generated response strings, parallel to ``prompts``.
+        Tuple of (responses, new-token counts, hit-cap flags), all parallel to
+        ``prompts``.
     """
     device = next(model.parameters()).device
 
@@ -310,6 +340,8 @@ def generate_greedy_batched(
     model.config.use_cache = True
 
     responses = []
+    new_token_counts = []
+    hit_cap_flags = []
     try:
         for start in range(0, len(prompts), batch_size):
             batch = prompts[start:start + batch_size]
@@ -344,14 +376,19 @@ def generate_greedy_batched(
             prompt_length = encoded['input_ids'].shape[1]
             new_tokens = generated[:, prompt_length:]
             decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-            for text in decoded:
+            for row_index, text in enumerate(decoded):
+                token_count, hit_cap = count_new_tokens(
+                    new_tokens[row_index], tokenizer.eos_token_id
+                )
+                new_token_counts.append(token_count)
+                hit_cap_flags.append(hit_cap)
                 responses.append(truncate_at_stop(text.strip(), stop_strings))
     finally:
         tokenizer.padding_side = original_padding_side
         if original_use_cache is not None:
             model.config.use_cache = original_use_cache
 
-    return responses
+    return responses, new_token_counts, hit_cap_flags
 
 
 class GenerationChrfCallback(TrainerCallback):
@@ -361,6 +398,13 @@ class GenerationChrfCallback(TrainerCallback):
     holdout set and scores them against their reference responses with chrF
     (sacrebleu), injecting ``eval_<name>_chrf`` so the surface-adequacy metric
     sits alongside the forward-pass ``eval_<name>_bpc`` (see ``BPCCallback``).
+
+    It also injects ``eval_<name>_hit_cap_frac``: the fraction of generations
+    that ran to ``max_new_tokens`` without emitting EOS. This is free (the
+    generation already happened) and is a diagnostic, not a quality score -- a
+    model that emits EOS immediately scores a perfect 0.0, so never select on
+    it. It is only comparable across runs sharing the same ``max_new_tokens``,
+    since raising the cap lowers the rate without the model changing.
 
     bpc is a weakly-correct proxy for generation quality (right sign, low
     magnitude, and it misranks eras where a task mix inflates translation bpc
@@ -379,8 +423,10 @@ class GenerationChrfCallback(TrainerCallback):
             (matching its bpc holdout so metrics align) and 'path' (an
             instruction JSONL), with optional 'max_new_tokens', 'word_order'
             (0 = plain chrF, 2 = chrF++), 'batch_size', 'max_examples',
-            'stop' (list of stop substrings), 'repetition_penalty', and
-            'no_repeat_ngram_size'.
+            'stop' (list of stop substrings), 'repetition_penalty',
+            'no_repeat_ngram_size', and 'hit_cap_warn_threshold' (fraction of
+            non-halting generations above which a stderr warning fires;
+            default 0.25).
         max_prompt_length: Token cap for encoded prompts (typically the training
             max_length).
     """
@@ -399,6 +445,10 @@ class GenerationChrfCallback(TrainerCallback):
         # Track the last step generation ran, so a multi-dataset eval (which fires
         # on_evaluate once per split) generates each spec only once per cycle.
         self._last_generated_step = -1
+
+        # Holdouts already warned about for a high non-halting rate, so the
+        # warning fires on the transition rather than every eval cycle.
+        self._warned_hit_cap = set()
 
         # Pre-load prompts/references once so we don't re-read files every eval.
         self.specs = []
@@ -420,11 +470,40 @@ class GenerationChrfCallback(TrainerCallback):
                 'stop': list(eval_config.get('stop') or []),
                 'repetition_penalty': eval_config.get('repetition_penalty', 1.0),
                 'no_repeat_ngram_size': eval_config.get('no_repeat_ngram_size', 0),
+                'hit_cap_warn_threshold': eval_config.get('hit_cap_warn_threshold', 0.25),
             })
             print(
                 f"  chrF eval '{name}': {len(prompts)} examples from {eval_config['path']}",
                 file=sys.stderr,
             )
+
+    def _maybe_warn_hit_cap(self, spec: dict, hit_cap_frac: float, global_step: int):
+        """Warn to stderr the first time a holdout's non-halting rate is high.
+
+        A high rate means either ``max_new_tokens`` is miscalibrated for this
+        model and task, or the model is failing to halt at all -- the latter
+        being the fingerprint of a stale ``generation_config`` EOS id surviving
+        a vocabulary swap. Either way it is worth catching early rather than
+        finding it later in a plot, so it is announced rather than only logged.
+
+        Warns once per holdout, re-arming if the rate falls back below the
+        threshold, so a persistent problem does not spam every eval cycle.
+        """
+        name = spec['name']
+        if hit_cap_frac < spec['hit_cap_warn_threshold']:
+            self._warned_hit_cap.discard(name)
+            return
+        if name in self._warned_hit_cap:
+            return
+        self._warned_hit_cap.add(name)
+        print(
+            f"WARNING: chrF eval '{name}' at step {global_step}: "
+            f"{hit_cap_frac:.1%} of generations hit max_new_tokens "
+            f"({spec['max_new_tokens']}) without emitting EOS. Either the cap is "
+            f"too low for this task or the model is not halting (check that the "
+            f"model's generation_config EOS id matches the tokenizer's).",
+            file=sys.stderr,
+        )
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         if metrics is None:
@@ -446,7 +525,7 @@ class GenerationChrfCallback(TrainerCallback):
         chrf_values = {}
         try:
             for spec in self.specs:
-                hypotheses = generate_greedy_batched(
+                hypotheses, _, hit_cap_flags = generate_greedy_batched(
                     model=self.model,
                     tokenizer=self.tokenizer,
                     prompts=spec['prompts'],
@@ -461,6 +540,10 @@ class GenerationChrfCallback(TrainerCallback):
                 corpus_result = chrf.corpus_score(hypotheses, [spec['references']])
                 chrf_key = f"eval_{spec['name']}_chrf"
                 chrf_values[chrf_key] = corpus_result.score
+
+                hit_cap_frac = sum(hit_cap_flags) / len(hit_cap_flags)
+                chrf_values[f"eval_{spec['name']}_hit_cap_frac"] = hit_cap_frac
+                self._maybe_warn_hit_cap(spec, hit_cap_frac, state.global_step)
         finally:
             if was_training:
                 self.model.train()

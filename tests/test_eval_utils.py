@@ -13,7 +13,7 @@ from datasets import Dataset
 
 from eval_utils import (
     compute_ttr_metrics, preprocess_logits_for_metrics,
-    compute_chars_per_token, BPCCallback,
+    compute_chars_per_token, BPCCallback, count_new_tokens, GenerationChrfCallback,
 )
 
 
@@ -306,3 +306,97 @@ class TestBPCCallback:
 
         assert "eval_bpc" in metrics
         assert "eval_other_bpc" not in metrics
+
+
+class TestCountNewTokens:
+    """Tests for measuring the true length of a single generation."""
+
+    def test_halted_before_padding(self):
+        """A sequence right-padded with EOS counts only up to the first EOS."""
+        # generate() pads finished sequences out to the batch's longest, and PAD
+        # is EOS here, so the trailing 2s are padding rather than content.
+        row_ids = torch.tensor([5, 6, 7, 2, 2, 2])
+
+        token_count, hit_cap = count_new_tokens(row_ids, eos_token_id=2)
+
+        assert token_count == 4
+        assert hit_cap is False
+
+    def test_no_eos_means_hit_cap(self):
+        """A sequence with no EOS never halted and was cut off by the cap."""
+        row_ids = torch.tensor([5, 6, 7, 8])
+
+        token_count, hit_cap = count_new_tokens(row_ids, eos_token_id=2)
+
+        assert token_count == 4
+        assert hit_cap is True
+
+    def test_immediate_eos(self):
+        """A model that emits EOS first thing generated exactly one token."""
+        row_ids = torch.tensor([2, 2, 2])
+
+        token_count, hit_cap = count_new_tokens(row_ids, eos_token_id=2)
+
+        assert token_count == 1
+        assert hit_cap is False
+
+    def test_eos_in_final_position(self):
+        """EOS as the last token counts the full row and still counts as halted."""
+        row_ids = torch.tensor([5, 6, 2])
+
+        token_count, hit_cap = count_new_tokens(row_ids, eos_token_id=2)
+
+        assert token_count == 3
+        assert hit_cap is False
+
+
+class TestHitCapWarning:
+    """Tests for the stderr warning on a high non-halting rate."""
+
+    def _make_callback(self, threshold: float = 0.25):
+        """Build a callback without running __init__, which reads data files."""
+        callback = GenerationChrfCallback.__new__(GenerationChrfCallback)
+        callback._warned_hit_cap = set()
+        spec = {
+            'name': 'got',
+            'max_new_tokens': 128,
+            'hit_cap_warn_threshold': threshold,
+        }
+        return callback, spec
+
+    def test_warns_above_threshold(self, capsys):
+        callback, spec = self._make_callback()
+
+        callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.4, global_step=100)
+
+        captured = capsys.readouterr()
+        assert "40.0% of generations hit max_new_tokens" in captured.err
+        assert captured.out == ""
+
+    def test_silent_below_threshold(self, capsys):
+        callback, spec = self._make_callback()
+
+        callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.1, global_step=100)
+
+        assert capsys.readouterr().err == ""
+
+    def test_warns_once_while_persistent(self, capsys):
+        """A sustained problem should not spam every eval cycle."""
+        callback, spec = self._make_callback()
+
+        callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.4, global_step=100)
+        capsys.readouterr()
+        callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.5, global_step=200)
+
+        assert capsys.readouterr().err == ""
+
+    def test_rearms_after_recovery(self, capsys):
+        """Dropping below the threshold re-arms the warning for a relapse."""
+        callback, spec = self._make_callback()
+
+        callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.4, global_step=100)
+        callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.05, global_step=200)
+        capsys.readouterr()
+        callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.4, global_step=300)
+
+        assert "40.0% of generations hit max_new_tokens" in capsys.readouterr().err
