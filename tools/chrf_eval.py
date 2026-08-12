@@ -7,6 +7,12 @@ prompt, and scores the generated text against the reference response with chrF
 (sacrebleu). The corpus chrF is printed to stdout; optionally, a per-example
 report with a metadata header is written to a file.
 
+Alongside chrF, this reports generation-length behavior: how many new tokens
+each generation actually produced, and what fraction ran to the
+``--max-tokens`` cap without ever emitting EOS. That non-halting rate is a
+cheap behavioral flag (see ``.claude/gothic/generation_eval.md``) and comes
+free with generation you are already paying for.
+
 This is the batch, non-interactive counterpart to ``tools/interactive_prompt.py``
 and reuses its model-loading helpers. Although chrF is usually applied to bare
 translation, it works for any task whose reference is a sentence-length string
@@ -18,8 +24,9 @@ Usage:
         --model models/got/some-run \
         --data data/gothic_instruct/translation_all-codices_both-scripts_both-directions_test_v1.1.0.jsonl
 
-    # Write the translations + per-example scores to a file:
-    python tools/chrf_eval.py --model ... --data ... --output outputs/chrf/run.txt
+    # Write the translations + per-example scores to a file, plus length stats:
+    python tools/chrf_eval.py --model ... --data ... \
+        --output outputs/chrf/run.txt --stats-json outputs/chrf/run.json
 
     # Sampling instead of greedy, larger batch, chrF++ (word bigrams):
     python tools/chrf_eval.py --model ... --data ... \
@@ -42,6 +49,7 @@ from pathlib import Path
 # trip an OpenMP duplicate-runtime abort.
 from interactive_prompt import load_model, resolve_device, resolve_dtype
 
+import torch
 from sacrebleu.metrics import CHRF
 from tqdm import tqdm
 
@@ -91,8 +99,34 @@ def truncate_at_stop(text: str, stop_strings: list[str]) -> str:
     return text[:cut]
 
 
+def count_new_tokens(row_ids, eos_token_id: int) -> tuple[int, bool]:
+    """Measure how many tokens a single generation actually produced.
+
+    ``generate`` right-pads every finished sequence out to the length of the
+    longest one in the batch, so the raw row length overstates a short
+    generation. The true length is the number of tokens up to and including the
+    first EOS; if no EOS is present the model never halted and was cut off by
+    ``max_new_tokens``.
+
+    Args:
+        row_ids: 1-D tensor of the newly generated token ids for one example
+            (the prompt already sliced off).
+        eos_token_id: The EOS id that was passed to ``generate``.
+
+    Returns:
+        Tuple of (number of tokens generated, whether the generation hit the
+        ``max_new_tokens`` cap without emitting EOS).
+    """
+    eos_positions = (row_ids == eos_token_id).nonzero()
+    if eos_positions.numel() == 0:
+        return int(row_ids.shape[0]), True
+    first_eos_index = int(eos_positions[0].item())
+    return first_eos_index + 1, False
+
+
 def generate_responses(
-    generator,
+    model,
+    tokenizer,
     prompts: list[str],
     max_new_tokens: int,
     do_sample: bool,
@@ -102,15 +136,24 @@ def generate_responses(
     no_repeat_ngram_size: int,
     batch_size: int,
     stop_strings: list[str],
-) -> list[str]:
+) -> tuple[list[str], list[int], list[bool]]:
     """Generate a continuation for each prompt, batched.
 
-    Returns the newly generated text only (the prompt is stripped by the
-    pipeline via ``return_full_text=False``), stripped of surrounding whitespace
-    and truncated at any stop string.
+    Drives ``model.generate`` directly rather than going through the
+    ``text-generation`` pipeline, so the raw generated token ids are available:
+    the pipeline only hands back decoded text, which cannot distinguish a model
+    that halted on EOS from one that rambled to ``max_new_tokens`` and was cut
+    off. This mirrors ``src/eval_utils.generate_greedy_batched``, the
+    training-loop counterpart, which slices the prompt off by token index for
+    the same reason.
+
+    Returns the newly generated text only, stripped of surrounding whitespace
+    and truncated at any stop string, alongside per-example token counts
+    measured *before* stop-string truncation.
 
     Args:
-        generator: A HuggingFace text-generation pipeline.
+        model: A causal-LM model.
+        tokenizer: The matching tokenizer, already set to left padding.
         prompts: Prompts to continue.
         max_new_tokens: Maximum number of new tokens per generation.
         do_sample: Whether to sample (True) or decode greedily (False).
@@ -122,17 +165,22 @@ def generate_responses(
         stop_strings: Substrings at which to truncate each generated response.
 
     Returns:
-        List of generated response strings, parallel to prompts.
+        Tuple of (responses, new-token counts, hit-cap flags), all parallel to
+        prompts.
     """
+    device = next(model.parameters()).device
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id
+
     generate_kwargs = dict(
         max_new_tokens=max_new_tokens,
         do_sample=do_sample,
-        return_full_text=False,
         # Pass EOS/PAD explicitly from the tokenizer so a stale generation_config
         # (e.g. a base-model EOS id surviving a vocab swap) cannot silently
         # prevent the model from halting. Mirrors interactive_prompt.py.
-        eos_token_id=generator.tokenizer.eos_token_id,
-        pad_token_id=generator.tokenizer.eos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+        pad_token_id=pad_token_id,
     )
     if do_sample:
         generate_kwargs['temperature'] = temperature
@@ -143,15 +191,64 @@ def generate_responses(
         generate_kwargs['no_repeat_ngram_size'] = no_repeat_ngram_size
 
     responses = []
+    new_token_counts = []
+    hit_cap_flags = []
     for start in tqdm(range(0, len(prompts), batch_size), desc="Generating", unit="batch"):
         batch = prompts[start:start + batch_size]
-        outputs = generator(batch, batch_size=len(batch), **generate_kwargs)
-        # For a list input the pipeline returns a list (per prompt) of lists
-        # (per returned sequence) of dicts; we requested one sequence each.
-        for output in outputs:
-            generated = output[0]['generated_text'] if isinstance(output, list) else output['generated_text']
-            responses.append(truncate_at_stop(generated.strip(), stop_strings))
-    return responses
+        encoded = tokenizer(batch, return_tensors='pt', padding=True).to(device)
+
+        # Some tokenizers emit token_type_ids, which decoder-only models like
+        # XGLM do not accept; generate() rejects unused model kwargs, so drop it.
+        encoded.pop('token_type_ids', None)
+
+        with torch.no_grad():
+            generated = model.generate(**encoded, **generate_kwargs)
+
+        prompt_length = encoded['input_ids'].shape[1]
+        new_tokens = generated[:, prompt_length:]
+        decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+        for row_index, text in enumerate(decoded):
+            token_count, hit_cap = count_new_tokens(new_tokens[row_index], tokenizer.eos_token_id)
+            new_token_counts.append(token_count)
+            hit_cap_flags.append(hit_cap)
+            responses.append(truncate_at_stop(text.strip(), stop_strings))
+    return responses, new_token_counts, hit_cap_flags
+
+
+def summarize_lengths(
+    new_token_counts: list[int],
+    hit_cap_flags: list[bool],
+    max_new_tokens: int,
+) -> dict:
+    """Summarize how long generations ran and how often they never halted.
+
+    Args:
+        new_token_counts: Per-example counts of newly generated tokens.
+        hit_cap_flags: Per-example flags for hitting max_new_tokens without EOS.
+        max_new_tokens: The cap that was in force.
+
+    Returns:
+        Dict of summary statistics, suitable for JSON serialization.
+    """
+    num_examples = len(new_token_counts)
+    num_hit_cap = sum(hit_cap_flags)
+    sorted_counts = sorted(new_token_counts)
+    median_index = num_examples // 2
+    if num_examples % 2 == 1:
+        median = float(sorted_counts[median_index])
+    else:
+        median = (sorted_counts[median_index - 1] + sorted_counts[median_index]) / 2
+
+    return {
+        'num_examples': num_examples,
+        'max_new_tokens': max_new_tokens,
+        'num_hit_cap': num_hit_cap,
+        'frac_hit_cap': num_hit_cap / num_examples,
+        'mean_new_tokens': sum(new_token_counts) / num_examples,
+        'median_new_tokens': median,
+        'min_new_tokens': sorted_counts[0],
+        'max_observed_new_tokens': sorted_counts[-1],
+    }
 
 
 def write_report(
@@ -165,6 +262,9 @@ def write_report(
     references: list[str],
     hypotheses: list[str],
     sentence_scores: list[float],
+    new_token_counts: list[int],
+    hit_cap_flags: list[bool],
+    length_summary: dict,
 ) -> None:
     """Write a per-example chrF report with a metadata header."""
     decoding = "greedy" if not args.sample else (
@@ -185,6 +285,12 @@ def write_report(
         f"# stop_strings: {args.stop!r}",
         f"# chrF: {corpus_result.format()}",
         f"# signature: {signature}",
+        f"# hit_max_new_tokens: {length_summary['num_hit_cap']}/{length_summary['num_examples']}"
+        f" ({length_summary['frac_hit_cap']:.1%})",
+        f"# new_tokens: mean={length_summary['mean_new_tokens']:.1f}"
+        f" median={length_summary['median_new_tokens']:.1f}"
+        f" min={length_summary['min_new_tokens']}"
+        f" max={length_summary['max_observed_new_tokens']}",
         "#" + "=" * 70,
         "",
     ]
@@ -193,10 +299,12 @@ def write_report(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('w', encoding='utf-8') as handle:
         handle.write("\n".join(header_lines))
-        for index, (prompt, reference, hypothesis, score) in enumerate(
-            zip(prompts, references, hypotheses, sentence_scores), start=1
+        for index, (prompt, reference, hypothesis, score, token_count, hit_cap) in enumerate(
+            zip(prompts, references, hypotheses, sentence_scores, new_token_counts, hit_cap_flags),
+            start=1,
         ):
-            handle.write(f"[{index}] chrF={score:.2f}\n")
+            cap_marker = " HIT-CAP" if hit_cap else ""
+            handle.write(f"[{index}] chrF={score:.2f} new_tokens={token_count}{cap_marker}\n")
             handle.write(f"PROMPT: {prompt}\n")
             handle.write(f"REF:    {reference.strip()}\n")
             handle.write(f"HYP:    {hypothesis}\n")
@@ -213,6 +321,10 @@ def main():
     parser.add_argument(
         '--output', type=str, default=None,
         help='Optional path to write a per-example report (with metadata header)'
+    )
+    parser.add_argument(
+        '--stats-json', type=str, default=None,
+        help='Optional path to write generation-length statistics as machine-readable JSON'
     )
     parser.add_argument(
         '--max-examples', type=int, default=None,
@@ -263,8 +375,9 @@ def main():
     if generator.tokenizer.pad_token_id is None:
         generator.tokenizer.pad_token = generator.tokenizer.eos_token
 
-    hypotheses = generate_responses(
-        generator=generator,
+    hypotheses, new_token_counts, hit_cap_flags = generate_responses(
+        model=generator.model,
+        tokenizer=generator.tokenizer,
         prompts=prompts,
         max_new_tokens=args.max_tokens,
         do_sample=args.sample,
@@ -286,8 +399,35 @@ def main():
         for hypothesis, reference in zip(hypotheses, references_stripped)
     ]
 
+    length_summary = summarize_lengths(new_token_counts, hit_cap_flags, args.max_tokens)
+
     print(f"\ncorpus {corpus_result.format()}")
     print(f"signature: {signature}")
+    print(
+        f"hit max_new_tokens ({args.max_tokens}): "
+        f"{length_summary['num_hit_cap']}/{length_summary['num_examples']} "
+        f"({length_summary['frac_hit_cap']:.1%})"
+    )
+    print(
+        f"new tokens: mean={length_summary['mean_new_tokens']:.1f} "
+        f"median={length_summary['median_new_tokens']:.1f} "
+        f"min={length_summary['min_new_tokens']} "
+        f"max={length_summary['max_observed_new_tokens']}"
+    )
+
+    if args.stats_json:
+        stats = dict(length_summary)
+        stats['model'] = args.model
+        stats['data'] = args.data
+        stats['chrf'] = corpus_result.score
+        stats['chrf_signature'] = signature
+        stats['new_token_counts'] = new_token_counts
+        stats['hit_cap_flags'] = hit_cap_flags
+        stats_path = Path(args.stats_json)
+        stats_path.parent.mkdir(parents=True, exist_ok=True)
+        with stats_path.open('w', encoding='utf-8') as handle:
+            json.dump(stats, handle, indent=2)
+        print(f"Wrote generation stats to {args.stats_json}", file=sys.stderr)
 
     if args.output:
         write_report(
@@ -301,6 +441,9 @@ def main():
             references=references,
             hypotheses=hypotheses,
             sentence_scores=sentence_scores,
+            new_token_counts=new_token_counts,
+            hit_cap_flags=hit_cap_flags,
+            length_summary=length_summary,
         )
 
 
