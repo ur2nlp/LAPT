@@ -1,0 +1,107 @@
+seed: 1
+hf_model: Qwen/Qwen3-0.6B-Base
+dataset:
+  type: multinomial
+  language: old_germanic
+  cache_dir: data/old_germanic
+  dev_size: 0.1
+  sources:
+  - type: plaintext
+    id: got
+    dev_size: -1
+    upsampling_factor: 5.0
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_train.txt
+  - type: plaintext
+    id: got-translit
+    dev_size: -1
+    upsampling_factor: 2.5
+    path: data/gothic_prepared/transliteration_all-codices_both-directions_delimited_train.txt
+  - type: concat
+    id: non
+    upsampling_factor: 15.0
+    sources:
+    - type: plaintext
+      path: data/sagas/sagas_clean.txt
+    - type: plaintext
+      path: data/icecorpus-texts/icepahc_12th-18th_clean.txt
+  - type: plaintext
+    id: got-eng
+    dev_size: -1
+    upsampling_factor: 5.0
+    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_delimited_train.txt
+  - type: huggingface
+    id: eng
+    name: allenai/c4
+    config: en
+    split: train
+    max_samples: 5020000
+    min_words_per_line: 8
+    oversampling_factor: 8
+    dev_size: 20000
+  alpha: 0.5
+  total_samples: 9000000
+output_dir: models
+model_name: null
+init_model_id: qwen3-0.6b
+resume_from_checkpoint: null
+preempt_resume: true
+training:
+  name: l40_optimized
+  max_length: 512
+  num_train_epochs: 1.0
+  max_steps: 100000
+  train_batch_size: 15
+  gradient_accumulation_steps: 4
+  gradient_checkpointing: false
+  learning_rate: 1.0e-05
+  lr_scheduler_type: linear
+  warmup_ratio: 0.005
+  max_grad_norm: 4.0
+  bf16: true
+  optim: adamw_torch_fused
+  dataloader_num_workers: 4
+  torch_compile: false
+  dropout: 0.1
+  attention_dropout: 0.25
+  activation_dropout: 0.0
+  weight_decay: 0.01
+  loss_type: token_mean
+  per_example_loss_floor: 1
+  logging_steps: 100
+  eval_strategy: steps
+  metric_for_best_model: got_holdout_loss
+  eval_steps: 1000
+  eval_batch_size: 45
+  compute_ttr: true
+  save_steps: 1000
+  save_total_limit: 2
+  early_stopping_patience: 10
+  early_stopping_delay_ratio: 0.0
+  freeze_main_model: false
+  model_freeze_prefix: model.layer
+  unfreeze_step_ratio: 0.05
+  correct_pruned_gradients: false
+focus:
+  enabled: true
+  tokenizer_path: null
+  vocab_size: 66034
+  num_samples: 5000000
+  inherit_additional_special_tokens: true
+  character_coverage: 0.999
+  tokenizer_algorithm: null
+  fasttext_model_min_count: 1
+  use_seed_vocabulary: false
+  reuse_embeddings: null
+external_eval:
+  external_eval_sets:
+  - name: got_holdout
+    path: data/gothic_prepared/monolingual_all-codices_both-scripts_test.txt
+    format: plaintext
+  - name: got-translit_holdout
+    path: data/gothic_prepared/transliteration_all-codices_both-directions_delimited_test.txt
+  - name: got-eng_holdout
+    path: data/gothic_prepared/translation_all-codices_both-scripts_both-directions_delimited_test.txt
+    format: plaintext
+chrf_eval:
+  chrf_eval_sets: null
+experiment_id: v1q
