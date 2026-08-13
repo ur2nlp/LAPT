@@ -334,7 +334,7 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         untokenized_path = _load_concat_dataset(cache_dir, sources, parent_id)
     elif dataset_type == 'multinomial':
         sources = dataset_config.sources
-        alpha = dataset_config.alpha
+        alpha = dataset_config.get('alpha')
         total_samples = dataset_config.total_samples
         untokenized_path = _load_multinomial_dataset(
             cache_dir, sources, alpha, total_samples, dev_size,
@@ -1012,7 +1012,7 @@ def _load_multinomial_dataset(
         raise ValueError("Cannot sample from datasets: sources list is empty")
     if total_samples <= 0:
         raise ValueError(f"total_samples must be positive, got {total_samples}")
-    if alpha <= 0:
+    if alpha is not None and alpha <= 0:
         raise ValueError(f"alpha must be positive, got {alpha}")
     if dev_size is None:
         raise ValueError("dev_size must be provided for multinomial sampling")
@@ -1148,7 +1148,7 @@ def _load_multinomial_dataset(
 def _compute_sampling_probs(
     sources: list[dict],
     train_sizes: list[int],
-    alpha: float,
+    alpha: float | None,
 ) -> list[float]:
     """
     Compute per-source sampling probabilities, respecting pinned sampling_prob values.
@@ -1157,10 +1157,15 @@ def _compute_sampling_probs(
     directly. The remaining probability budget is distributed among unpinned sources using
     alpha-based temperature scaling: p_i = (size_i)^alpha / Z, scaled to fill the budget.
 
+    Alpha may be None when it has nothing to do: when every source is pinned, or when
+    exactly one source is unpinned and therefore takes the whole remaining budget
+    regardless of the exponent. It is required whenever two or more sources are unpinned.
+
     Args:
         sources: List of source config dicts (may contain 'sampling_prob' field)
         train_sizes: Number of training examples per source (after dev split)
-        alpha: Temperature parameter for unpinned source reweighting
+        alpha: Temperature parameter for unpinned source reweighting. May be None only
+            if it cannot affect the result.
 
     Returns:
         List of sampling probabilities (one per source, sums to 1.0)
@@ -1206,6 +1211,24 @@ def _compute_sampling_probs(
     unpinned_sizes = [train_sizes[i] for i in unpinned_indices]
     if all(s == 0 for s in unpinned_sizes):
         raise ValueError("Cannot compute sampling probabilities: all unpinned sources are empty")
+
+    # a lone unpinned source takes the whole remaining budget: its weight normalizes
+    # to 1.0 for any exponent, so alpha is not needed to resolve the mixture
+    if len(unpinned_indices) == 1:
+        lone_probs = dict(pinned_probs)
+        lone_probs[unpinned_indices[0]] = remaining_budget
+        return [lone_probs[i] for i in range(num_sources)]
+
+    if alpha is None:
+        unpinned_ids = [
+            _get_source_id(DictConfig(sources[i]), fallback=f"source_{i}")
+            for i in unpinned_indices
+        ]
+        raise ValueError(
+            f"alpha is required when two or more sources are unpinned "
+            f"({', '.join(unpinned_ids)}): it sets how the remaining probability "
+            "budget is split between them"
+        )
 
     weights = [size ** alpha for size in unpinned_sizes]
     total_weight = sum(weights)
@@ -1751,7 +1774,7 @@ def load_tokenized_multinomial_dataset(
         raise ValueError("Cannot sample from datasets: sources list is empty")
     if total_samples <= 0:
         raise ValueError(f"total_samples must be positive, got {total_samples}")
-    if alpha <= 0:
+    if alpha is not None and alpha <= 0:
         raise ValueError(f"alpha must be positive, got {alpha}")
     if dev_size is None:
         raise ValueError("dev_size must be provided")

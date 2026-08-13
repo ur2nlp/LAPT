@@ -392,7 +392,7 @@ def lapt(args: DictConfig):
         tokenizer_id = os.path.basename(tokenized_path).replace("tokenized_", "", 1)
         dataset = load_tokenized_multinomial_dataset(
             sources=OmegaConf.to_container(args.dataset.sources, resolve=True),
-            alpha=args.dataset.alpha,
+            alpha=args.dataset.get('alpha'),
             total_samples=args.dataset.total_samples,
             dev_size=dev_size,
             base_cache_dir=args.dataset.cache_dir,

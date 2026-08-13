@@ -1512,6 +1512,45 @@ class TestComputeSamplingProbs:
         assert abs(probs_a0[0] - 0.25) < 0.01
         assert abs(probs_a0[1] - 0.25) < 0.01
 
+    def test_alpha_optional_when_all_sources_pinned(self):
+        """Alpha may be omitted when every source has a pinned probability."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 0.3},
+            {'id': 'b', 'sampling_prob': 0.7},
+        ]
+        train_sizes = [100, 10000]
+
+        probs = _compute_sampling_probs(sources, train_sizes, alpha=None)
+
+        assert probs == [0.3, 0.7]
+
+    def test_alpha_optional_with_single_unpinned_source(self):
+        """A lone unpinned source takes the residual budget regardless of alpha."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 0.3},
+            {'id': 'b', 'sampling_prob': 0.4},
+            {'id': 'filler'},
+        ]
+        train_sizes = [100, 200, 10000]
+
+        probs_none = _compute_sampling_probs(sources, train_sizes, alpha=None)
+        probs_half = _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+
+        assert abs(probs_none[2] - 0.3) < 1e-9
+        assert probs_none == probs_half
+
+    def test_missing_alpha_with_several_unpinned_raises_error(self):
+        """Alpha is required as soon as two or more sources are unpinned."""
+        sources = [
+            {'id': 'a', 'sampling_prob': 0.5},
+            {'id': 'unpinned1'},
+            {'id': 'unpinned2'},
+        ]
+        train_sizes = [100, 1000, 10000]
+
+        with pytest.raises(ValueError, match="alpha is required"):
+            _compute_sampling_probs(sources, train_sizes, alpha=None)
+
     def test_unpinned_empty_source_raises_error(self):
         """All unpinned sources being empty raises error."""
         sources = [

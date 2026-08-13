@@ -228,13 +228,14 @@ def multinomial_mix_slug(dataset_config: dict) -> str:
     transparently shared.
 
     Args:
-        dataset_config: Dict with at least 'alpha', 'total_samples', 'sources'.
-            Must correspond to a multinomial dataset.
+        dataset_config: Dict with at least 'total_samples' and 'sources'. Must
+            correspond to a multinomial dataset. 'alpha' is optional, since it is
+            omissible for mixes where it cannot affect the sampling probabilities.
 
     Returns:
-        Slug like "mix_a0.5_s5m_ab12cd34".
+        Slug like "mix_a0.5_s5m_ab12cd34", or "mix_s5m_ab12cd34" without alpha.
     """
-    alpha = dataset_config['alpha']
+    alpha = dataset_config.get('alpha')
     total_samples = dataset_config['total_samples']
 
     mix_keys = {
@@ -254,7 +255,11 @@ def multinomial_mix_slug(dataset_config: dict) -> str:
     }
     canonical = json.dumps(mix_keys, sort_keys=True, default=str)
     digest = hashlib.sha256(canonical.encode()).hexdigest()[:8]
-    return f"mix_a{alpha}_s{format_number(total_samples)}_{digest}"
+
+    # omit the alpha segment when the config has no alpha, rather than writing
+    # "aNone" into the directory name; slugs for configs that do set it are unchanged
+    alpha_part = f"a{alpha}_" if alpha is not None else ""
+    return f"mix_{alpha_part}s{format_number(total_samples)}_{digest}"
 
 
 def format_number(n: int) -> str:
@@ -597,7 +602,7 @@ class DatasetConfig(ArtifactConfig):
             config['sources'] = OmegaConf.to_container(args.dataset.sources, resolve=True)
         elif dataset_type == 'multinomial':
             config['sources'] = OmegaConf.to_container(args.dataset.sources, resolve=True)
-            config['alpha'] = args.dataset.alpha
+            config['alpha'] = args.dataset.get('alpha')
             config['total_samples'] = args.dataset.total_samples
             config['dev_size'] = resolve_dev_size(args)
 
