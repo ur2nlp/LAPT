@@ -4,7 +4,7 @@ sources:
   - type: instruction_jsonl
     id: got-translation
     dev_size: -1  # Using external holdout (test split)
-    sampling_prob: 0.08
+    sampling_prob: 0.092
     path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train_v1.1.0.jsonl
   - type: instruction_jsonl
     id: got-translation-cot
@@ -19,12 +19,12 @@ sources:
   - type: instruction_jsonl
     id: got-alignment
     dev_size: -1
-    sampling_prob: 0.229
+    sampling_prob: 0.171
     path: data/gothic_instruct/alignment_both-scripts_train_v2.1.0.jsonl
   - type: instruction_jsonl
     id: got-lexicon
     dev_size: -1
-    sampling_prob: 0.114
+    sampling_prob: 0.057
     path: data/gothic_instruct/dictionary-lookup_both-scripts_both-directions_train_v1.0.0.jsonl
   - type: instruction_hf
     id: eng-chat

@@ -4,29 +4,29 @@ sources:
   - type: instruction_jsonl
     id: got-translation
     dev_size: -1  # Using external holdout (test split)
-    sampling_prob: 0.078
+    sampling_prob: 0.084
     path: data/gothic_instruct/translation_all-codices_both-scripts_both-directions_train_v1.1.0.jsonl
   - type: instruction_jsonl
     id: got-translation-cot
     dev_size: -1  # Using external holdout (test split)
-    sampling_prob: 0.056
+    sampling_prob: 0.053
     path: data/gothic_instruct/translation-cot_both-scripts_both-directions_train_v2.2.0.jsonl
   - type: instruction_jsonl
     id: got-transliteration
     dev_size: -1  # Using external holdout (test split)
-    sampling_prob: 0.089
+    sampling_prob: 0.084
     path: data/gothic_instruct/transliteration_all-codices_both-directions_train_v1.1.0.jsonl
   - type: instruction_jsonl
     id: got-alignment
     dev_size: -1
-    sampling_prob: 0.222
+    sampling_prob: 0.158
     path: data/gothic_instruct/alignment_both-scripts_train_v2.1.0.jsonl
   - type: instruction_hf
     id: eng-chat
     name: HuggingFaceH4/no_robots
     split: train
     dev_size: -1
-    sampling_prob: 0.055
+    sampling_prob: 0.053
     # Collapse newline runs (plus surrounding whitespace) into a single space so
     # the chat data matches the single-line formatting of the Gothic tasks.
     substitutions:
@@ -35,12 +35,12 @@ sources:
   - type: instruction_jsonl
     id: eng-dolly-grounded
     dev_size: -1
-    sampling_prob: 0.028
+    sampling_prob: 0.026
     path: data/english_instruct/dolly-grounded_closed-qa-extract-summ_train.jsonl
   - type: instruction_jsonl
     id: eng-squad
     dev_size: -1
-    sampling_prob: 0.111
+    sampling_prob: 0.105
     path: data/english_instruct/squad-v2_extractive-qa_train.jsonl
   - type: huggingface
     id: eng
