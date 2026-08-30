@@ -82,4 +82,21 @@ jobs:
           restore-keys: hf-${{ runner.os }}-
 
       - name: Run tests
-        run: pytest -q --durations=10
+        run: pytest -q --durations=10 --cov
+
+      # Deliberately no threshold. A coverage percentage is a target an LLM can
+      # satisfy without improving anything, and it moves for irrelevant reasons.
+      # What is worth seeing every run is the per-module map and which lines are
+      # unreached, so publish that to the run summary and never fail on it.
+      - name: Publish coverage map
+        if: always()
+        run: |
+          {
+            echo '## Coverage'
+            echo
+            echo 'Branch coverage, `src/` only. No threshold: read the map, not the total.'
+            echo
+            echo '```'
+            coverage report || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
