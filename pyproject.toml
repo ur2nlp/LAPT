@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -84,6 +84,25 @@ ignore = [
     "B904",  # raise-without-from-inside-except
     "UP035", # deprecated-import
 ]
+
+[tool.ruff.lint.isort]
+# Classify explicitly rather than letting ruff infer first-party packages from
+# directories on disk. The repo has a gitignored local `tokenizers/` output
+# directory, so inference called `tokenizers` first-party on a developer machine
+# and third-party in CI (where it is never checked out) -- the same file sorted
+# two different ways, and `ruff check` disagreed with itself between a working
+# tree and a clean checkout. Naming both sides makes the result reproducible.
+known-first-party = [
+    "artifact_configs",
+    "custom_trainer",
+    "dataset_utils",
+    "eval_utils",
+    "gradient_correction",
+    "model_utils",
+    "tokenizer_utils",
+    "tools",
+]
+known-third-party = ["tokenizers"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests re-import module-level names inside test bodies to document what is
