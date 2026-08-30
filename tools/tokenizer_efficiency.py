@@ -57,10 +57,9 @@ Usage:
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
-from typing import List, Dict, Tuple
-import random
 
 from transformers import AutoTokenizer
 
@@ -69,7 +68,7 @@ def load_text_data(
     file_path: str,
     format: str = "plaintext",
     max_samples: int = None
-) -> List[str]:
+) -> list[str]:
     """
     Load text data from file.
 
@@ -83,7 +82,7 @@ def load_text_data(
     """
     samples = []
 
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         if format == 'plaintext':
             samples = [line.strip() for line in f if line.strip()]
         elif format == 'jsonl':
@@ -103,8 +102,8 @@ def load_text_data(
 
 def compute_efficiency_metrics(
     tokenizer,
-    samples: List[str]
-) -> Dict[str, float]:
+    samples: list[str]
+) -> dict[str, float]:
     """
     Compute tokenization efficiency metrics.
 
@@ -183,7 +182,7 @@ def format_tokenizer_name(tokenizer_path: str) -> str:
     return path.name
 
 
-def print_results_table(results: List[Tuple[str, str, Dict[str, float]]]):
+def print_results_table(results: list[tuple[str, str, dict[str, float]]]):
     """
     Print results as formatted table.
 
@@ -234,7 +233,7 @@ def print_results_table(results: List[Tuple[str, str, Dict[str, float]]]):
                   f"{metrics['total_words']:>12,}")
 
 
-def write_results_csv(results: List[Tuple[str, str, Dict[str, float]]], output_path: str):
+def write_results_csv(results: list[tuple[str, str, dict[str, float]]], output_path: str):
     """
     Write results to CSV file.
 

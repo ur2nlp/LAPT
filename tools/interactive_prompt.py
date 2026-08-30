@@ -50,10 +50,11 @@ Commands (during interactive session):
 """
 
 import argparse
-from dataclasses import dataclass, field
 import sys
-import torch
+from dataclasses import dataclass
 from pathlib import Path
+
+import torch
 from transformers import pipeline
 
 
@@ -150,7 +151,7 @@ def apply_template(template: str, user_input: str) -> str:
 
 def show_settings(session: Session):
     """Display current generation settings."""
-    print(f"\nCurrent generation settings:")
+    print("\nCurrent generation settings:")
     print(f"  Model: {session.model_path}")
     print(f"  Device: {session.device_name}")
     print(f"  Dtype: {session.model_dtype}")
@@ -159,7 +160,7 @@ def show_settings(session: Session):
         print(f"  Template: {session.template!r}")
         print(f"    (from {session.template_path})")
     else:
-        print(f"  Template: off")
+        print("  Template: off")
     print(f"  Temperature: {session.temperature}")
     print(f"  Max new tokens: {session.max_tokens}")
     print(f"  Top-p: {session.top_p}")

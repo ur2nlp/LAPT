@@ -3,11 +3,14 @@
 import pytest
 from omegaconf import OmegaConf
 
-from src.model_utils import (
-    format_number, get_model_shortname, get_tokenized_path,
-    is_local_model_path, get_init_model_identifier,
-)
 from src.__main__ import _validate_init_model_id
+from src.model_utils import (
+    format_number,
+    get_init_model_identifier,
+    get_model_shortname,
+    get_tokenized_path,
+    is_local_model_path,
+)
 
 
 class TestFormatNumber:

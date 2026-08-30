@@ -12,7 +12,6 @@ import json
 import os
 import random
 import sys
-from typing import Optional
 
 import sentencepiece as spm
 import torch
@@ -49,7 +48,7 @@ def extract_base_vocabulary_frequencies(
     if os.path.exists(output_file):
         print(f"Base vocabulary already exists at {output_file}, loading it", file=sys.stderr)
         vocab = {}
-        with open(output_file, 'r', encoding='utf-8') as f:
+        with open(output_file, encoding='utf-8') as f:
             for line in f:
                 parts = line.rstrip('\n').split('\t')
                 if len(parts) == 2:
@@ -67,7 +66,7 @@ def extract_base_vocabulary_frequencies(
     from collections import Counter
     token_counts = Counter()
 
-    with open(text_file_path, 'r', encoding='utf-8') as f:
+    with open(text_file_path, encoding='utf-8') as f:
         for line in f:
             text = line.strip()
             if not text:
@@ -106,7 +105,7 @@ def extract_base_vocabulary_frequencies(
 
     print(f"  After filtering: {len(filtered_vocab)} tokens", file=sys.stderr)
     if filtered_reasons:
-        print(f"  Filtered out:", file=sys.stderr)
+        print("  Filtered out:", file=sys.stderr)
         for reason, count in filtered_reasons.most_common():
             print(f"    {reason}: {count}", file=sys.stderr)
 
@@ -420,7 +419,7 @@ def train_new_tokenizer(
     text_file_path = jsonl_path.replace('.jsonl', '_spm.txt')
     if not os.path.exists(text_file_path):
         print(f"Creating SentencePiece training file: {text_file_path}", file=sys.stderr)
-        with open(jsonl_path, 'r', encoding='utf-8') as jsonl_file:
+        with open(jsonl_path, encoding='utf-8') as jsonl_file:
             with open(text_file_path, 'w', encoding='utf-8') as text_file:
                 for line in jsonl_file:
                     data = json.loads(line)
@@ -455,7 +454,7 @@ def train_new_tokenizer(
             print(f"  Saving to: {seed_output_path}", file=sys.stderr)
             os.makedirs(seed_output_path, exist_ok=True)
 
-            seed_sp_model = _train_sentencepiece_model(
+            _train_sentencepiece_model(
                 text_file_path=text_file_path,
                 model_type=model_type,
                 vocab_size=seed_vocab_size,
@@ -469,7 +468,7 @@ def train_new_tokenizer(
 
         # Step 2: Extract raw base vocabulary counts from corpus
         # Cache in seed tokenizer dir (shared across lambda values)
-        print(f"Extracting base tokenizer vocabulary", file=sys.stderr)
+        print("Extracting base tokenizer vocabulary", file=sys.stderr)
         base_vocab_file = os.path.join(seed_output_path, 'base_vocab_counts.txt')
         base_vocab = extract_base_vocabulary_frequencies(
             text_file_path=text_file_path,
@@ -485,7 +484,7 @@ def train_new_tokenizer(
 
         # Step 3: Extract target vocabulary from seed tokenizer, normalized to target mass scale
         # Both vocabularies are scaled to the same target_mass so they're directly comparable
-        print(f"Extracting target vocabulary from seed tokenizer", file=sys.stderr)
+        print("Extracting target vocabulary from seed tokenizer", file=sys.stderr)
         target_vocab = extract_target_seed_vocab(
             spm_model_path=seed_model_path,
             target_mass=target_mass,
@@ -659,8 +658,8 @@ def _train_sentencepiece_model(
     special_tokens_config: dict,
     output_path: str,
     character_coverage: float = 1.0,
-    seed_sentencepieces_file: Optional[str] = None,
-    seed_sentencepiece_size: Optional[int] = None
+    seed_sentencepieces_file: str | None = None,
+    seed_sentencepiece_size: int | None = None
 ) -> spm.SentencePieceProcessor:
     """
     Train a SentencePiece model and return the loaded processor.
@@ -751,7 +750,7 @@ def _detect_tokenizer_algorithm(tokenizer: PreTrainedTokenizerFast) -> str:
             f"Unknown tokenizer algorithm: {type(backend_model)}. "
             "Expected BPE or Unigram."
         )
-    
+
 
 def _apply_spm_pipeline(backend_tokenizer) -> None:
     """
@@ -767,8 +766,9 @@ def _apply_spm_pipeline(backend_tokenizer) -> None:
     Args:
         backend_tokenizer: A tokenizers.Tokenizer to configure in place
     """
-    from tokenizers import normalizers, decoders
     from tokenizers.pre_tokenizers import Metaspace
+
+    from tokenizers import decoders, normalizers
 
     backend_tokenizer.normalizer = normalizers.Sequence(normalizers=[])  # type: ignore
     backend_tokenizer.pre_tokenizer = Metaspace(replacement="▁", prepend_scheme="always")
@@ -790,8 +790,9 @@ def _create_unigram_tokenizer(vocab_scores: list[tuple[str, float]], unk_id: int
     Returns:
         Configured Tokenizer object ready for use with PreTrainedTokenizerFast
     """
-    from tokenizers import Tokenizer
     from tokenizers.models import Unigram
+
+    from tokenizers import Tokenizer
 
     # Initialize Unigram model with vocabulary and scores from SentencePiece
     # byte_fallback=False: use <unk> for unknown chars (matches SentencePiece training)
@@ -830,9 +831,10 @@ def _create_bpe_tokenizer(
     Returns:
         Configured Tokenizer object ready for use with PreTrainedTokenizerFast
     """
-    from tokenizers import Tokenizer
     from tokenizers.models import BPE
     from transformers.convert_slow_tokenizer import SentencePieceExtractor
+
+    from tokenizers import Tokenizer
 
     # Reconstruct merges from piece scores, exactly as transformers' SpmConverter does.
     _, merges = SentencePieceExtractor(spm_model_path).extract(vocab_scores)
@@ -964,7 +966,7 @@ DEFAULT_UNK_PIECE = '<unk>'
 def _assign_special_token_ids(
     tokenizer: PreTrainedTokenizerBase,
     role_pieces: dict[str, str],
-    vocab_size: Optional[int],
+    vocab_size: int | None,
 ) -> dict[str, int]:
     """
     Choose SentencePiece ids for the special-token roles that have a piece.
@@ -1045,7 +1047,7 @@ def _resolve_hf_special_tokens(
     tokenizer: PreTrainedTokenizerBase,
     special_tokens_config: dict,
     vocab: set[str],
-) -> dict[str, Optional[str]]:
+) -> dict[str, str | None]:
     """
     Choose the special-token strings to register on the new ``PreTrainedTokenizerFast``.
 
@@ -1077,7 +1079,7 @@ def _resolve_hf_special_tokens(
 def _extract_special_tokens(
     tokenizer: PreTrainedTokenizerBase,
     inherit_additional: bool = True,
-    vocab_size: Optional[int] = None,
+    vocab_size: int | None = None,
 ) -> dict:
     """
     Extract special token configuration from a tokenizer for SentencePiece training.
@@ -1168,7 +1170,7 @@ def _sidecar_paths(cache_dir: str, embedding_hash: str) -> tuple[str, str, str]:
     )
 
 
-def _enumerate_cached_embeddings(cache_dir: str) -> list[tuple[str, Optional[str]]]:
+def _enumerate_cached_embeddings(cache_dir: str) -> list[tuple[str, str | None]]:
     """
     List all cached FOCUS embedding sets under cache_dir.
 
@@ -1176,7 +1178,7 @@ def _enumerate_cached_embeddings(cache_dir: str) -> list[tuple[str, Optional[str
     both the new focus_embs/<hash>.input.pt layout and the legacy unhashed
     files at the tokenizer-dir root.
     """
-    found: list[tuple[str, Optional[str]]] = []
+    found: list[tuple[str, str | None]] = []
 
     sub = os.path.join(cache_dir, FOCUS_EMBS_SUBDIR)
     if os.path.isdir(sub):
@@ -1195,10 +1197,10 @@ def _enumerate_cached_embeddings(cache_dir: str) -> list[tuple[str, Optional[str
 
 
 def resolve_cached_embedding_paths(
-    cache_dir: Optional[str],
-    embedding_hash: Optional[str],
-    reuse_policy: Optional[str],
-) -> Optional[tuple[str, Optional[str]]]:
+    cache_dir: str | None,
+    embedding_hash: str | None,
+    reuse_policy: str | None,
+) -> tuple[str, str | None] | None:
     """
     Resolve which cached FOCUS embedding sidecar to load, if any.
 
@@ -1256,7 +1258,7 @@ def _copy_embeddings_directly(
     source_tokenizer: PreTrainedTokenizerBase,
     target_token_strings: list[str],
     has_separate_output: bool,
-) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """
     Build new embedding matrices by copying source embeddings for each target token.
 
@@ -1320,13 +1322,13 @@ def apply_focus_initialization(
     source_model,
     source_tokenizer: PreTrainedTokenizerBase,
     target_tokenizer: PreTrainedTokenizerBase,
-    training_data_path: Optional[str],
+    training_data_path: str | None,
     fasttext_model_min_count: int = 4,
-    cache_dir: Optional[str] = None,
-    embedding_hash: Optional[str] = None,
-    embedding_meta: Optional[dict] = None,
-    reuse_policy: Optional[str] = None,
-) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    cache_dir: str | None = None,
+    embedding_hash: str | None = None,
+    embedding_meta: dict | None = None,
+    reuse_policy: str | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """
     Apply FOCUS to generate new input embeddings and optionally output embeddings.
 

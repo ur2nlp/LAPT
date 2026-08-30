@@ -96,7 +96,7 @@ class ArtifactConfig:
         if not os.path.exists(config_path):
             return True
 
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             cached_config = yaml.safe_load(f)
 
         if cached_config is None:
@@ -317,17 +317,17 @@ class TokenizerConfig(ArtifactConfig):
 
     # Fresh-tokenizer algorithm: None inherits the base tokenizer's algorithm;
     # 'unigram' or 'bpe' overrides it when training a fresh tokenizer.
-    tokenizer_algorithm: Optional[str] = None
+    tokenizer_algorithm: str | None = None
 
     # Model identifier (optional override for local model paths)
-    init_model_id: Optional[str] = None
+    init_model_id: str | None = None
 
     # Pre-built tokenizer path (bypasses training, e.g. PTEx tokenizer)
-    tokenizer_path: Optional[str] = None
+    tokenizer_path: str | None = None
 
     # Data source (one of these will be set)
-    train_dataset_cache: Optional[str] = None
-    focus_dataset: Optional[dict] = field(default=None)
+    train_dataset_cache: str | None = None
+    focus_dataset: dict | None = field(default=None)
 
     @classmethod
     def from_args(cls, args: DictConfig) -> Optional['TokenizerConfig']:
@@ -524,7 +524,7 @@ class TokenizerConfig(ArtifactConfig):
         """
         if not os.path.exists(config_path):
             return True
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             cached = yaml.safe_load(f) or {}
         for k in self._embedding_only_fields:
             cached.pop(k, None)
@@ -690,9 +690,9 @@ class TokenizedDatasetConfig(ArtifactConfig):
         dev_size: float,
         dataset_config: DatasetConfig,
         tokenizer_id: str,
-        tokenizer_config: Optional[TokenizerConfig] = None,
-        hf_model: Optional[str] = None,
-        init_model_id: Optional[str] = None,
+        tokenizer_config: TokenizerConfig | None = None,
+        hf_model: str | None = None,
+        init_model_id: str | None = None,
     ):
         self.max_length = max_length
         self.dev_size = dev_size

@@ -1,5 +1,9 @@
 # LAPT: Language-Adaptive Pretraining Framework
 
+[![CI](https://github.com/ur2nlp/LAPT/actions/workflows/ci.yml/badge.svg)](https://github.com/ur2nlp/LAPT/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 A modular framework for continued pre-training of multilingual language models with flexible data loading and optional vocabulary specialization via [FOCUS](https://github.com/konstantinjdobler/focus).
 
 ## Features
@@ -25,7 +29,7 @@ conda activate lapt
 Train on OSCAR corpus for a single language:
 
 ```bash
-python -m src dataset.type=oscar dataset.language=hy
+python src/__main__.py dataset.type=oscar dataset.language=hy
 ```
 
 ### FOCUS Training
@@ -33,7 +37,7 @@ python -m src dataset.type=oscar dataset.language=hy
 Train with vocabulary specialization:
 
 ```bash
-python -m src focus.enabled=true focus.vocab_size=32768 focus.num_samples=1000000
+python src/__main__.py focus.enabled=true focus.vocab_size=32768 focus.num_samples=1000000
 ```
 
 ### Multinomial Sampling
@@ -56,7 +60,7 @@ cache_dir: data/uralic_mix
 ```
 
 ```bash
-python -m src dataset=multilingual
+python src/__main__.py dataset=multilingual
 ```
 
 ### Local Data
@@ -64,7 +68,7 @@ python -m src dataset=multilingual
 Train on your own plaintext files:
 
 ```bash
-python -m src dataset.type=plaintext dataset.path=/path/to/data.txt
+python src/__main__.py dataset.type=plaintext dataset.path=/path/to/data.txt
 ```
 
 ## Project Structure

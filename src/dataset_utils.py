@@ -20,8 +20,7 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, l
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
-from artifact_configs import _dict_diff, multinomial_mix_slug, SourceCacheTracking
-
+from artifact_configs import SourceCacheTracking, _dict_diff, multinomial_mix_slug
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
 
@@ -51,7 +50,7 @@ def _validate_source_cache(untokenized_path: str, current: dict) -> None:
         )
         return
 
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         cached = yaml.safe_load(f) or {}
 
     legacy_defaults = SourceCacheTracking.legacy_defaults(current.get('type'))
@@ -264,7 +263,7 @@ def _apply_substitutions(
             if getattr(feature, 'dtype', None) == 'string'
         ]
         substituted_splits[split_name] = split_dataset.map(
-            lambda examples: substitute_batch(examples, string_columns),
+            lambda examples, columns=string_columns: substitute_batch(examples, columns),
             batched=True,
         )
 
@@ -672,7 +671,7 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Plaintext file not found: {file_path}")
 
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         lines = [line.strip() for line in f if line.strip()]
 
     if not lines:
@@ -742,7 +741,7 @@ def _load_instruction_jsonl_file(file_path: str) -> tuple[list[str], list[str]]:
 
     prompts = []
     responses = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -1036,7 +1035,7 @@ def _load_multinomial_dataset(
         print("WARNING: dev_size=-1 skips dev split creation.", file=sys.stderr)
         print(
             "If using this dataset for model training (not FOCUS), this will cause dev-set "
-            "contamination as upsampled training data won't have a held-out dev set. Only use " 
+            "contamination as upsampled training data won't have a held-out dev set. Only use "
             "dev_size=-1 for datasets that don't need evaluation (e.g., FOCUS training), or ones "
             "that have an external dev set.",
             file=sys.stderr
@@ -1675,7 +1674,7 @@ def _validate_tokenized_source_cache(tokenized_path: str, current: dict) -> None
             file=sys.stderr,
         )
         return
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         cached = yaml.safe_load(f) or {}
     diffs = _dict_diff(cached, current)
     if not diffs:
@@ -2127,7 +2126,7 @@ def load_external_eval_set(
     # Load data based on format
     if file_format == 'plaintext':
         # Read lines from plaintext file
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             lines = [line.strip() for line in f if line.strip()]
         dataset = Dataset.from_dict({'text': lines})
         is_instruction = False
@@ -2135,7 +2134,7 @@ def load_external_eval_set(
     elif file_format == 'jsonl':
         # Load JSONL file
         data = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 if line.strip():
                     obj = json.loads(line)

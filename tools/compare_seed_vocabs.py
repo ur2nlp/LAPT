@@ -1,12 +1,11 @@
 """Compare two seed vocabulary files to understand differences in tokens, counts, and ranks."""
 
 import argparse
-import sys
 
 
 def load_seed_vocab(path: str) -> dict[str, float]:
     vocab = {}
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         for line in f:
             parts = line.rstrip('\n').split('\t')
             if len(parts) == 2:

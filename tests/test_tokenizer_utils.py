@@ -637,12 +637,11 @@ from types import SimpleNamespace
 import torch
 
 from tokenizer_utils import (
-    apply_focus_initialization,
-    resolve_cached_embedding_paths,
-    _sidecar_paths,
-    FOCUS_EMBS_SUBDIR,
     LEGACY_INPUT_NAME,
     LEGACY_OUTPUT_NAME,
+    _sidecar_paths,
+    apply_focus_initialization,
+    resolve_cached_embedding_paths,
 )
 
 

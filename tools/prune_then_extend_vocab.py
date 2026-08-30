@@ -123,7 +123,7 @@ def count_base_token_frequencies(
         cache_file = os.path.join(cache_dir, 'base_token_counts.json')
         if os.path.isfile(cache_file):
             print(f"Loading cached base-language token counts: {cache_file}", file=sys.stderr)
-            with open(cache_file, 'r') as f:
+            with open(cache_file) as f:
                 cached = json.load(f)
             # JSON keys are strings, convert back to int
             token_counts = {int(k): v for k, v in cached.items()}
@@ -135,7 +135,7 @@ def count_base_token_frequencies(
     print(f"Tokenizing base-language text: {text_path}", file=sys.stderr)
     token_counts_counter: Counter[int] = Counter()
 
-    with open(text_path, 'r', encoding='utf-8') as f:
+    with open(text_path, encoding='utf-8') as f:
         for line in f:
             text = line.strip()
             if not text:
@@ -194,7 +194,7 @@ def select_base_tokens_by_coverage(
     )
 
     # Show coverage at a few thresholds for context
-    print(f"\n  Coverage table:", file=sys.stderr)
+    print("\n  Coverage table:", file=sys.stderr)
     cumulative = 0
     thresholds = [0.90, 0.95, 0.99, 0.995, 0.999, 1.0]
     threshold_idx = 0
@@ -240,7 +240,7 @@ def concatenate_novel_texts(
     with open(concat_path, 'w', encoding='utf-8') as out:
         for path in text_paths:
             line_count = 0
-            with open(path, 'r', encoding='utf-8') as inp:
+            with open(path, encoding='utf-8') as inp:
                 for line in inp:
                     out.write(line)
                     line_count += 1
@@ -339,10 +339,10 @@ def estimate_corpus_scores(
         Dict mapping token ID to log-probability score
     """
     token_counts: Counter[int] = Counter()
-    print(f"\nEstimating corpus-based scores:", file=sys.stderr)
+    print("\nEstimating corpus-based scores:", file=sys.stderr)
     print(f"  Corpus: {corpus_path}", file=sys.stderr)
 
-    with open(corpus_path, 'r', encoding='utf-8') as f:
+    with open(corpus_path, encoding='utf-8') as f:
         for line in f:
             text = line.strip()
             if not text:
@@ -433,7 +433,7 @@ def build_combined_tokenizer(
     combined = special_entries + base_entries + novel_entries
 
     # Report
-    print(f"\nCombined vocabulary composition:", file=sys.stderr)
+    print("\nCombined vocabulary composition:", file=sys.stderr)
     print(f"  Special tokens: {len(special_entries)}", file=sys.stderr)
     print(f"  Base tokens (retained): {len(base_entries)}", file=sys.stderr)
     print(f"  Novel tokens (new languages): {len(novel_entries)}", file=sys.stderr)
@@ -448,14 +448,14 @@ def build_combined_tokenizer(
         )
         if len(combined) < target_vocab_size:
             print(
-                f"  The novel SPM produced fewer unique tokens than expected. "
-                f"This can happen when overlap is larger than anticipated.",
+                "  The novel SPM produced fewer unique tokens than expected. "
+                "This can happen when overlap is larger than anticipated.",
                 file=sys.stderr,
             )
         else:
             print(
-                f"  Truncating to target vocab size (dropping lowest-scored "
-                f"novel tokens)",
+                "  Truncating to target vocab size (dropping lowest-scored "
+                "novel tokens)",
                 file=sys.stderr,
             )
             # Keep all specials and base tokens, truncate novel tokens
@@ -679,7 +679,7 @@ def main():
         sys.exit(1)
 
     print(
-        f"\nVocabulary budget:",
+        "\nVocabulary budget:",
         file=sys.stderr,
     )
     print(f"  Target total: {target_vocab_size:,}", file=sys.stderr)
@@ -834,7 +834,7 @@ def main():
 
     # Final summary
     print(f"\n{'=' * 60}", file=sys.stderr)
-    print(f"PTEx tokenizer built successfully", file=sys.stderr)
+    print("PTEx tokenizer built successfully", file=sys.stderr)
     print(f"  Output: {args.output}", file=sys.stderr)
     print(f"  Vocab size: {len(new_tokenizer):,}", file=sys.stderr)
     print(f"  Base tokenizer: {args.base_tokenizer}", file=sys.stderr)

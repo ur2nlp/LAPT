@@ -7,16 +7,14 @@ conftest.py is a special pytest file that:
 3. Runs before any tests are collected
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 from transformers import AutoTokenizer
 
-# Add the src directory to Python's import path
-# This allows tests to import from src modules the same way the main code does
-src_path = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(src_path))
+# Import paths are declared in pyproject.toml ([tool.pytest.ini_options]
+# pythonpath), not manipulated here -- that setting is applied before collection,
+# whereas a sys.path edit in this file only happens once conftest itself imports.
 
 
 @pytest.fixture

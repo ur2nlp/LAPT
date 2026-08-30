@@ -8,8 +8,9 @@ Usage:
     cat text.txt | python tools/show_tokenization.py path/to/spm.model
 """
 
-import sys
 import argparse
+import sys
+
 import sentencepiece as spm
 
 

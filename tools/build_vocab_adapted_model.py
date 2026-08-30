@@ -136,7 +136,7 @@ class PlaintextDataset(Dataset):
         self.examples = []
         # Character count of the original text, used for BPC computation.
         self.char_lens = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 text = line.strip()
                 if not text:

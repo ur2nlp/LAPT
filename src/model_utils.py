@@ -8,23 +8,25 @@ specialization workflows.
 import os
 import random
 import sys
-from typing import Optional
 
 import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
+from artifact_configs import (
+    TokenizerConfig,
+    effective_dataset_cache_dir,
+    focus_embedding_hash,
+    format_number,
+    get_model_shortname,
+)
 from tokenizer_utils import (
     LEGACY_INPUT_NAME,
     apply_focus_initialization,
     prepare_focus_training_data,
     resolve_cached_embedding_paths,
     train_new_tokenizer,
-)
-from artifact_configs import (
-    TokenizerConfig, get_model_shortname, format_number, effective_dataset_cache_dir,
-    focus_embedding_hash,
 )
 
 
@@ -177,7 +179,7 @@ def _initialize_focus_model(args: DictConfig):
             )
 
     jsonl_needed = not (tokenizer_cache_exists and embeddings_cache_hit)
-    jsonl_path: Optional[str] = None
+    jsonl_path: str | None = None
     if jsonl_needed:
         # Subset name depends only on source data + num_samples + seed and is
         # therefore shared across FOCUS runs on the same mix.
