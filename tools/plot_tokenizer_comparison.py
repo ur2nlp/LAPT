@@ -1,4 +1,4 @@
-"""
+r"""
 Plot tokenizer efficiency and overlap metrics across lambda values.
 
 Creates plots showing how lambda parameter affects:
@@ -35,13 +35,22 @@ import argparse
 import re
 import sys
 from pathlib import Path
-import pandas as pd
-import matplotlib.pyplot as plt
+
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+import pandas as pd
 from plotnine import (
-    ggplot, aes, geom_line, geom_point, facet_wrap,
-    theme_minimal, theme, labs, scale_color_manual,
-    element_text, element_rect
+    aes,
+    element_rect,
+    element_text,
+    facet_wrap,
+    geom_line,
+    geom_point,
+    ggplot,
+    labs,
+    scale_color_manual,
+    theme,
+    theme_minimal,
 )
 
 
@@ -293,7 +302,7 @@ def create_dual_axis_plot(
         over_file = overlap_data[overlap_data['file'] == file].sort_values('lambda_value')
 
         # Plot compression on left y-axis
-        line1 = ax1.plot(comp_file['lambda_value'], comp_file['value'],
+        ax1.plot(comp_file['lambda_value'], comp_file['value'],
                         color=comp_color, linewidth=2, marker='o', markersize=6,
                         label='Compression (chars/token)')
         ax1.set_xlabel('Lambda', fontsize=10)
@@ -306,7 +315,7 @@ def create_dual_axis_plot(
 
         # Create second y-axis for overlap
         ax2 = ax1.twinx()
-        line2 = ax2.plot(over_file['lambda_value'], over_file['value'],
+        ax2.plot(over_file['lambda_value'], over_file['value'],
                         color=overlap_color, linewidth=2, marker='o', markersize=6,
                         label='Base Overlap (%)')
         ax2.set_ylabel('Base Overlap (%)', fontsize=10, color=overlap_color)
@@ -576,7 +585,7 @@ def main():
         }
         metric_names = [metric_map[m] for m in args.metrics if metric_map.get(m) in data['metric'].unique()]
         if not metric_names:
-            print(f"ERROR: None of the requested metrics are available in the data")
+            print("ERROR: None of the requested metrics are available in the data")
             print(f"Available metrics: {', '.join(data['metric'].unique())}")
             sys.exit(1)
     else:

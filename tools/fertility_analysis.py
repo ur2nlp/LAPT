@@ -37,7 +37,7 @@ def load_corpus_word_counts(
         Counter mapping word types to their occurrence counts.
     """
     print(f"Loading corpus from {corpus_path}", file=sys.stderr)
-    with open(corpus_path, "r", encoding="utf-8") as f:
+    with open(corpus_path, encoding="utf-8") as f:
         lines = f.readlines()
     print(f"  Read {len(lines):,} lines", file=sys.stderr)
 

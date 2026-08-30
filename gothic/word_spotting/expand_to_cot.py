@@ -72,7 +72,6 @@ from pathlib import Path
 from gothic.instruction_format import flatten_prompt
 from gothic.word_spotting.canonical import trainable_alignments
 
-
 # Punctuation stripped from sentence tokens when locating a word's position.
 PUNCTUATION = string.punctuation + "·"
 
@@ -433,7 +432,7 @@ def main():
         print(f"Error: input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
-    with open(input_path, "r", encoding="utf-8") as f:
+    with open(input_path, encoding="utf-8") as f:
         entries = [json.loads(line) for line in f if line.strip()]
 
     if args.directions == "both":

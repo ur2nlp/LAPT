@@ -50,7 +50,7 @@ class PlaintextLinesDataset(Dataset):
         max_samples: int,
     ):
         self.examples: list[torch.Tensor] = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 text = line.strip()
                 if not text:

@@ -18,7 +18,6 @@ Coverage:
 
 from gothic.dictionary_lookup import parse_wright_glossary as pw
 
-
 # Minimal HTML mirroring the Germanic Lexicon Project markup of Wright's
 # glossary: <br>-delimited entries, <em> for POS and page refs, untagged cognate
 # runs, character images as <IMG ... chars/NAME.png>, and page markers.

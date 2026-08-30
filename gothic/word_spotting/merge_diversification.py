@@ -42,7 +42,7 @@ def normalize_alignment(alignment: dict) -> tuple[str, str]:
 
 def load_jsonl(path: Path) -> list[dict]:
     records = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -355,7 +355,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    with open(args.manifest, "r", encoding="utf-8") as f:
+    with open(args.manifest, encoding="utf-8") as f:
         manifest = json.load(f)
 
     print(f"Loading annotations from {args.annotations}...", file=sys.stderr)

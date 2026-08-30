@@ -292,7 +292,7 @@ def main():
         print(f"Error: input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
-    with open(input_path, "r", encoding="utf-8") as handle:
+    with open(input_path, encoding="utf-8") as handle:
         entries = json.load(handle)
 
     if args.script == "random":

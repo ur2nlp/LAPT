@@ -33,7 +33,6 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-
 # Gothic Unicode block; a line containing any of these is a Gothic-script line.
 _GOTHIC_SCRIPT = re.compile(r"[\U00010330-\U0001034F]")
 

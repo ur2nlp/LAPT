@@ -51,7 +51,6 @@ from pathlib import Path
 
 import yaml
 
-
 REGISTRY_PATH = Path("outputs/registry.yaml")
 
 # params hidden from display by default (usually redundant with max_steps)
@@ -235,7 +234,6 @@ def extract_params(config: dict) -> tuple[str, dict]:
 
     # compute synthetic params
     training = config.get("training", {})
-    focus = config.get("focus", {})
 
     batch_size = training.get("train_batch_size", 1)
     grad_accum = training.get("gradient_accumulation_steps", 1)

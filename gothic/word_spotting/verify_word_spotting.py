@@ -77,7 +77,7 @@ def load_dictionary(
         - english_to_forms: dict mapping each lowercase English gloss word to
           the set of citation forms associated with that gloss.
     """
-    with open(dict_path, "r", encoding="utf-8") as f:
+    with open(dict_path, encoding="utf-8") as f:
         entries = json.load(f)
 
     # Merge glosses for citation forms that appear in multiple entries
@@ -273,7 +273,7 @@ def verify_alignments(
 
     form_to_glosses = {cf: gs for cf, gs in all_forms}
 
-    with open(jsonl_path, "r", encoding="utf-8") as f:
+    with open(jsonl_path, encoding="utf-8") as f:
         jsonl_lines = [json.loads(line) for line in f if line.strip()]
 
     rows = []
@@ -327,7 +327,7 @@ def finalize(tsv_path: str, output_path: str | None):
     Drops rows with status 'delete', re-groups remaining alignments by sentence
     pair, and writes one JSONL line per sentence pair.
     """
-    with open(tsv_path, "r", encoding="utf-8-sig", newline="") as f:
+    with open(tsv_path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
         rows = list(reader)
 

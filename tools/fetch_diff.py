@@ -19,7 +19,6 @@ from pathlib import Path
 
 import yaml
 
-
 TRAINER_STATES_DIR = Path("outputs/trainer_states")
 CONFIGS_DIR = Path("outputs/configs")
 REGISTRY_PATH = Path("outputs/registry.yaml")

@@ -20,7 +20,6 @@ Usage:
 """
 
 import argparse
-import sys
 
 
 def parse_name_value(s: str, value_type: type, flag_name: str) -> tuple:

@@ -82,7 +82,7 @@ PENDING_STATUSES = {"", "unverified", "unchecked", "?", "todo", "skip"}
 
 def load_alignment_records(jsonl_path: str) -> list[dict]:
     """Load a canonical alignments JSONL into a list of sentence records."""
-    with open(jsonl_path, "r", encoding="utf-8") as f:
+    with open(jsonl_path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
@@ -226,7 +226,7 @@ def apply_review(
             remainder. The orphan check (TSV ids absent from the file) always
             runs.
     """
-    with open(review_path, "r", encoding="utf-8-sig", newline="") as f:
+    with open(review_path, encoding="utf-8-sig", newline="") as f:
         # READ with QUOTE_NONE: Google Sheets' TSV *export* is unquoted (it dumps
         # raw cell values, passing '"' through literally), so a QUOTE_MINIMAL reader
         # would treat a verse's leading '"' as a field-quote opener and merge rows.

@@ -73,7 +73,6 @@ from pathlib import Path
 
 from gothic.orthography import clean_gothic_artifacts
 
-
 # Statuses eligible for de-duplication. Rejected / replaced records are left
 # alone so their provenance survives.
 LIVE_STATUSES = {"verified_correct", "kept_edited", "unverified"}
@@ -267,7 +266,7 @@ def main():
         print(f"Error: input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
-    with open(input_path, "r", encoding="utf-8") as handle:
+    with open(input_path, encoding="utf-8") as handle:
         entries = [json.loads(line) for line in handle if line.strip()]
 
     fields_changed = 0

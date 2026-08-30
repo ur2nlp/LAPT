@@ -295,7 +295,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Read input file
-    with open(args.input_file, 'r', encoding='utf-8') as f:
+    with open(args.input_file, encoding='utf-8') as f:
         text = f.read()
 
     # Transliterate

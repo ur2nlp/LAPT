@@ -67,7 +67,7 @@ from pathlib import Path
 
 def load_jsonl(path: Path) -> list[dict]:
     records = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -94,7 +94,7 @@ def parse_verification_tsv(
     QUOTE_NONE (don't interpret quotes).
     """
     by_surface: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(
             f, delimiter="\t", quoting=csv.QUOTE_NONE
         )
@@ -168,7 +168,7 @@ def index_diversify_responses(
               'response_position': int  (0-based position in the response, for
                                          relative ordering within a batch) }
     """
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
     annotations = load_jsonl(diversify_annotations_path)
     by_custom_id: dict[str, list[dict]] = defaultdict(list)
@@ -238,7 +238,7 @@ def match_originals_to_verified(
             pairings.append((orig, None, "pending"))
 
     # pass 2: gothic-only or english-only match among remaining
-    for i, (orig, match, kind) in enumerate(pairings):
+    for i, (orig, _match, kind) in enumerate(pairings):
         if kind != "pending":
             continue
         match_idx = None

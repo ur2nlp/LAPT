@@ -128,7 +128,7 @@ def summarize(counts: Counter, name: str, thresholds: list[int]) -> None:
             f"({n_alignments} alignments, "
             f"{100 * n_alignments / total_items:.1f}% of total)"
         )
-    print(f"\n  Top 20:")
+    print("\n  Top 20:")
     for item, c in counts.most_common(20):
         print(f"    {c:>5}  {item}")
 

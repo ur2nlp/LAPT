@@ -26,7 +26,6 @@ Usage:
 """
 
 import argparse
-import json
 import random
 import sys
 from pathlib import Path
@@ -179,7 +178,7 @@ def print_report(
     print(f"  FOCUS: {focus_name}")
     print(f"{'='*70}")
 
-    print(f"\n--- Vocabulary (type-level) ---")
+    print("\n--- Vocabulary (type-level) ---")
     print(f"  Base vocab size:    {base_vocab_size:>10,}")
     print(f"  FOCUS vocab size:   {focus_vocab_size:>10,}")
     shared_pct = 100 * shared_vocab_size / focus_vocab_size if focus_vocab_size else 0
@@ -192,15 +191,15 @@ def print_report(
     direction = "more" if rel > 1 else "fewer"
     print(f"  Relative fertility: {rel:>10.3f}  (FOCUS has {abs(rel-1)*100:.1f}% {direction} tokens)")
 
-    print(f"\n--- Vocabulary-level reuse (upper bound) ---")
-    print(f"  Base token instances whose string is in FOCUS vocab:")
+    print("\n--- Vocabulary-level reuse (upper bound) ---")
+    print("  Base token instances whose string is in FOCUS vocab:")
     rate = stats['base_vocab_instance_rate'] * 100
     n = stats['base_instances_in_focus_vocab']
     total = stats['total_base_tokens']
     print(f"    {n:,} / {total:,}  =  {rate:.1f}%")
-    print(f"  (If FOCUS vocab includes this token, it *can* reuse the embedding)")
+    print("  (If FOCUS vocab includes this token, it *can* reuse the embedding)")
 
-    print(f"\n--- Segmentation-level agreement ---")
+    print("\n--- Segmentation-level agreement ---")
     if stats['offset_mapping_available']:
         bp = stats['base_boundary_preservation'] * 100
         fp = stats['focus_boundary_precision'] * 100

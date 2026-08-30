@@ -15,9 +15,8 @@ via ``gothic.orthography.transliterate_latin_to_gothic``.
 """
 
 import random
-from collections.abc import Callable
 from collections import defaultdict
-
+from collections.abc import Callable
 
 # Word-boundary markers. Padding a word with two start markers lets the first
 # real character be sampled from a trigram, and the end marker lets word length

@@ -354,7 +354,7 @@ def parse_glossary(html_path: str) -> tuple[list[WrightEntry], set[str]]:
     Returns:
         A tuple of (entries, unmapped_image_basenames).
     """
-    with open(html_path, "r", encoding="utf-8") as handle:
+    with open(html_path, encoding="utf-8") as handle:
         content = handle.read()
 
     parser = WrightHTMLParser()

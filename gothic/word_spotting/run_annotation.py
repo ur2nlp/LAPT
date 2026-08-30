@@ -51,7 +51,7 @@ def load_batch_requests(
     Returns:
         List of batch request dicts.
     """
-    with open(input_path, "r", encoding="utf-8") as f:
+    with open(input_path, encoding="utf-8") as f:
         requests = [json.loads(line) for line in f if line.strip()]
 
     if range_spec:

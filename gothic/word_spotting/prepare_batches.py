@@ -66,7 +66,7 @@ def parse_pairs(input_path: str) -> list[tuple[str, str]]:
     Returns:
         List of (roman_line, gothic_script_line) tuples.
     """
-    with open(input_path, "r", encoding="utf-8") as f:
+    with open(input_path, encoding="utf-8") as f:
         lines = [line.rstrip("\n") for line in f if line.strip()]
 
     if len(lines) % 2 != 0:
@@ -141,7 +141,7 @@ def build_original_requests(
 
 def load_verified_alignments(path: Path) -> list[dict]:
     records = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:

@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 # add project root to path so we can import tools.registry
 sys.path.insert(0, str(Path(__file__).parent.parent))

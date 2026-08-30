@@ -48,7 +48,7 @@ COLOR_CUTOFF = "#333333"
 def load_base_vocab(path: str) -> dict[str, int]:
     """Load tab-separated token<TAB>count file."""
     vocab = {}
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             parts = line.rstrip("\n").split("\t")
             if len(parts) == 2:

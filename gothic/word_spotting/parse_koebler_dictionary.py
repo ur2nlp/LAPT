@@ -374,7 +374,7 @@ def split_glosses(text: str) -> list[str]:
 
 def parse_dictionary(html_path: str) -> list[DictionaryEntry]:
     """Parse the full Koebler dictionary HTML into structured entries."""
-    with open(html_path, "r", encoding="utf-8") as f:
+    with open(html_path, encoding="utf-8") as f:
         content = f.read()
 
     parser = KoeblerHTMLParser()

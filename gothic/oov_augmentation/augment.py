@@ -53,18 +53,19 @@ from pathlib import Path
 
 from gothic.data.prepare_gothic_data import build_instruction_prompt
 from gothic.instruction_format import flatten_prompt
-from gothic.orthography import transliterate_latin_to_gothic
 from gothic.oov_augmentation.stems import StemModel, build_stem_model, generate_nonword
+from gothic.orthography import transliterate_latin_to_gothic
 from gothic.word_spotting.canonical import trainable_alignments
 from gothic.word_spotting.expand_to_cot import (
     CONCLUSION_TEMPLATES,
-    PROMPT_TEMPLATES as COT_PROMPT_TEMPLATES,
     SCRIPT_FIELDS,
     gloss_pair,
     render_gloss_items,
     token_position,
 )
-
+from gothic.word_spotting.expand_to_cot import (
+    PROMPT_TEMPLATES as COT_PROMPT_TEMPLATES,
+)
 
 BLANK = "_____"
 

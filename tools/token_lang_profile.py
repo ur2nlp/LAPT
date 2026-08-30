@@ -29,7 +29,6 @@ from collections import Counter
 import numpy as np
 from transformers import AutoTokenizer
 
-
 DEFAULT_PALETTE = [
     "#2E86AB",
     "#A23B72",
@@ -236,7 +235,7 @@ def main():
 
     # Print summary
     unseen_count = int((scores.sum(axis=1) == 0).sum())
-    print(f"\nSummary:", file=sys.stderr)
+    print("\nSummary:", file=sys.stderr)
     for j, lang in enumerate(languages):
         dominant = (scores.argmax(axis=1) == j) & (scores.sum(axis=1) > 0)
         print(

@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from gothic.oov_augmentation.stems import build_stem_model, generate_nonword
 from gothic.oov_augmentation.vocab import content_vocab, load_training_vocab
 
-
 START = "^"
 END = "$"
 

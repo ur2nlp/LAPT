@@ -41,15 +41,16 @@ dev = [
 [project.urls]
 Repository = "https://github.com/ur2nlp/LAPT"
 
-# Nothing here is importable as a package yet: the `src/` modules import each
-# other flat (`from dataset_utils import ...`), so they resolve only with `src/`
-# itself on sys.path -- see [tool.pytest.ini_options].pythonpath. Installing is
-# therefore dependencies-only. Renaming `src` -> `lapt` with absolute imports
-# would make the framework installable, and is the prerequisite for factoring
-# shared code (FOCUS init, dataset loading, plotting) into its own package.
-# Project branches that add a real package re-declare this table.
-[tool.setuptools]
-packages = []
+# `gothic` is a real package and installs normally. The framework's own `src/`
+# modules are not included: they import each other flat (`from dataset_utils
+# import ...`), so they resolve only with `src/` itself on sys.path -- see
+# [tool.pytest.ini_options].pythonpath. Renaming `src` -> `lapt` with absolute
+# imports would make the framework installable too, and is the prerequisite for
+# factoring shared code (FOCUS init, dataset loading, plotting) into its own
+# package. This table overrides the framework default on `main`, which declares
+# no packages at all.
+[tool.setuptools.packages.find]
+include = ["gothic*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
