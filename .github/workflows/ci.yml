@@ -1,0 +1,75 @@
+name: CI
+
+# No branch filter: this is the framework template, and project branches
+# (which fork from here) should get the same checks without editing this file.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch makes the in-flight run obsolete; cancel it
+# rather than paying for both.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Deliberately does not install the project: ruff is a static analyzer, so
+      # this job stays ~20s and reports before the test job has finished
+      # downloading torch.
+      - name: Install ruff
+        run: pip install "ruff>=0.16"
+
+      - name: Lint
+        run: ruff check --output-format=github .
+
+      # Advisory until a formatting pass is adopted repo-wide; see the E501
+      # entry in pyproject.toml.
+      - name: Check formatting drift (advisory)
+        run: ruff format --check --diff .
+        continue-on-error: true
+
+  test:
+    name: test (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # The CPU wheel is ~200MB against ~2.5GB for the default CUDA build, and
+      # the runners have no GPU. Installed first so the editable install below
+      # sees torch already satisfied and does not pull the CUDA variant.
+      - name: Install CPU torch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install project
+        run: pip install -e ".[dev]"
+
+      # tests/conftest.py downloads the facebook/xglm-564M tokenizer once per
+      # session; cache it so only the first run on a given key pays for it.
+      - name: Cache HuggingFace assets
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-xglm564m
+          restore-keys: hf-${{ runner.os }}-
+
+      - name: Run tests
+        run: pytest -q --durations=10
