@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lapt"
+version = "0.1.0"
+description = "Language-Adaptive Pre-Training: adapting multilingual LMs to new languages"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "C.M. Downey", email = "cmdowney.nlp@gmail.com" }]
+
+# Mirrors environment.yml, which remains the canonical setup path for the
+# cluster (conda supplies the CUDA-linked torch build). This list exists so CI
+# and contributors can `pip install -e .` without conda. Pin minor versions only
+# where reproducibility depends on it.
+dependencies = [
+    "accelerate>=0.26",
+    "datasets>=3,<4",
+    "hydra-core>=1,<2",
+    "numpy<2.0",
+    "pandas",
+    "plotnine",
+    "protobuf",
+    "pyyaml",
+    "sacrebleu>=2,<3",
+    "sentencepiece>=0.1",
+    "tokenizers>=0.15",
+    "torch>=2.6",
+    "tqdm",
+    "transformers>=4.57,<4.58",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.16",
+]
+
+[project.urls]
+Repository = "https://github.com/ur2nlp/LAPT"
+
+# Nothing here is importable as a package yet: the `src/` modules import each
+# other flat (`from dataset_utils import ...`), so they resolve only with `src/`
+# itself on sys.path -- see [tool.pytest.ini_options].pythonpath. Installing is
+# therefore dependencies-only. Renaming `src` -> `lapt` with absolute imports
+# would make the framework installable, and is the prerequisite for factoring
+# shared code (FOCUS init, dataset loading, plotting) into its own package.
+# Project branches that add a real package re-declare this table.
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `.` makes `tools` (and any project package) importable; `src` supports the
+# flat intra-module imports described above. This replaces a sys.path.insert in
+# tests/conftest.py, and applies before collection rather than during it.
+pythonpath = [".", "src"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["data", "outputs", "models", "tokenizers", "plots"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import sorting
+    "B",   # bugbear (likely bugs)
+    "UP",  # pyupgrade (modern syntax)
+]
+# Grandfathered pre-existing debt. Each entry is a burn-down target, not a
+# permanent exemption. New code is held to everything else.
+ignore = [
+    "E501",  # line-too-long: pending a `ruff format` adoption pass
+    "E402",  # module-import-not-at-top: sys.path setup precedes imports
+    "E741",  # ambiguous-variable-name
+    "E731",  # lambda-assignment
+    "B905",  # zip-without-explicit-strict
+    "B904",  # raise-without-from-inside-except
+    "UP035", # deprecated-import
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests re-import module-level names inside test bodies to document what is
+# under test, and bind fixtures that are used only for their side effects.
+"tests/*" = ["F811", "F841", "B017"]
