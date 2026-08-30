@@ -766,9 +766,8 @@ def _apply_spm_pipeline(backend_tokenizer) -> None:
     Args:
         backend_tokenizer: A tokenizers.Tokenizer to configure in place
     """
-    from tokenizers.pre_tokenizers import Metaspace
-
     from tokenizers import decoders, normalizers
+    from tokenizers.pre_tokenizers import Metaspace
 
     backend_tokenizer.normalizer = normalizers.Sequence(normalizers=[])  # type: ignore
     backend_tokenizer.pre_tokenizer = Metaspace(replacement="▁", prepend_scheme="always")
@@ -790,9 +789,8 @@ def _create_unigram_tokenizer(vocab_scores: list[tuple[str, float]], unk_id: int
     Returns:
         Configured Tokenizer object ready for use with PreTrainedTokenizerFast
     """
-    from tokenizers.models import Unigram
-
     from tokenizers import Tokenizer
+    from tokenizers.models import Unigram
 
     # Initialize Unigram model with vocabulary and scores from SentencePiece
     # byte_fallback=False: use <unk> for unknown chars (matches SentencePiece training)
@@ -831,10 +829,9 @@ def _create_bpe_tokenizer(
     Returns:
         Configured Tokenizer object ready for use with PreTrainedTokenizerFast
     """
+    from tokenizers import Tokenizer
     from tokenizers.models import BPE
     from transformers.convert_slow_tokenizer import SentencePieceExtractor
-
-    from tokenizers import Tokenizer
 
     # Reconstruct merges from piece scores, exactly as transformers' SpmConverter does.
     _, merges = SentencePieceExtractor(spm_model_path).extract(vocab_scores)
