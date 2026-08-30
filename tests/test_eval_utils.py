@@ -17,7 +17,9 @@ from eval_utils import (
     compute_chars_per_token,
     compute_ttr_metrics,
     count_new_tokens,
+    load_instruction_prompts,
     preprocess_logits_for_metrics,
+    truncate_at_stop,
 )
 
 # Create a simple EvalPrediction-like object for testing
@@ -403,3 +405,137 @@ class TestHitCapWarning:
         callback._maybe_warn_hit_cap(spec, hit_cap_frac=0.4, global_step=300)
 
         assert "40.0% of generations hit max_new_tokens" in capsys.readouterr().err
+
+
+class TestTruncateAtStop:
+    """Unit tests for truncate_at_stop."""
+
+    def test_returns_text_unchanged_when_no_stop_present(self):
+        assert truncate_at_stop("a complete answer", ["\n\n", "###"]) == "a complete answer"
+
+    def test_returns_text_unchanged_for_empty_stop_list(self):
+        assert truncate_at_stop("a complete answer", []) == "a complete answer"
+
+    def test_truncates_at_the_stop_string(self):
+        assert truncate_at_stop("answer###trailing", ["###"]) == "answer"
+
+    def test_cuts_at_the_earliest_stop_regardless_of_list_order(self):
+        """
+        The cut is the minimum index over all stop strings, not the first stop
+        that happens to match. Reordering the list must not change the result,
+        or the truncation would depend on config ordering.
+        """
+        text = "answer<eos>tail###more"
+        assert truncate_at_stop(text, ["###", "<eos>"]) == "answer"
+        assert truncate_at_stop(text, ["<eos>", "###"]) == "answer"
+
+    def test_returns_empty_string_when_stop_is_at_the_start(self):
+        assert truncate_at_stop("###everything", ["###"]) == ""
+
+
+class TestLoadInstructionPrompts:
+    """Unit tests for load_instruction_prompts."""
+
+    @staticmethod
+    def _write(tmp_path, text):
+        path = tmp_path / "eval.jsonl"
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def test_loads_parallel_prompt_and_reference_lists(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            '{"prompt": "p1", "response": "r1"}\n'
+            '{"prompt": "p2", "response": "r2"}\n',
+        )
+
+        prompts, references = load_instruction_prompts(path)
+
+        assert prompts == ["p1", "p2"]
+        assert references == ["r1", "r2"]
+
+    def test_skips_blank_lines(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            '{"prompt": "p1", "response": "r1"}\n'
+            "\n"
+            "   \n"
+            '{"prompt": "p2", "response": "r2"}\n',
+        )
+
+        prompts, references = load_instruction_prompts(path)
+
+        assert prompts == ["p1", "p2"]
+        assert references == ["r1", "r2"]
+
+    def test_raises_file_not_found_for_missing_file(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="chrF eval data file not found"):
+            load_instruction_prompts(str(tmp_path / "absent.jsonl"))
+
+    def test_reports_the_physical_line_number_of_a_malformed_entry(self, tmp_path):
+        """
+        Blank lines are skipped but still counted, so the number in the error
+        matches what an editor shows for the offending line.
+        """
+        path = self._write(
+            tmp_path,
+            '{"prompt": "p1", "response": "r1"}\n'
+            "\n"
+            '{"prompt": "p2"}\n',
+        )
+
+        with pytest.raises(ValueError, match="Line 3"):
+            load_instruction_prompts(path)
+
+    def test_raises_when_response_field_is_missing(self, tmp_path):
+        path = self._write(tmp_path, '{"response": "r1"}\n')
+
+        with pytest.raises(ValueError, match="missing 'prompt' or 'response'"):
+            load_instruction_prompts(path)
+
+    def test_raises_when_no_examples_are_loaded(self, tmp_path):
+        path = self._write(tmp_path, "\n   \n\n")
+
+        with pytest.raises(ValueError, match="No examples loaded"):
+            load_instruction_prompts(path)
+
+
+class TestComputeTtrMetricsInputHandling:
+    """Input-shape and mask handling in compute_ttr_metrics."""
+
+    def test_accepts_torch_tensor_predictions(self):
+        """Trainer may hand back tensors rather than numpy arrays."""
+        predictions = torch.tensor([[1, 2, 3, 4]])
+        labels = torch.tensor([[1, 2, 3, 4]])
+
+        metrics = compute_ttr_metrics(EvalPrediction(predictions, labels))
+
+        assert metrics["ttr-seq"] == pytest.approx(1.0)
+
+    def test_rejects_three_dimensional_logits(self):
+        """
+        Passing raw logits instead of argmaxed ids is the expected misuse, and
+        it would otherwise produce a meaningless TTR rather than an error.
+        """
+        predictions = np.zeros((2, 4, 8))
+        labels = np.zeros((2, 4))
+
+        with pytest.raises(ValueError, match="3D predictions"):
+            compute_ttr_metrics(EvalPrediction(predictions, labels))
+
+    def test_uses_all_positions_when_labels_are_absent(self):
+        """With no label_ids there is no padding information to mask on."""
+        predictions = np.array([[5, 5, 6, 7]])
+
+        metrics = compute_ttr_metrics(EvalPrediction(predictions, None))
+
+        assert metrics["ttr-seq"] == pytest.approx(0.75)
+
+    def test_returns_zero_when_every_position_is_masked(self):
+        """An all-padding batch has no tokens to measure diversity over."""
+        predictions = np.array([[1, 2, 3, 4]])
+        labels = np.full((1, 4), -100)
+
+        metrics = compute_ttr_metrics(EvalPrediction(predictions, labels))
+
+        assert metrics["ttr-seq"] == 0.0
