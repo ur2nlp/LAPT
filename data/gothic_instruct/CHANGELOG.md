@@ -4,6 +4,30 @@ Human-readable history of the instruction-tuning artifacts in this folder.
 `MANIFEST.yaml` is the machine-readable companion (sha256, per-file provenance,
 `used_by`). Newest first.
 
+## 2026-08-30 — note: `oov-hedge` 3.0.0 bytes drift from the generator (no re-release)
+
+**No new artifact.** Recording that the committed `oov-hedge-instruct` 3.0.0 files are
+no longer reproducible from the committed generator, and that this was deliberately
+left uncorrected.
+
+`fe68e01` (2026-07-24, translation-cot 2.2.0) unified the `expand_to_cot` response
+format — 4 gloss styles / 4 conclusions / 2 join styles collapsed to one each — and
+updated that module and its tests, but not `gothic/oov_augmentation/augment.py`, which
+imports those templates. `augment.py` was therefore **broken at import** from that
+commit until 2026-08-30, with its 33 tests silently uncollectable. (A second break was
+latent rather than loud: `CONCLUSION_TEMPLATES[direction]` changed from `list` to
+`str`, so the surviving `rng.choice(...)` would have drawn a random single *character*
+as the conclusion template.)
+
+`augment.py` now adopts the unified format. The committed 3.0.0 bytes predate it and
+still carry the retired variety — 8130/16488 train examples (49%) use the retired
+period / "However" join. The generated **non-words are unaffected**; the drift is
+response rendering only.
+
+Not regenerated: `oov-hedge` has been out of the active training mixture for a while,
+so a 4.0.0 bump (MAJOR — response content changes for ~half the file) would buy
+nothing now. **Regenerate before returning oov-hedge to a training mixture.**
+
 ## 2026-07-13 — editorial cleanup: translation/transliteration 1.1.0, alignment/cot 2.1.0, oov-hedge 3.0.0
 
 **MINOR bumps for both `prepare_gothic_data`-derived artifacts**, regenerated with

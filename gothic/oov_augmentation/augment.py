@@ -58,10 +58,10 @@ from gothic.oov_augmentation.stems import StemModel, build_stem_model, generate_
 from gothic.word_spotting.canonical import trainable_alignments
 from gothic.word_spotting.expand_to_cot import (
     CONCLUSION_TEMPLATES,
-    GLOSS_ITEM_STYLES,
     PROMPT_TEMPLATES as COT_PROMPT_TEMPLATES,
     SCRIPT_FIELDS,
     gloss_pair,
+    render_gloss_items,
     token_position,
 )
 
@@ -110,15 +110,18 @@ def render_hedge_response(
     gloss_items: list[tuple[str, str]],
     hedge_clause: str,
     blanked_translation: str,
-    rng: random.Random,
 ) -> str:
     """Render the CoT-fallback hedge response.
 
-    The known words are glossed (reusing ``expand_to_cot`` styles), the non-word
-    is flagged with ``hedge_clause``, and the conclusion states the full
-    translation with the non-word's English span blanked. Mirrors
+    The known words are glossed (reusing ``expand_to_cot.render_gloss_items``),
+    the non-word is flagged with ``hedge_clause``, and the conclusion states the
+    full translation with the non-word's English span blanked. Mirrors
     ``expand_to_cot.render_response`` but routes the corrupted word to a hedge
     instead of a gloss.
+
+    Like ``expand_to_cot.render_response`` (v2.2.0), the response side is a
+    single canonical form and consumes no RNG; hedge variety lives in the
+    caller's choice of ``hedge_clause`` and in the input prompts.
 
     Args:
         gloss_items: Ordered (gothic_word, english_word) pairs for the *known*
@@ -126,40 +129,21 @@ def render_hedge_response(
         hedge_clause: The rendered "I don't recognize ..." clause.
         blanked_translation: The gold English sentence with the aligned span
             blanked.
-        rng: Seeded RNG for style choices.
 
     Returns:
         The response string (without the leading space added by the caller).
     """
-    conclusion = rng.choice(CONCLUSION_TEMPLATES[DIRECTION]).format(
-        full=blanked_translation,
-    )
+    conclusion = CONCLUSION_TEMPLATES[DIRECTION].format(full=blanked_translation)
 
     if not gloss_items:
         # No other trainable word to lean on: bare hedge + conclusion.
         return f"{capitalize_first(hedge_clause)}, {conclusion}"
 
-    item_style = rng.choice(GLOSS_ITEM_STYLES)
-    rendered_items = [
-        item_style.format(a=gothic_word, b=english_word)
-        for gothic_word, english_word in gloss_items
-    ]
-
-    join_style = rng.choice(["comma_but", "period"])
-    if join_style == "comma_but":
-        # "a means x, b means y, but <hedge>, <conclusion>"
-        gloss_clause = ", ".join(rendered_items)
-        return f"{gloss_clause}, but {hedge_clause}, {conclusion}"
-
-    # period style: each gloss is its own sentence; the hedge and conclusion
-    # start new (capitalized) sentences.
-    # "However, " is a sentence-initial connector, so the hedge clause continues
-    # lowercase (styles beginning with "I" stay capital naturally).
-    gloss_clause = ". ".join(rendered_items)
-    return (
-        f"{gloss_clause}. However, {hedge_clause}. "
-        f"{capitalize_first(conclusion)}"
-    )
+    # "a means x, b means y, but <hedge>, <conclusion>". The hedge is the final
+    # element of the chain, so the glosses take a plain comma join rather than
+    # the "a, b, and c" join expand_to_cot uses when a gloss ends the chain.
+    gloss_clause = ", ".join(render_gloss_items(gloss_items, DIRECTION))
+    return f"{gloss_clause}, but {hedge_clause}, {conclusion}"
 
 
 def build_prompt(sentence: str, prompt_style: str, rng: random.Random) -> str:
@@ -248,7 +232,7 @@ def make_hedge_example(
     gloss_items = [gloss_pair(alignment, DIRECTION, word_field) for alignment in chosen]
 
     hedge_clause = rng.choice(HEDGE_ITEM_STYLES).format(word=nonword_surface)
-    response = render_hedge_response(gloss_items, hedge_clause, blanked, rng)
+    response = render_hedge_response(gloss_items, hedge_clause, blanked)
     prompt = build_prompt(corrupted_sentence, prompt_style, rng)
     return {"prompt": prompt, "response": f" {response}"}
 

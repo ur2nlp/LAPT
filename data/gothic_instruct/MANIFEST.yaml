@@ -363,6 +363,21 @@ artifacts:
           reproducible baseline (deterministic under current code). Diverges in version
           from the alignment/cot 2.1.0 diacritic bumps by design: those were provably
           diacritic-only, this is a generator swap. Not yet trained on (by a committed run).
+
+          STALE AS OF 2026-08-30 (noted, not corrected). These bytes are no longer
+          reproducible from the committed generator, for a *different* reason than the
+          2.0.0 case above. `fe68e01` (2026-07-24) unified the expand_to_cot response
+          format — 4 gloss styles / 4 conclusions / 2 join styles collapsed to one each
+          — but did not update augment.py, which consumes those templates. That left
+          augment.py broken at import (`GLOSS_ITEM_STYLES` gone) until it was repaired
+          on 2026-08-30; the repair adopts the unified format. So the current generator
+          emits a single canonical response style, while these 3.0.0 bytes still carry
+          the retired variety: 8130/16488 train examples (49%) use the retired period /
+          "However" join alone. The *non-words* — the substantive OOV content — are
+          unaffected; the drift is response rendering only. Deliberately NOT regenerated:
+          the task has been out of the active mixture for a while, so a 4.0.0 bump would
+          buy nothing. Regenerate (MAJOR, response content changes for ~half the file)
+          before any run that actually consumes oov-hedge again.
       - version: 2.0.0
         files:
           train: {path: oov-hedge_both-scripts_got2eng_train_v2.0.0.jsonl, sha256: 515f2fbefd97e59b4feb4eafdd9271f8f91e6c808ba31c3353abdb2ee40f92fd, n: 16487}

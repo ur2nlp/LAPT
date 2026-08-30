@@ -254,9 +254,8 @@ def test_capitalize_first():
 
 
 def test_render_hedge_response_bare_hedge_when_no_glosses():
-    rng = random.Random(0)
     response = augment.render_hedge_response(
-        [], 'I don\'t recognize the word "X"', "The _____ sows.", rng
+        [], 'I don\'t recognize the word "X"', "The _____ sows."
     )
     assert response.startswith("I don't recognize")
     assert "The _____ sows." in response
@@ -264,16 +263,26 @@ def test_render_hedge_response_bare_hedge_when_no_glosses():
 
 
 def test_render_hedge_response_includes_gloss_hedge_and_blanked_conclusion():
-    rng = random.Random(0)
     response = augment.render_hedge_response(
         [("waurd", "word")],
         'I don\'t recognize the word "X"',
         "The _____ sows the word.",
-        rng,
     )
     assert "waurd" in response and "word" in response
     assert '"X"' in response
     assert "The _____ sows the word." in response
+    assert ", but " in response
+
+
+def test_render_hedge_response_is_deterministic_across_calls():
+    """The response side consumes no RNG (unified format, v2.2.0)."""
+    arguments = (
+        [("waurd", "word"), ("manna", "man")],
+        'I don\'t recognize the word "X"',
+        "The _____ sows the word.",
+    )
+    responses = {augment.render_hedge_response(*arguments) for _ in range(10)}
+    assert len(responses) == 1
 
 
 # --- augment: prompt styles ----------------------------------------------
