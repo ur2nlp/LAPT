@@ -67,10 +67,14 @@ addopts = "--strict-markers"
 # where untested defects concentrate.
 branch = true
 # `tools/` is deliberately excluded. It is one-off analysis and plotting
-# scripts, not library code; including it drags the aggregate to ~24% and
-# buries the signal from the code that is actually depended on.
-# Project branches that add a package re-declare this table.
-source = ["src"]
+# scripts, not library code; including it drags the aggregate down and buries
+# the signal from the code that is actually depended on.
+#
+# `gothic` is included even though parts of it are also run-once pipeline
+# scripts (data cleaning, annotation runs, batch prep) that sit near 0%. Unlike
+# `tools/` it is a real imported package, so leaving it unmeasured would hide
+# genuinely load-bearing code. Read the per-module map, not the total.
+source = ["src", "gothic"]
 
 [tool.coverage.report]
 show_missing = true
