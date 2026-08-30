@@ -28,12 +28,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from tokenizer_utils import (
-    _train_sentencepiece_model,
+    _copy_base_post_processor,
+    _create_unigram_tokenizer,
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
-    _create_unigram_tokenizer,
-    _copy_base_post_processor,
     _resolve_hf_special_tokens,
+    _train_sentencepiece_model,
     _validate_tokenizer,
 )
 
@@ -50,6 +50,7 @@ def train_from_seed(
     seed_sentencepiece_size: int = None,
 ):
     import os
+
     from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
     if os.path.exists(os.path.join(output_path, "tokenizer.json")):
@@ -65,7 +66,7 @@ def train_from_seed(
         )
         actual_seed_path = scaled_file.name
         print(f"Scaling seed vocab counts by {scale_counts}x")
-        with open(seed_vocab_path, 'r', encoding='utf-8') as f:
+        with open(seed_vocab_path, encoding='utf-8') as f:
             for line in f:
                 parts = line.rstrip('\n').split('\t')
                 if len(parts) == 2:

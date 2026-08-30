@@ -50,7 +50,7 @@ def test_hybrid_seed_vocabulary(
     print("=" * 80)
     print("HYBRID SEED VOCABULARY TEST")
     print("=" * 80)
-    print(f"Parameters:")
+    print("Parameters:")
     print(f"  jsonl_path: {jsonl_path}")
     print(f"  vocab_size: {vocab_size}")
     print(f"  seed_lambda: {seed_lambda}")
@@ -64,7 +64,7 @@ def test_hybrid_seed_vocabulary(
         return False
 
     # Count samples in JSONL
-    with open(jsonl_path, 'r') as f:
+    with open(jsonl_path) as f:
         num_samples = sum(1 for _ in f)
     print(f"Found {num_samples} samples in JSONL file")
     print()
@@ -139,7 +139,7 @@ def test_hybrid_seed_vocabulary(
             seed_tokenizer_dir = tokenizers_dir / f"xglm564m_focus-v{vocab_str}-s{samples_str}_seed-{seed_vocab_multiplier}x"
             if seed_tokenizer_dir.exists():
                 print(f"Seed tokenizer saved to: {seed_tokenizer_dir}")
-                print(f"  (Can be reused for other lambda values)")
+                print("  (Can be reused for other lambda values)")
             print()
         except Exception as e:
             print(f"ERROR training seeded tokenizer: {e}")
@@ -164,7 +164,7 @@ def test_hybrid_seed_vocabulary(
         print(f"Base tokenizer vocab size: {len(base_vocab):,}")
         print()
 
-        print(f"Baseline tokenizer (unseeded):")
+        print("Baseline tokenizer (unseeded):")
         print(f"  Total vocab: {len(baseline_vocab)}")
         print(f"  Overlap with base: {len(baseline_overlap)} ({100*len(baseline_overlap)/len(baseline_vocab):.1f}%)")
         print(f"  Novel tokens: {len(baseline_only)} ({100*len(baseline_only)/len(baseline_vocab):.1f}%)")
@@ -239,19 +239,19 @@ def test_hybrid_seed_vocabulary(
         print("=" * 80)
         print()
         print("Key findings:")
-        print(f"  - Hybrid seeding successfully interpolates between base and corpus vocabularies")
+        print("  - Hybrid seeding successfully interpolates between base and corpus vocabularies")
         print(f"  - Lambda={seed_lambda} → {100*len(seeded_overlap)/len(seeded_vocab):.1f}% base overlap")
         print(f"  - Baseline (unseeded) → {100*len(baseline_overlap)/len(baseline_vocab):.1f}% base overlap")
         print()
         print("Cached artifacts:")
         print(f"  - Seed tokenizer: {seed_tokenizer_dir}")
-        print(f"    (Shared across different lambda values)")
+        print("    (Shared across different lambda values)")
         print(f"  - Final tokenizer: {seeded_output}")
         print()
         print("To try a different lambda value:")
         print(f"  python tools/test_hybrid_seed.py {jsonl_path} \\")
         print(f"    --output-dir {base_dir} \\")
-        print(f"    --lambda 0.7  # or any value 0.0-1.0")
+        print("    --lambda 0.7  # or any value 0.0-1.0")
         print(f"  → Will reuse seed tokenizer from {seed_tokenizer_dir}")
         print()
 
@@ -261,7 +261,7 @@ def test_hybrid_seed_vocabulary(
         # Cleanup temporary directory if used
         if use_temp:
             import shutil
-            shutil.rmtree(tmpdir, ignore_errors=True)
+            shutil.rmtree(base_dir, ignore_errors=True)
 
 
 def main():

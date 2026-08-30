@@ -7,11 +7,15 @@ are correctly saved/loaded alongside artifacts.
 
 import os
 import tempfile
+
 import pytest
 from omegaconf import OmegaConf
 
 from src.artifact_configs import (
-    TokenizerConfig, DatasetConfig, TokenizedDatasetConfig, _dict_diff,
+    DatasetConfig,
+    TokenizedDatasetConfig,
+    TokenizerConfig,
+    _dict_diff,
     focus_embedding_hash,
 )
 

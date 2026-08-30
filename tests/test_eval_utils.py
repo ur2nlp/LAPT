@@ -3,19 +3,22 @@ Tests for evaluation utilities: TTR metrics, BPC computation, and logit preproce
 """
 
 import math
+from collections import namedtuple
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 import torch
-from collections import namedtuple
-from unittest.mock import MagicMock
 from datasets import Dataset
 
 from eval_utils import (
-    compute_ttr_metrics, preprocess_logits_for_metrics,
-    compute_chars_per_token, BPCCallback, count_new_tokens, GenerationChrfCallback,
+    BPCCallback,
+    GenerationChrfCallback,
+    compute_chars_per_token,
+    compute_ttr_metrics,
+    count_new_tokens,
+    preprocess_logits_for_metrics,
 )
-
 
 # Create a simple EvalPrediction-like object for testing
 EvalPrediction = namedtuple('EvalPrediction', ['predictions', 'label_ids'])

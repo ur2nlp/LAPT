@@ -44,7 +44,7 @@ def load_z_estimate(tokenizer_path: str) -> float | None:
     path = os.path.join(tokenizer_path, Z_ESTIMATE_FILENAME)
     if not os.path.isfile(path):
         return None
-    with open(path, 'r') as f:
+    with open(path) as f:
         data = json.load(f)
     return float(data['mean_log_z'])
 

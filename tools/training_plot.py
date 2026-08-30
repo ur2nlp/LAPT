@@ -87,14 +87,14 @@ def theme_colors(dark):
 
 def load_from_trainer_state(filepath):
     """Load log history from trainer_state.json (proper JSON format)."""
-    with open(filepath, 'r') as f:
+    with open(filepath) as f:
         state = json.load(f)
     return pd.DataFrame(state['log_history'])
 
 
 def load_from_raw_log(filepath, skip_lines=0):
     """Load from raw log output (legacy - almost-JSON format)."""
-    lines = open(filepath, 'r').readlines()[skip_lines:]
+    lines = open(filepath).readlines()[skip_lines:]
     # HF logs use single quotes, need to convert to double quotes for JSON
     jsonl_text = '\n'.join([line.replace('\'', '\"') for line in lines])
     return pd.read_json(jsonl_text, lines=True)

@@ -52,11 +52,11 @@ from interactive_prompt import load_model, resolve_device, resolve_dtype
 # Share the token-counting definition with the training-loop chrF callback so
 # the offline and in-training non-halting rates cannot drift apart.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
-from eval_utils import count_new_tokens
-
 import torch
 from sacrebleu.metrics import CHRF
 from tqdm import tqdm
+
+from eval_utils import count_new_tokens
 
 
 def load_instruction_jsonl(file_path: str) -> tuple[list[str], list[str]]:

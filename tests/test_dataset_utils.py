@@ -33,32 +33,29 @@ TODO: Add tests for:
   - Concurrent access to cache
 """
 
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from datasets import Dataset, DatasetDict, load_from_disk
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
 from dataset_utils import (
-    _validate_source_cache,
-    _save_source_cache_config,
-    _load_plaintext_dataset,
-    _load_plaintext_dir_dataset,
+    _apply_substitutions,
+    _compute_sampling_probs,
     _load_concat_dataset,
     _load_huggingface_dataset,
     _load_instruction_hf_dataset,
-    _compute_sampling_probs,
+    _load_plaintext_dataset,
+    _load_plaintext_dir_dataset,
     _parse_substitutions,
-    _apply_substitutions,
-    load_untokenized_dataset,
+    _partition_source_indices,
+    _save_source_cache_config,
+    _validate_source_cache,
     load_external_eval_set,
     load_tokenized_multinomial_dataset,
-    tokenize_source,
-    _partition_source_indices,
-    _tokenize_instruction_examples,
-    DataCollatorForInstructionTuning,
+    load_untokenized_dataset,
 )
 
 
@@ -977,8 +974,9 @@ class TestDataCollatorForInstructionTuning:
         3. attention_mask padded with 0
         4. labels padded with -100
         """
-        from dataset_utils import DataCollatorForInstructionTuning
         import torch
+
+        from dataset_utils import DataCollatorForInstructionTuning
 
         collator = DataCollatorForInstructionTuning(base_tokenizer)
 
@@ -1095,8 +1093,9 @@ class TestDataCollatorForInstructionTuning:
         """
         Test that output is PyTorch tensors, not lists.
         """
-        from dataset_utils import DataCollatorForInstructionTuning
         import torch
+
+        from dataset_utils import DataCollatorForInstructionTuning
 
         collator = DataCollatorForInstructionTuning(base_tokenizer)
 
@@ -1170,7 +1169,7 @@ class TestMixedInstructionPlaintextDatasets:
         alongside 'prompt'/'response' for label masking during tokenization.
         """
         from datasets import Dataset, DatasetDict, concatenate_datasets
-        from dataset_utils import load_tokenized_dataset
+
 
         # Create instruction data with all three columns
         instruction_data = Dataset.from_dict({
@@ -1220,7 +1219,8 @@ class TestMixedInstructionPlaintextDatasets:
         """
         Test that pure plaintext datasets are correctly detected as non-instruction.
         """
-        from datasets import Dataset, DatasetDict, load_from_disk
+        from datasets import Dataset, DatasetDict
+
         from dataset_utils import load_tokenized_dataset
 
         plaintext_data = Dataset.from_dict({
@@ -1250,6 +1250,7 @@ class TestMixedInstructionPlaintextDatasets:
         Test that pure instruction datasets are correctly detected and get labels.
         """
         from datasets import Dataset, DatasetDict
+
         from dataset_utils import load_tokenized_dataset
 
         instruction_data = Dataset.from_dict({
@@ -1289,6 +1290,7 @@ class TestMixedInstructionPlaintextDatasets:
         Instruction examples should get label masking, plaintext should not.
         """
         from datasets import Dataset, DatasetDict, concatenate_datasets
+
         from dataset_utils import load_tokenized_dataset
 
         # Create instruction data (multiple examples to ensure some end up in train)

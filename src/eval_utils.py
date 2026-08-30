@@ -16,7 +16,6 @@ import numpy as np
 import torch
 from sacrebleu.metrics import CHRF
 from transformers import TrainerCallback
-from typing import Dict
 
 
 def preprocess_logits_for_metrics(logits, labels):
@@ -43,7 +42,7 @@ def preprocess_logits_for_metrics(logits, labels):
     return logits.argmax(dim=-1)
 
 
-def compute_ttr_metrics(eval_pred) -> Dict[str, float]:
+def compute_ttr_metrics(eval_pred) -> dict[str, float]:
     """
     Compute type-token ratio (TTR) to measure prediction diversity.
 
