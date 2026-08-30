@@ -35,10 +35,20 @@ jobs:
         run: ruff check --output-format=github .
 
       # Advisory until a formatting pass is adopted repo-wide; see the E501
-      # entry in pyproject.toml.
+      # entry in pyproject.toml. This deliberately exits 0 and reports through a
+      # warning annotation instead of using continue-on-error: a tolerated
+      # non-zero step still emits a bare "Process completed with exit code 1"
+      # annotation on an otherwise-green run, which reads as a failure nobody
+      # can explain.
       - name: Check formatting drift (advisory)
-        run: ruff format --check --diff .
-        continue-on-error: true
+        run: |
+          if ruff format --check . > format-check.txt 2>&1; then
+            echo "::notice::Formatting is clean."
+          else
+            drift=$(grep -oE '^[0-9]+ files? would be reformatted' format-check.txt || echo "some files would be reformatted")
+            echo "::warning::Advisory, not blocking: $drift. Adopting \`ruff format\` repo-wide is a tracked follow-up; see the E501 entry in pyproject.toml."
+          fi
+          cat format-check.txt
 
   test:
     name: test (pytest)
