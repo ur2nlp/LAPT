@@ -1,12 +1,18 @@
 """Tests for custom_trainer module."""
 
 import math
+from types import SimpleNamespace
 
 import pytest
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+from transformers import Trainer, TrainingArguments
 
-from src.custom_trainer import floored_per_example_causal_lm_loss
+from src.custom_trainer import (
+    FlooredPerExampleLossTrainer,
+    floored_per_example_causal_lm_loss,
+)
 
 
 def _log_prob_of_target(logits_row: torch.Tensor, target: int) -> float:
@@ -196,3 +202,155 @@ class TestFlooredPerExampleLoss:
         assert torch.all(logits.grad[:, -1, :] == 0)
         # Example 1 positions 0 corresponds to label[1]=-100 after shift → zero grad
         assert torch.all(logits.grad[1, 0, :] == 0)
+
+
+class _StubCausalLM(nn.Module):
+    """Minimal stand-in for a causal LM, recording the kwargs it is called with.
+
+    `FlooredPerExampleLossTrainer.compute_loss` only needs `outputs.logits`, and
+    the train/eval branch keys off `nn.Module.training`, so a real transformer is
+    unnecessary here. Recording the call kwargs lets the tests assert that labels
+    were withheld from the model.
+    """
+
+    def __init__(self, vocab_size: int = 4):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.scale = nn.Parameter(torch.ones(1))
+        self.last_call_kwargs: dict | None = None
+
+    def forward(self, **kwargs):
+        self.last_call_kwargs = kwargs
+        input_ids = kwargs["input_ids"]
+        batch_size, seq_len = input_ids.shape
+        logits = torch.arange(
+            batch_size * seq_len * self.vocab_size,
+            dtype=torch.float32,
+        ).reshape(batch_size, seq_len, self.vocab_size)
+        return SimpleNamespace(logits=logits * self.scale)
+
+
+def _make_trainer(tmp_path, per_example_loss_floor: int = 1):
+    """Construct a FlooredPerExampleLossTrainer around a stub model."""
+    args = TrainingArguments(
+        output_dir=str(tmp_path),
+        report_to=[],
+        use_cpu=True,
+    )
+    return FlooredPerExampleLossTrainer(
+        model=_StubCausalLM(),
+        args=args,
+        per_example_loss_floor=per_example_loss_floor,
+    )
+
+
+class TestFlooredPerExampleLossTrainerInit:
+    """Unit tests for FlooredPerExampleLossTrainer construction."""
+
+    def test_rejects_floor_below_one(self, tmp_path):
+        """The Trainer enforces the same floor contract as the loss function."""
+        with pytest.raises(ValueError, match="per_example_loss_floor"):
+            _make_trainer(tmp_path, per_example_loss_floor=0)
+
+    def test_stores_floor_for_compute_loss(self, tmp_path):
+        trainer = _make_trainer(tmp_path, per_example_loss_floor=5)
+        assert trainer.per_example_loss_floor == 5
+
+    def test_disables_model_accepts_loss_kwargs(self, tmp_path):
+        """
+        compute_loss returns a mean over the micro-batch rather than a
+        num_items_in_batch-normalized sum, so HF's training_step must divide by
+        gradient_accumulation_steps. It only does that when this flag is False.
+        If it were left True, the accumulated gradient and the logged loss would
+        both be inflated by a factor of gradient_accumulation_steps -- silently,
+        with no error.
+        """
+        trainer = _make_trainer(tmp_path)
+        assert trainer.model_accepts_loss_kwargs is False
+
+    def test_model_accepts_loss_kwargs_is_a_real_trainer_attribute(self, tmp_path):
+        """
+        Guard against the assignment above becoming a silent no-op. Setting an
+        attribute transformers no longer consults would still "succeed" while
+        losing the gradient-accumulation correction, so assert that the base
+        Trainer establishes the attribute itself.
+        """
+        args = TrainingArguments(output_dir=str(tmp_path), report_to=[], use_cpu=True)
+        base_trainer = Trainer(model=_StubCausalLM(), args=args)
+        assert hasattr(base_trainer, "model_accepts_loss_kwargs")
+
+
+class TestFlooredPerExampleLossTrainerComputeLoss:
+    """Unit tests for the train/eval split in compute_loss."""
+
+    @staticmethod
+    def _batch():
+        """A two-example batch with unequal numbers of unmasked label tokens."""
+        return {
+            "input_ids": torch.tensor([[1, 2, 3], [1, 2, 3]]),
+            "labels": torch.tensor([[-100, 1, 2], [-100, -100, 3]]),
+        }
+
+    def test_training_uses_floored_per_example_loss(self, tmp_path):
+        """In train mode the loss must match the module's own loss function."""
+        trainer = _make_trainer(tmp_path, per_example_loss_floor=2)
+        trainer.model.train()
+        inputs = self._batch()
+        expected_logits = trainer.model(input_ids=inputs["input_ids"]).logits
+        expected = floored_per_example_causal_lm_loss(
+            logits=expected_logits,
+            labels=inputs["labels"],
+            per_example_loss_floor=2,
+        )
+
+        loss = trainer.compute_loss(trainer.model, self._batch())
+
+        assert torch.allclose(loss, expected)
+
+    def test_training_withholds_labels_from_the_model(self, tmp_path):
+        """
+        Labels are popped before the forward pass so the model does not also
+        compute its own token-mean loss, which would be both wasted work and a
+        second, conflicting definition of the training objective.
+        """
+        trainer = _make_trainer(tmp_path)
+        trainer.model.train()
+
+        trainer.compute_loss(trainer.model, self._batch())
+
+        assert "labels" not in trainer.model.last_call_kwargs
+        assert "input_ids" in trainer.model.last_call_kwargs
+
+    def test_training_returns_outputs_when_requested(self, tmp_path):
+        trainer = _make_trainer(tmp_path)
+        trainer.model.train()
+
+        loss, outputs = trainer.compute_loss(
+            trainer.model, self._batch(), return_outputs=True
+        )
+
+        assert loss.ndim == 0
+        assert hasattr(outputs, "logits")
+
+    def test_eval_delegates_to_the_parent_implementation(self, tmp_path, monkeypatch):
+        """
+        Evaluation must use HF's token-mean loss so that eval_loss -- and the BPC
+        derived from it -- stays comparable across runs trained under different
+        loss formulations. Only the training objective is overridden.
+        """
+        trainer = _make_trainer(tmp_path)
+        trainer.model.eval()
+        sentinel = torch.tensor(1.2345)
+        calls = []
+
+        def fake_parent_compute_loss(self, model, inputs, **kwargs):
+            calls.append(inputs)
+            return sentinel
+
+        monkeypatch.setattr(Trainer, "compute_loss", fake_parent_compute_loss)
+
+        loss = trainer.compute_loss(trainer.model, self._batch())
+
+        assert loss is sentinel
+        assert len(calls) == 1
+        assert "labels" in calls[0]
