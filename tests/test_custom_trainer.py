@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import Trainer, TrainingArguments
 
-from src.custom_trainer import (
+from lapt.custom_trainer import (
     FlooredPerExampleLossTrainer,
     floored_per_example_causal_lm_loss,
 )

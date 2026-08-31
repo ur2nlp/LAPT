@@ -11,7 +11,7 @@ import pytest
 import torch
 from datasets import Dataset
 
-from eval_utils import (
+from lapt.eval_utils import (
     BPCCallback,
     GenerationChrfCallback,
     compute_chars_per_token,

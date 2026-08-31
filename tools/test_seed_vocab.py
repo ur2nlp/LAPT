@@ -22,10 +22,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+# Put the repository root on sys.path so `lapt` imports without an
+# editable install, for running this script straight from a checkout.
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tokenizer_utils import train_new_tokenizer
+from lapt.tokenizer_utils import train_new_tokenizer
 
 
 def test_hybrid_seed_vocabulary(
@@ -88,7 +89,7 @@ def test_hybrid_seed_vocabulary(
     print()
 
     # Build directory names using production format
-    from model_utils import format_number
+    from lapt.model_utils import format_number
     vocab_str = format_number(vocab_size)
     samples_str = format_number(num_samples)
 

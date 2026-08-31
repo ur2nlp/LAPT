@@ -43,23 +43,17 @@ dev = [
 [project.urls]
 Repository = "https://github.com/ur2nlp/LAPT"
 
-# `gothic` is a real package and installs normally. The framework's own `src/`
-# modules are not included: they import each other flat (`from dataset_utils
-# import ...`), so they resolve only with `src/` itself on sys.path -- see
-# [tool.pytest.ini_options].pythonpath. Renaming `src` -> `lapt` with absolute
-# imports would make the framework installable too, and is the prerequisite for
-# factoring shared code (FOCUS init, dataset loading, plotting) into its own
-# package. This table overrides the framework default on `main`, which declares
-# no packages at all.
+# Both `lapt` and `gothic` are real, installable packages. This table overrides
+# the framework default on `main`, which declares `lapt` alone.
 [tool.setuptools.packages.find]
-include = ["gothic*"]
+include = ["lapt*", "gothic*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `.` makes `tools` (and any project package) importable; `src` supports the
-# flat intra-module imports described above. This replaces a sys.path.insert in
+# `.` makes `lapt` and `tools` importable from a bare checkout, so the suite
+# runs without an editable install. This replaces a sys.path.insert in
 # tests/conftest.py, and applies before collection rather than during it.
-pythonpath = [".", "src"]
+pythonpath = ["."]
 addopts = "--strict-markers"
 
 [tool.coverage.run]
@@ -75,7 +69,7 @@ branch = true
 # scripts (data cleaning, annotation runs, batch prep) that sit near 0%. Unlike
 # `tools/` it is a real imported package, so leaving it unmeasured would hide
 # genuinely load-bearing code. Read the per-module map, not the total.
-source = ["src", "gothic"]
+source = ["lapt", "gothic"]
 
 [tool.coverage.report]
 show_missing = true
@@ -120,14 +114,8 @@ ignore = [
 # two different ways, and `ruff check` disagreed with itself between a working
 # tree and a clean checkout. Naming both sides makes the result reproducible.
 known-first-party = [
-    "artifact_configs",
-    "custom_trainer",
-    "dataset_utils",
-    "eval_utils",
     "gothic",
-    "gradient_correction",
-    "model_utils",
-    "tokenizer_utils",
+    "lapt",
     "tools",
 ]
 known-third-party = ["tokenizers"]
@@ -145,8 +133,8 @@ known-third-party = ["tokenizers"]
 [tool.mutmut]
 # Mutate the framework modules, but scope each run with `only_mutate` -- a whole
 # -tree run is far more mutants than a single sitting warrants.
-source_paths = ["src"]
-only_mutate = ["src/dataset_utils.py"]
+source_paths = ["lapt"]
+only_mutate = ["lapt/dataset_utils.py"]
 # Deliberately left off. It would skip mutants on lines no test executes, but it
 # buys that by running a whole extra in-process pytest pass to collect coverage
 # -- and a second pytest run in one process re-imports torch, which dies with

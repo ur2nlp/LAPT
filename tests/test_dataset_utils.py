@@ -41,7 +41,7 @@ from datasets import Dataset, DatasetDict, load_from_disk
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
-from dataset_utils import (
+from lapt.dataset_utils import (
     _apply_substitutions,
     _compute_sampling_probs,
     _load_concat_dataset,
@@ -240,7 +240,7 @@ class TestConcatLoader:
 
         # Mock the recursive calls to load_untokenized_dataset
         # It will be called twice (once per source), return our synthetic paths
-        with patch('dataset_utils.load_untokenized_dataset') as mock_load:
+        with patch('lapt.dataset_utils.load_untokenized_dataset') as mock_load:
             mock_load.side_effect = [str(source1_dir), str(source2_dir)]
 
             # Act: Concatenate the sources
@@ -303,7 +303,7 @@ class TestConcatLoader:
         cache_dir = tmp_path / "concat_cache"
 
         # First call - should load sources
-        with patch('dataset_utils.load_untokenized_dataset') as mock_load:
+        with patch('lapt.dataset_utils.load_untokenized_dataset') as mock_load:
             mock_load.return_value = str(source_dir)
             result_path1 = _load_concat_dataset(str(cache_dir), sources)
             first_call_count = mock_load.call_count
@@ -311,7 +311,7 @@ class TestConcatLoader:
         assert first_call_count == 1
 
         # Second call - should use cache, NOT call load_untokenized_dataset
-        with patch('dataset_utils.load_untokenized_dataset') as mock_load:
+        with patch('lapt.dataset_utils.load_untokenized_dataset') as mock_load:
             mock_load.return_value = str(source_dir)
             result_path2 = _load_concat_dataset(str(cache_dir), sources)
             second_call_count = mock_load.call_count
@@ -789,7 +789,7 @@ class TestTokenizeInstructionExamples:
         3. Response tokens have actual token IDs in labels
         4. input_ids and labels have same length
         """
-        from dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import _tokenize_instruction_examples
 
         examples = {
             'prompt': ['Translate to Gothic: hello\nResponse:'],
@@ -828,7 +828,7 @@ class TestTokenizeInstructionExamples:
 
         Strategy: Tokenize prompt alone, count tokens, verify that many are masked.
         """
-        from dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import _tokenize_instruction_examples
 
         prompt = "This is a test prompt with several words\nResponse:"
         response = " Yes"
@@ -855,7 +855,7 @@ class TestTokenizeInstructionExamples:
 
         Verifies each example is tokenized independently.
         """
-        from dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import _tokenize_instruction_examples
 
         examples = {
             'prompt': [
@@ -887,7 +887,7 @@ class TestTokenizeInstructionExamples:
 
         Strategy: Use very short max_length, verify output is truncated.
         """
-        from dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import _tokenize_instruction_examples
 
         # Long prompt and response
         examples = {
@@ -912,7 +912,7 @@ class TestTokenizeInstructionExamples:
         immediately rather than continuing the prompt. So every label is -100
         except a final EOS.
         """
-        from dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import _tokenize_instruction_examples
 
         examples = {
             'prompt': ['Prompt text\nResponse:'],
@@ -935,7 +935,7 @@ class TestTokenizeInstructionExamples:
         Our JSONL format uses ' response' (with leading space) to ensure
         proper tokenization as a continuation.
         """
-        from dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import _tokenize_instruction_examples
 
         examples = {
             'prompt': ['Test\nResponse:'],
@@ -976,7 +976,7 @@ class TestDataCollatorForInstructionTuning:
         """
         import torch
 
-        from dataset_utils import DataCollatorForInstructionTuning
+        from lapt.dataset_utils import DataCollatorForInstructionTuning
 
         collator = DataCollatorForInstructionTuning(base_tokenizer)
 
@@ -1019,7 +1019,7 @@ class TestDataCollatorForInstructionTuning:
         """
         Test batch with single example (no padding needed).
         """
-        from dataset_utils import DataCollatorForInstructionTuning
+        from lapt.dataset_utils import DataCollatorForInstructionTuning
 
         collator = DataCollatorForInstructionTuning(base_tokenizer)
 
@@ -1045,7 +1045,7 @@ class TestDataCollatorForInstructionTuning:
         """
         Test that -100 labels are preserved (not overwritten by padding logic).
         """
-        from dataset_utils import DataCollatorForInstructionTuning
+        from lapt.dataset_utils import DataCollatorForInstructionTuning
 
         collator = DataCollatorForInstructionTuning(base_tokenizer)
 
@@ -1071,7 +1071,7 @@ class TestDataCollatorForInstructionTuning:
 
         This can happen with empty responses or very long prompts.
         """
-        from dataset_utils import DataCollatorForInstructionTuning
+        from lapt.dataset_utils import DataCollatorForInstructionTuning
 
         collator = DataCollatorForInstructionTuning(base_tokenizer)
 
@@ -1095,7 +1095,7 @@ class TestDataCollatorForInstructionTuning:
         """
         import torch
 
-        from dataset_utils import DataCollatorForInstructionTuning
+        from lapt.dataset_utils import DataCollatorForInstructionTuning
 
         collator = DataCollatorForInstructionTuning(base_tokenizer)
 
@@ -1221,7 +1221,7 @@ class TestMixedInstructionPlaintextDatasets:
         """
         from datasets import Dataset, DatasetDict
 
-        from dataset_utils import load_tokenized_dataset
+        from lapt.dataset_utils import load_tokenized_dataset
 
         plaintext_data = Dataset.from_dict({
             'text': ['Line 1', 'Line 2', 'Line 3']
@@ -1251,7 +1251,7 @@ class TestMixedInstructionPlaintextDatasets:
         """
         from datasets import Dataset, DatasetDict
 
-        from dataset_utils import load_tokenized_dataset
+        from lapt.dataset_utils import load_tokenized_dataset
 
         instruction_data = Dataset.from_dict({
             'prompt': [
@@ -1291,7 +1291,7 @@ class TestMixedInstructionPlaintextDatasets:
         """
         from datasets import Dataset, DatasetDict, concatenate_datasets
 
-        from dataset_utils import load_tokenized_dataset
+        from lapt.dataset_utils import load_tokenized_dataset
 
         # Create instruction data (multiple examples to ensure some end up in train)
         instruction_data = Dataset.from_dict({
@@ -1828,7 +1828,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1854,7 +1854,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1877,7 +1877,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1894,7 +1894,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1913,7 +1913,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list, column='conversation')
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1932,7 +1932,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1950,7 +1950,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1968,11 +1968,11 @@ class TestInstructionHFLoader:
         fake_ds = _fake_hf_dataset(messages_list)
         cache_dir = str(tmp_path / 'cache')
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
             first_calls = mock_load.call_count
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
             second_calls = mock_load.call_count
 
@@ -1987,10 +1987,10 @@ class TestInstructionHFLoader:
         fake_ds = _fake_hf_dataset(messages_list)
         cache_dir = str(tmp_path / 'cache')
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             with pytest.raises(Exception):
                 _load_instruction_hf_dataset(
                     cache_dir=cache_dir,
@@ -2008,7 +2008,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             with pytest.raises(ValueError, match='No examples remained'):
                 _load_instruction_hf_dataset(
                     cache_dir=str(tmp_path / 'cache'),
@@ -2027,7 +2027,7 @@ class TestInstructionHFLoader:
             'name': 'fake/dataset',
         })
 
-        with patch('dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
             result_path = load_untokenized_dataset(
                 dataset_config,
                 cache_dir=str(tmp_path / 'cache'),
@@ -2169,7 +2169,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_split_into_lines_default(self, tmp_path):
         """By default each document is split into one example per line."""
-        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
             )
@@ -2181,7 +2181,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_no_split_keeps_documents_whole(self, tmp_path):
         """split_into_lines=False keeps documents intact with newlines preserved."""
-        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
                 split_into_lines=False,
@@ -2194,7 +2194,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_no_split_min_words_filters_per_document(self, tmp_path):
         """With no splitting, min_words_per_line filters whole documents."""
-        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
                 min_words_per_line=6, split_into_lines=False,
@@ -2215,8 +2215,8 @@ class TestHuggingFaceSplitIntoLines:
             collect_limits.append(limit)
             return docs.select(range(min(limit, len(docs))))
 
-        with patch('dataset_utils.load_dataset', return_value='STREAM'), \
-             patch('dataset_utils.collect_from_stream', side_effect=fake_collect):
+        with patch('lapt.dataset_utils.load_dataset', return_value='STREAM'), \
+             patch('lapt.dataset_utils.collect_from_stream', side_effect=fake_collect):
             _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
                 oversampling_factor=3, split_into_lines=False,
@@ -2233,8 +2233,8 @@ class TestHuggingFaceSplitIntoLines:
             collect_limits.append(limit)
             return docs.select(range(min(limit, len(docs))))
 
-        with patch('dataset_utils.load_dataset', return_value='STREAM'), \
-             patch('dataset_utils.collect_from_stream', side_effect=fake_collect):
+        with patch('lapt.dataset_utils.load_dataset', return_value='STREAM'), \
+             patch('lapt.dataset_utils.collect_from_stream', side_effect=fake_collect):
             _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
                 oversampling_factor=3, split_into_lines=True,
@@ -2245,11 +2245,11 @@ class TestHuggingFaceSplitIntoLines:
     def test_split_into_lines_tracked_in_cache(self, tmp_path):
         """Changing split_into_lines invalidates the per-source cache."""
         cache = str(tmp_path / 'cache')
-        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
             _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
                                       split_into_lines=True)
         # Same cache dir, different split flag -> mismatch error.
-        with patch('dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
             with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
                 _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
                                           split_into_lines=False)

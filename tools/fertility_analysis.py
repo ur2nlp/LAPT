@@ -18,7 +18,7 @@ from transformers import AutoTokenizer
 
 # Allow imports from src/
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.tokenizer_utils import extract_target_seed_vocab
+from lapt.tokenizer_utils import extract_target_seed_vocab
 
 
 def load_corpus_word_counts(

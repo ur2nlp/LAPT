@@ -14,14 +14,14 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-from artifact_configs import (
+from lapt.artifact_configs import (
     TokenizerConfig,
     effective_dataset_cache_dir,
     focus_embedding_hash,
     format_number,
     get_model_shortname,
 )
-from tokenizer_utils import (
+from lapt.tokenizer_utils import (
     LEGACY_INPUT_NAME,
     apply_focus_initialization,
     prepare_focus_training_data,

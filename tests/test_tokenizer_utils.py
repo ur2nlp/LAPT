@@ -2,8 +2,8 @@
 
 import pytest
 
-from artifact_configs import TokenizerConfig
-from tokenizer_utils import (
+from lapt.artifact_configs import TokenizerConfig
+from lapt.tokenizer_utils import (
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _resolve_hf_special_tokens,
@@ -636,7 +636,7 @@ from types import SimpleNamespace
 
 import torch
 
-from tokenizer_utils import (
+from lapt.tokenizer_utils import (
     LEGACY_INPUT_NAME,
     LEGACY_OUTPUT_NAME,
     _sidecar_paths,

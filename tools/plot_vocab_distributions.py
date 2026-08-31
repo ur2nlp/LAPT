@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.tokenizer_utils import (
+from lapt.tokenizer_utils import (
     apply_character_weighting,
     extract_target_seed_vocab,
     normalize_vocab_mass,

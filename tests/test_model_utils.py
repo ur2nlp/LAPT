@@ -3,8 +3,8 @@
 import pytest
 from omegaconf import OmegaConf
 
-from src.__main__ import _validate_init_model_id
-from src.model_utils import (
+from lapt.__main__ import _validate_init_model_id
+from lapt.model_utils import (
     format_number,
     get_init_model_identifier,
     get_model_shortname,
@@ -211,9 +211,9 @@ from types import SimpleNamespace
 
 import torch
 
-import src.model_utils as model_utils_mod
-from src.artifact_configs import TokenizerConfig, focus_embedding_hash
-from src.tokenizer_utils import _sidecar_paths
+import lapt.model_utils as model_utils_mod
+from lapt.artifact_configs import TokenizerConfig, focus_embedding_hash
+from lapt.tokenizer_utils import _sidecar_paths
 
 
 def _focus_model_args(cache_dir_base: str, language: str = "hy"):
