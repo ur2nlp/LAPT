@@ -20,7 +20,7 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, l
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
-from artifact_configs import SourceCacheTracking, _dict_diff, multinomial_mix_slug
+from lapt.artifact_configs import SourceCacheTracking, _dict_diff, multinomial_mix_slug
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
 

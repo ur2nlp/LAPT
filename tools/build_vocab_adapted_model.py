@@ -46,9 +46,10 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-# Allow imports from src/ when run from project root
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-from tokenizer_utils import apply_focus_initialization
+# Put the repository root on sys.path so `lapt` imports without an
+# editable install, for running this script straight from a checkout.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from lapt.tokenizer_utils import apply_focus_initialization
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)

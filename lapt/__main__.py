@@ -14,15 +14,15 @@ from transformers import (
 )
 from transformers.trainer_utils import get_last_checkpoint
 
-from artifact_configs import (
+from lapt.artifact_configs import (
     DatasetConfig,
     ModelConfig,
     TokenizedDatasetConfig,
     TokenizerConfig,
     resolve_dev_size,
 )
-from custom_trainer import FlooredPerExampleLossTrainer
-from dataset_utils import (
+from lapt.custom_trainer import FlooredPerExampleLossTrainer
+from lapt.dataset_utils import (
     DataCollatorForInstructionTuning,
     is_instruction_dataset,
     load_tokenized_dataset,
@@ -30,14 +30,14 @@ from dataset_utils import (
     load_untokenized_dataset,
     prepare_eval_datasets,
 )
-from eval_utils import (
+from lapt.eval_utils import (
     BPCCallback,
     GenerationChrfCallback,
     compute_chars_per_token,
     compute_ttr_metrics,
     preprocess_logits_for_metrics,
 )
-from model_utils import (
+from lapt.model_utils import (
     get_init_model_identifier,
     get_tokenized_path,
     initialize_model_and_tokenizer,

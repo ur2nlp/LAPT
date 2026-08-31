@@ -67,9 +67,11 @@ from pathlib import Path
 import sentencepiece as spm
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+# Put the repository root on sys.path so `lapt` imports without an
+# editable install, for running this script straight from a checkout.
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tokenizer_utils import (
+from lapt.tokenizer_utils import (
     _create_unigram_tokenizer,
     _detect_tokenizer_algorithm,
     _extract_special_tokens,

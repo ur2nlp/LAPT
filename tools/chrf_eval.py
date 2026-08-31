@@ -51,12 +51,12 @@ from interactive_prompt import load_model, resolve_device, resolve_dtype
 
 # Share the token-counting definition with the training-loop chrF callback so
 # the offline and in-training non-halting rates cannot drift apart.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 from sacrebleu.metrics import CHRF
 from tqdm import tqdm
 
-from eval_utils import count_new_tokens
+from lapt.eval_utils import count_new_tokens
 
 
 def load_instruction_jsonl(file_path: str) -> tuple[list[str], list[str]]:
@@ -123,7 +123,7 @@ def generate_responses(
     ``text-generation`` pipeline, so the raw generated token ids are available:
     the pipeline only hands back decoded text, which cannot distinguish a model
     that halted on EOS from one that rambled to ``max_new_tokens`` and was cut
-    off. This mirrors ``src/eval_utils.generate_greedy_batched``, the
+    off. This mirrors ``lapt/eval_utils.generate_greedy_batched``, the
     training-loop counterpart, which slices the prompt off by token index for
     the same reason.
 

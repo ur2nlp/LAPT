@@ -29,7 +29,7 @@ conda activate lapt
 Train on OSCAR corpus for a single language:
 
 ```bash
-python src/__main__.py dataset.type=oscar dataset.language=hy
+python -m lapt dataset.type=oscar dataset.language=hy
 ```
 
 ### FOCUS Training
@@ -37,7 +37,7 @@ python src/__main__.py dataset.type=oscar dataset.language=hy
 Train with vocabulary specialization:
 
 ```bash
-python src/__main__.py focus.enabled=true focus.vocab_size=32768 focus.num_samples=1000000
+python -m lapt focus.enabled=true focus.vocab_size=32768 focus.num_samples=1000000
 ```
 
 ### Multinomial Sampling
@@ -60,7 +60,7 @@ cache_dir: data/uralic_mix
 ```
 
 ```bash
-python src/__main__.py dataset=multilingual
+python -m lapt dataset=multilingual
 ```
 
 ### Local Data
@@ -68,12 +68,12 @@ python src/__main__.py dataset=multilingual
 Train on your own plaintext files:
 
 ```bash
-python src/__main__.py dataset.type=plaintext dataset.path=/path/to/data.txt
+python -m lapt dataset.type=plaintext dataset.path=/path/to/data.txt
 ```
 
 ## Project Structure
 
-- `src/` - Main source code
+- `lapt/` - Main source code (installable package)
   - `__main__.py` - Training orchestration
   - `dataset_utils.py` - Dataset loading and processing
   - `model_utils.py` - Model and tokenizer initialization

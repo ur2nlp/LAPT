@@ -11,7 +11,7 @@ import tempfile
 import pytest
 from omegaconf import OmegaConf
 
-from src.artifact_configs import (
+from lapt.artifact_configs import (
     DatasetConfig,
     TokenizedDatasetConfig,
     TokenizerConfig,

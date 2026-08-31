@@ -19,7 +19,7 @@ import yaml
 from datasets import load_from_disk
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, PreTrainedTokenizerFast
 
-from artifact_configs import TokenizerConfig
+from lapt.artifact_configs import TokenizerConfig
 
 
 def extract_base_vocabulary_frequencies(
@@ -157,7 +157,7 @@ def prepare_focus_training_data(
     # If dataset_config provided, load that dataset; otherwise use training dataset
     if dataset_config is not None:
         # Import here to avoid circular dependency (dataset_utils imports tokenizer_utils)
-        from dataset_utils import load_untokenized_dataset
+        from lapt.dataset_utils import load_untokenized_dataset
         # Use the JSONL output directory as the cache for the FOCUS dataset
         focus_cache = os.path.dirname(output_jsonl_path)
         untokenized_path = load_untokenized_dataset(
