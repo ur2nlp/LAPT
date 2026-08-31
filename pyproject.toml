@@ -34,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "mutmut>=3.7",
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.16",
@@ -129,3 +130,20 @@ known-third-party = ["tokenizers"]
 # Tests re-import module-level names inside test bodies to document what is
 # under test, and bind fixtures that are used only for their side effects.
 "tests/*" = ["F811", "F841", "B017"]
+
+# Mutation testing: rather than asking which lines the tests *execute* (coverage),
+# ask which defects they would *catch*. mutmut copies the tree into `mutants/`,
+# introduces one small change at a time (flip a comparison, drop a call, alter a
+# literal), and reports whether some test fails. A surviving mutant is a defect
+# the suite would ship. This is an audit run on demand, not part of CI.
+[tool.mutmut]
+# Mutate the framework modules, but scope each run with `only_mutate` -- a whole
+# -tree run is far more mutants than a single sitting warrants.
+source_paths = ["src"]
+only_mutate = ["src/dataset_utils.py"]
+# Deliberately left off. It would skip mutants on lines no test executes, but it
+# buys that by running a whole extra in-process pytest pass to collect coverage
+# -- and a second pytest run in one process re-imports torch, which dies with
+# "function '_has_torch_function' already has a docstring". Coverage already
+# tells us which lines are unreached, so the saving is not worth the breakage.
+# mutate_only_covered_lines = true
