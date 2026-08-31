@@ -1,15 +1,18 @@
-"""
-Configuration classes for LAPT artifacts.
+"""LAPT's concrete artifact configurations.
 
 Each artifact (tokenizer, dataset, model) has a config class that:
+
 1. Defines all parameters that affect the artifact
-2. Provides from_args() to extract from full Hydra config
+2. Provides from_args() to extract from the full Hydra config
 3. Provides cache_path() to generate consistent cache paths
 4. Provides save() / check_cached() for config tracking
+
+The tracking machinery itself -- the `ArtifactConfig` base class, config
+diffing, and path digests -- lives in `lapt.core.artifacts`, which is shared
+with sibling projects. This module holds only what is specific to LAPT's Hydra
+schema and cache layout.
 """
 
-import hashlib
-import json
 import os
 import sys
 import warnings
@@ -18,6 +21,14 @@ from typing import Optional
 
 import yaml
 from omegaconf import DictConfig, OmegaConf
+
+from lapt.core.artifacts import (
+    ArtifactConfig,
+    ConfigMismatchError,
+    config_digest,
+    dict_diff,
+    format_number,
+)
 
 
 def resolve_dev_size(args: DictConfig):
@@ -55,119 +66,6 @@ def resolve_dev_size(args: DictConfig):
         "dev_size not found in dataset or training config. "
         "Please set dataset.dev_size in your config."
     )
-
-
-class ArtifactConfig:
-    """Base class for artifact configuration tracking.
-
-    Subclasses must implement to_dict() and set artifact_name.
-    """
-    artifact_name: str
-
-    def to_dict(self) -> dict:
-        raise NotImplementedError
-
-    def save(self, config_path: str):
-        """Save this config to a YAML file.
-
-        Args:
-            config_path: Full path to the config file to write
-        """
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        with open(config_path, 'w') as f:
-            yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
-        print(f"Saved {self.artifact_name} config to {config_path}", file=sys.stderr)
-
-    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
-        """Check if cached config at path matches this config.
-
-        Args:
-            config_path: Full path to the cached config file
-            error_on_mismatch: If True (default), raise ValueError on mismatch.
-                               If False, print warning and return False.
-
-        Returns:
-            True if configs match (or no cached config exists),
-            False if mismatch and error_on_mismatch is False
-
-        Raises:
-            ValueError: If configs don't match and error_on_mismatch is True
-        """
-        if not os.path.exists(config_path):
-            return True
-
-        with open(config_path) as f:
-            cached_config = yaml.safe_load(f)
-
-        if cached_config is None:
-            return True
-
-        diffs = _dict_diff(cached_config, self.to_dict())
-        if not diffs:
-            return True
-
-        error_msg = (
-            f"\n{'=' * 70}\n"
-            f"CONFIG MISMATCH: {self.artifact_name}\n"
-            f"{'=' * 70}\n"
-            f"Cached artifact was created with different parameters:\n\n"
-            + "\n".join(f"  {diff}" for diff in diffs)
-            + f"\n\n"
-            f"The cached config file represents what actually created this artifact.\n"
-            f"To proceed, either:\n\n"
-            f"  1. Regenerate with current config:\n"
-            f"     Add fresh_dataset=true (dataset), fresh_tokenizer=true (tokenizer),\n"
-            f"     or fresh_model=true (model) to your command\n\n"
-            f"  2. Update your config to match the cached version\n"
-            f"{'=' * 70}\n"
-        )
-
-        if error_on_mismatch:
-            raise ValueError(error_msg)
-        else:
-            print(error_msg, file=sys.stderr)
-            return False
-
-
-def _dict_diff(dict1: dict, dict2: dict, path: str = "") -> list[str]:
-    """
-    Recursively find differences between two dictionaries.
-
-    Args:
-        dict1: First dictionary (cached)
-        dict2: Second dictionary (current)
-        path: Current path in nested structure (for error messages)
-
-    Returns:
-        List of difference descriptions
-    """
-    diffs = []
-
-    only_in_1 = set(dict1.keys()) - set(dict2.keys())
-    for key in only_in_1:
-        diffs.append(
-            f"{path}.{key}" if path
-            else f"{key}: present in cached config but not in current"
-        )
-
-    only_in_2 = set(dict2.keys()) - set(dict1.keys())
-    for key in only_in_2:
-        diffs.append(
-            f"{path}.{key}" if path
-            else f"{key}: present in current config but not in cached"
-        )
-
-    for key in set(dict1.keys()) & set(dict2.keys()):
-        val1 = dict1[key]
-        val2 = dict2[key]
-        current_path = f"{path}.{key}" if path else key
-
-        if isinstance(val1, dict) and isinstance(val2, dict):
-            diffs.extend(_dict_diff(val1, val2, current_path))
-        elif val1 != val2:
-            diffs.append(f"{current_path}: {val1} (cached) != {val2} (current)")
-
-    return diffs
 
 
 class SourceCacheTracking:
@@ -253,33 +151,12 @@ def multinomial_mix_slug(dataset_config: dict) -> str:
             for source in dataset_config.get('sources', [])
         ],
     }
-    canonical = json.dumps(mix_keys, sort_keys=True, default=str)
-    digest = hashlib.sha256(canonical.encode()).hexdigest()[:8]
+    digest = config_digest(mix_keys)
 
     # omit the alpha segment when the config has no alpha, rather than writing
     # "aNone" into the directory name; slugs for configs that do set it are unchanged
     alpha_part = f"a{alpha}_" if alpha is not None else ""
     return f"mix_{alpha_part}s{format_number(total_samples)}_{digest}"
-
-
-def format_number(n: int) -> str:
-    """
-    Format large numbers with k/m suffix for directory names.
-
-    Uses integer division (truncation) for consistency in paths.
-
-    Args:
-        n: Number to format
-
-    Returns:
-        Formatted string like "50k", "1m" (always truncated, never decimal)
-    """
-    if n >= 1_000_000:
-        return f"{n // 1_000_000}m"
-    elif n >= 1000:
-        return f"{n // 1000}k"
-    else:
-        return str(n)
 
 
 @dataclass
@@ -531,24 +408,14 @@ class TokenizerConfig(ArtifactConfig):
         # Backward compat: caches predating tokenizer_algorithm were all trained
         # with the inherited algorithm (None), so treat a missing key as such.
         cached.setdefault('tokenizer_algorithm', None)
-        # Round-trip via the base implementation by writing the filtered
-        # config to a tempfile would be over-engineered; replicate the diff
-        # inline.
-        diffs = _dict_diff(cached, self.to_dict())
+        # the filtering above is why this cannot just delegate to the base
+        # implementation; the message itself is still shared
+        diffs = dict_diff(cached, self.to_dict())
         if not diffs:
             return True
-        error_msg = (
-            f"\n{'=' * 70}\n"
-            f"CONFIG MISMATCH: {self.artifact_name}\n"
-            f"{'=' * 70}\n"
-            f"Cached artifact was created with different parameters:\n\n"
-            + "\n".join(f"  {diff}" for diff in diffs)
-            + f"\n\n"
-            f"To proceed, either add fresh_tokenizer=true or align your config.\n"
-            f"{'=' * 70}\n"
-        )
+        error_msg = self._format_mismatch(config_path, diffs)
         if error_on_mismatch:
-            raise ValueError(error_msg)
+            raise ConfigMismatchError(error_msg)
         print(error_msg, file=sys.stderr)
         return False
 
@@ -671,8 +538,7 @@ def focus_embedding_hash(args: DictConfig) -> str:
         'seed': args.seed,
         'fasttext_model_min_count': args.focus.get('fasttext_model_min_count', 4),
     }
-    canonical = json.dumps(keys, sort_keys=True, default=str)
-    return hashlib.sha256(canonical.encode()).hexdigest()[:8]
+    return config_digest(keys)
 
 
 class TokenizedDatasetConfig(ArtifactConfig):

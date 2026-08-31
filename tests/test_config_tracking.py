@@ -15,7 +15,7 @@ from lapt.artifact_configs import (
     DatasetConfig,
     TokenizedDatasetConfig,
     TokenizerConfig,
-    _dict_diff,
+    dict_diff,
     focus_embedding_hash,
 )
 
@@ -26,34 +26,34 @@ class TestDictDiff:
     def test_identical_dicts(self):
         dict1 = {'a': 1, 'b': 2}
         dict2 = {'a': 1, 'b': 2}
-        diffs = _dict_diff(dict1, dict2)
+        diffs = dict_diff(dict1, dict2)
         assert len(diffs) == 0
 
     def test_different_values(self):
         dict1 = {'a': 1, 'b': 2}
         dict2 = {'a': 1, 'b': 3}
-        diffs = _dict_diff(dict1, dict2)
+        diffs = dict_diff(dict1, dict2)
         assert len(diffs) == 1
         assert 'b: 2 (cached) != 3 (current)' in diffs[0]
 
     def test_missing_keys_in_dict2(self):
         dict1 = {'a': 1, 'b': 2}
         dict2 = {'a': 1}
-        diffs = _dict_diff(dict1, dict2)
+        diffs = dict_diff(dict1, dict2)
         assert len(diffs) == 1
         assert 'b' in diffs[0]
 
     def test_extra_keys_in_dict2(self):
         dict1 = {'a': 1}
         dict2 = {'a': 1, 'b': 2}
-        diffs = _dict_diff(dict1, dict2)
+        diffs = dict_diff(dict1, dict2)
         assert len(diffs) == 1
         assert 'b' in diffs[0]
 
     def test_nested_dicts(self):
         dict1 = {'a': {'x': 1, 'y': 2}}
         dict2 = {'a': {'x': 1, 'y': 3}}
-        diffs = _dict_diff(dict1, dict2)
+        diffs = dict_diff(dict1, dict2)
         assert len(diffs) == 1
         assert 'a.y: 2 (cached) != 3 (current)' in diffs[0]
 
