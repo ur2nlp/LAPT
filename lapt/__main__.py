@@ -15,7 +15,6 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 
 from lapt.artifact_configs import (
-    DatasetConfig,
     ModelConfig,
     TokenizedDatasetConfig,
     TokenizerConfig,
@@ -24,10 +23,10 @@ from lapt.artifact_configs import (
 from lapt.custom_trainer import FlooredPerExampleLossTrainer
 from lapt.dataset_utils import (
     DataCollatorForInstructionTuning,
+    UntokenizedDataset,
     is_instruction_dataset,
     load_tokenized_dataset,
     load_tokenized_multinomial_dataset,
-    load_untokenized_dataset,
     prepare_eval_datasets,
 )
 from lapt.eval_utils import (
@@ -329,45 +328,15 @@ def lapt(args: DictConfig):
     # Handle cache cleanup if requested
     _handle_cache_cleanup(args)
 
-    # Build dataset config for tracking
     dev_size = resolve_dev_size(args)
 
-    # Build dataset config for tracking. For multinomial datasets, the
-    # untokenized split lives in a mix-keyed subfolder of the parent cache_dir;
-    # DatasetConfig.effective_cache_dir() resolves to that subfolder so config
-    # tracking points at the mix-specific artifact.
-    dataset_config = DatasetConfig.from_args(args)
-    effective_cache_dir = dataset_config.effective_cache_dir(args.dataset.cache_dir)
-    dataset_config_path = f"{effective_cache_dir}/untokenized/config.yaml"
-
-    # Check if dataset cache exists
-    dataset_cache_exists = os.path.exists(f"{effective_cache_dir}/untokenized")
-
-    # Verify config matches if cache exists
-    if dataset_cache_exists:
-        if os.path.exists(dataset_config_path):
-            dataset_config.check_cached(dataset_config_path)
-        else:
-            print(
-                f"Note: Using cached dataset at {effective_cache_dir}/untokenized"
-                f" without config tracking\n"
-                f"      (artifact was created before config tracking was implemented)",
-                file=sys.stderr
-            )
-
-    # Load or download untokenized dataset first (needed for FOCUS or standard training).
-    # For multinomial, load_untokenized_dataset internally routes the output
-    # to the mix subfolder; we still pass the parent cache_dir here so source
-    # subdirs remain shared at the parent level.
-    untokenized_path = load_untokenized_dataset(
-        dataset_config=args.dataset,
-        cache_dir=args.dataset.cache_dir,
-        dev_size=dev_size
-    )
-
-    # Save config if we just created the dataset
-    if not dataset_cache_exists:
-        dataset_config.save(dataset_config_path)
+    # Resolve the untokenized corpus (needed for FOCUS and for standard
+    # training alike). UntokenizedDataset owns the cache path, the config
+    # record beside it, and the validate-or-build decision; for multinomial
+    # mixes it resolves to the mix-keyed subfolder while per-source subdirs
+    # stay shared at the parent level.
+    untokenized_dataset = UntokenizedDataset(args)
+    untokenized_path = untokenized_dataset.resolve()
 
     # Initialize model and tokenizer (with optional FOCUS)
     model, tokenizer, tokenized_path = initialize_model_and_tokenizer(args)
