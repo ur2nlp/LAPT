@@ -3,6 +3,7 @@
 [![CI](https://github.com/ur2nlp/LAPT/actions/workflows/ci.yml/badge.svg)](https://github.com/ur2nlp/LAPT/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Docs](https://img.shields.io/badge/docs-ur2nlp.io%2FLAPT-blue.svg)](https://ur2nlp.io/LAPT/)
 
 A modular framework for continued pre-training of multilingual language models with flexible data loading and optional vocabulary specialization via [FOCUS](https://github.com/konstantinjdobler/focus).
 
