@@ -1,0 +1,75 @@
+site_name: LAPT
+site_description: Language-Adaptive Pre-Training — adapting multilingual LMs to new languages
+site_url: https://ur2nlp.github.io/LAPT/
+repo_url: https://github.com/ur2nlp/LAPT
+repo_name: ur2nlp/LAPT
+edit_uri: edit/main/docs/
+
+# `docs_dir` is deliberately narrow. The `.claude/` notes are a separate private
+# repository and must never be published here.
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - search.suggest
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            signature_crossrefs: true
+            heading_level: 2
+            # Private helpers are the majority of some modules and are not a
+            # supported surface; the source link covers anyone who needs them.
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+  # Lets docs/index.md pull in README.md instead of restating it, so the GitHub
+  # landing page and the site cannot drift apart.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+nav:
+  - Home: index.md
+  - API Reference:
+      - lapt.dataset_utils: api/dataset_utils.md
+      - lapt.model_utils: api/model_utils.md
+      - lapt.tokenizer_utils: api/tokenizer_utils.md
+      - lapt.eval_utils: api/eval_utils.md
+      - lapt.artifact_configs: api/artifact_configs.md
+      - lapt.custom_trainer: api/custom_trainer.md

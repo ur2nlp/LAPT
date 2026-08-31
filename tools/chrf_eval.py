@@ -10,8 +10,8 @@ report with a metadata header is written to a file.
 Alongside chrF, this reports generation-length behavior: how many new tokens
 each generation actually produced, and what fraction ran to the
 ``--max-tokens`` cap without ever emitting EOS. That non-halting rate is a
-cheap behavioral flag (see ``.claude/gothic/generation_eval.md``) and comes
-free with generation you are already paying for.
+cheap behavioral flag for a model that never learned to stop, and comes free
+with generation you are already paying for.
 
 This is the batch, non-interactive counterpart to ``tools/interactive_prompt.py``
 and reuses its model-loading helpers. Although chrF is usually applied to bare
