@@ -2118,20 +2118,30 @@ class TestSubstitutions:
     def test_apply_substitutions_cache_key_is_pinned(self, tmp_path):
         """The cache directory suffix is a compatibility surface, so pin it.
 
-        The digest names a directory that already exists on disk and on the
-        cluster. Any change to how it is derived -- renaming a key in the
-        hashed dict, reordering the pairs, switching the hash -- silently
-        orphans every substituted dataset already built: the next run sees a
-        miss and rebuilds, and the old directories linger. Nothing about that
-        looks like a failure, which is why it needs an assertion rather than
-        a review.
+        The digest names directories that already exist on disk and on the
+        cluster, so any change to how it is derived orphans them: the next run
+        misses, rebuilds, and the old directories linger. Nothing about that
+        looks like a failure. Pinning the literal value turns it into a
+        deliberate decision -- update the constant, and say so in the commit
+        message.
 
-        Tests that only compare two digests to each other cannot catch this,
-        since a renamed key preserves both "same patterns agree" and
-        "different patterns differ".
+        The realistic trigger is *adding* a field to the hashed dict (regex
+        flags, a match limit, a per-column scope), not renaming one: these key
+        names are internal, rebuilt here from the tuples _parse_substitutions
+        returns, so renaming them would not even touch the YAML schema and
+        there is no reason anyone would. Tests that compare two digests to each
+        other cannot see either change, since both preserve "same patterns
+        agree" and "different patterns differ".
 
-        If this value must change, that is a deliberate cache invalidation:
-        update the constant and say so in the commit message.
+        Stakes are modest -- a rebuild, not corruption. Correctness is
+        _validate_source_cache's job, and it is tested separately.
+
+        NOT covered here, and worth knowing: only `substitutions` feeds the
+        digest, while `tracked` also carries `type` and `base`. Adding a field
+        to `tracked` alone leaves the digest unchanged, so the same directory
+        is reused with a mismatched config and _validate_source_cache raises on
+        every existing cache until someone passes fresh_dataset=true. That is a
+        worse outcome than a silent rebuild and nothing flags it.
         """
         base_path = tmp_path / "untokenized"
         DatasetDict({'train': Dataset.from_dict({'text': ['x\ny']})}).save_to_disk(
