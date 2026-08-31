@@ -20,7 +20,7 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, l
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
-from lapt.artifact_configs import SourceCacheTracking, _dict_diff, multinomial_mix_slug
+from lapt.artifact_configs import SourceCacheTracking, dict_diff, multinomial_mix_slug
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
 
@@ -65,7 +65,7 @@ def _validate_source_cache(untokenized_path: str, current: dict) -> None:
             )
         }
 
-    diffs = _dict_diff(cached, current)
+    diffs = dict_diff(cached, current)
     if not diffs:
         return
 
@@ -1676,7 +1676,7 @@ def _validate_tokenized_source_cache(tokenized_path: str, current: dict) -> None
         return
     with open(config_path) as f:
         cached = yaml.safe_load(f) or {}
-    diffs = _dict_diff(cached, current)
+    diffs = dict_diff(cached, current)
     if not diffs:
         return
     raise ValueError(
