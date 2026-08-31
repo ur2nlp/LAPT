@@ -2115,6 +2115,34 @@ class TestSubstitutions:
         second = _apply_substitutions(str(base_path), substitutions)
         assert first == second
 
+    def test_apply_substitutions_cache_key_is_pinned(self, tmp_path):
+        """The cache directory suffix is a compatibility surface, so pin it.
+
+        The digest names a directory that already exists on disk and on the
+        cluster. Any change to how it is derived -- renaming a key in the
+        hashed dict, reordering the pairs, switching the hash -- silently
+        orphans every substituted dataset already built: the next run sees a
+        miss and rebuilds, and the old directories linger. Nothing about that
+        looks like a failure, which is why it needs an assertion rather than
+        a review.
+
+        Tests that only compare two digests to each other cannot catch this,
+        since a renamed key preserves both "same patterns agree" and
+        "different patterns differ".
+
+        If this value must change, that is a deliberate cache invalidation:
+        update the constant and say so in the commit message.
+        """
+        base_path = tmp_path / "untokenized"
+        DatasetDict({'train': Dataset.from_dict({'text': ['x\ny']})}).save_to_disk(
+            str(base_path)
+        )
+
+        substitutions = _parse_substitutions([{'pattern': r'\n+', 'replacement': ' '}])
+        out_path = _apply_substitutions(str(base_path), substitutions)
+
+        assert out_path == f"{base_path}_sub_9ec26528"
+
     def test_apply_substitutions_distinct_patterns_distinct_paths(self, tmp_path):
         """Different patterns hash to different cache directories."""
         base_path = tmp_path / "untokenized"

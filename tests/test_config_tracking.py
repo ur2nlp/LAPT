@@ -833,6 +833,24 @@ class TestFocusEmbeddingHash:
         h_b = focus_embedding_hash(_focus_args(focus={'dataset': focus_ds}, seed=2))
         assert h_a != h_b
 
+    def test_focus_dataset_key_order_does_not_change_hash(self):
+        """Reordering keys in the focus dataset spec must not change the hash.
+
+        `focus.dataset` is a free-form mapping copied straight out of the user's
+        YAML, so its key order is whatever the file happens to use. The hash is
+        stable across that only because focus_embedding_hash passes
+        sort_keys=True to json.dumps. Without it, editing a config purely for
+        readability would change the hash, miss the embedding cache, and pay for
+        a full fastText training run to arrive at identical embeddings.
+        """
+        spec = {'type': 'plaintext', 'path': '/data/got.txt', 'cache_dir': 'data/got'}
+        reordered = {'cache_dir': 'data/got', 'path': '/data/got.txt', 'type': 'plaintext'}
+        assert list(spec) != list(reordered)
+
+        h_a = focus_embedding_hash(_focus_args(focus={'dataset': spec}))
+        h_b = focus_embedding_hash(_focus_args(focus={'dataset': reordered}))
+        assert h_a == h_b
+
     def test_num_samples_still_matters_with_focus_dataset(self):
         focus_ds = {'type': 'plaintext', 'path': '/data/got.txt', 'cache_dir': 'data/got'}
         h_a = focus_embedding_hash(_focus_args(
