@@ -20,7 +20,14 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, l
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
-from lapt.artifact_configs import SourceCacheTracking, dict_diff, multinomial_mix_slug
+from lapt.artifact_configs import (
+    DatasetConfig,
+    SourceCacheTracking,
+    dict_diff,
+    multinomial_mix_slug,
+    resolve_dev_size,
+)
+from lapt.core.artifacts import CachedArtifact
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
 
@@ -367,6 +374,66 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         untokenized_path = _apply_substitutions(untokenized_path, substitutions)
 
     return untokenized_path
+
+
+class UntokenizedDataset(CachedArtifact):
+    """The raw, untokenized corpus stage, as a tracked pipeline artifact.
+
+    Wraps `load_untokenized_dataset` so that the config record beside the cache
+    is written and validated by the same object that resolves the path, instead
+    of by ~35 lines of glue in `__main__`.
+
+    The value of this stage is a *path*, not a dataset: downstream tokenization
+    reads it from disk, and for multinomial mixes it is a mix-keyed subfolder
+    resolved by `DatasetConfig.effective_cache_dir`. Substitutions, when
+    configured, move it again to a `_sub_{digest}` sibling.
+
+    `build` and `read` therefore both delegate to the dispatcher, and `write` is
+    a no-op. That is not an accident of the port: the dispatcher already owns a
+    second, per-source caching mechanism (`_save_source_cache_config` /
+    `_validate_source_cache`) that predates `CachedArtifact` and has not been
+    ported yet. Until it is, the dispatcher is the only thing that can decide
+    which of those inner caches are valid and what the resulting path is, so
+    this class tracks the outer stage only. Porting the inner sources is what
+    will let `build` and `read` become genuinely different operations.
+    """
+
+    name = "untokenized"
+
+    def __init__(self, args: DictConfig):
+        """Initialize from the full Hydra config.
+
+        Args:
+            args: Full Hydra configuration, read for `dataset` and `seed`.
+        """
+        self.args = args
+        self._dataset_config = DatasetConfig.from_args(args)
+        super().__init__(self._dataset_config.effective_cache_dir(args.dataset.cache_dir))
+
+    def config(self) -> dict:
+        """Return the tracked parameters for this dataset (see `DatasetConfig`)."""
+        return self._dataset_config.to_dict()
+
+    def artifact_config(self) -> DatasetConfig:
+        """Use `DatasetConfig` itself, so mismatch messages keep their name."""
+        return self._dataset_config
+
+    def _dispatch(self) -> str:
+        """Run the cache-aware loader and return the resulting path."""
+        return load_untokenized_dataset(
+            dataset_config=self.args.dataset,
+            cache_dir=self.args.dataset.cache_dir,
+            dev_size=resolve_dev_size(self.args),
+        )
+
+    def build(self, deps) -> str:
+        return self._dispatch()
+
+    def read(self, path: str) -> str:
+        return self._dispatch()
+
+    def write(self, value: str, path: str) -> None:
+        """No-op: the dispatcher writes its own output."""
 
 
 def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
