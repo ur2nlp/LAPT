@@ -1963,8 +1963,8 @@ def load_tokenized_dataset(
     tokenized_path: str,
     tokenizer: PreTrainedTokenizer,
     max_length: int,
-    dev_size: float
-):
+    dev_size: float,
+) -> DatasetDict:
     """
     Load or create tokenized dataset with train/test split.
 
@@ -1983,11 +1983,11 @@ def load_tokenized_dataset(
             of data to use for development/test set (ignored if dataset already split)
 
     Returns:
-        Dataset dictionary with 'train' and dev splits
-        - Simple datasets: {'train': ..., 'test': ...}
-        - Multinomial datasets: {'train': ..., '{language}': ..., '{language}': ..., ...}
-          (e.g., {'train': ..., 'got': ..., 'ang': ..., 'non': ...})
-        - Instruction datasets: same structure but with 'labels' field for loss masking
+        Dataset dictionary with 'train' and dev splits. Simple datasets give
+        ``{'train': ..., 'test': ...}``; multinomial datasets give one dev split
+        per source, e.g. ``{'train': ..., 'got': ..., 'ang': ..., 'non': ...}``;
+        instruction datasets use the same structure with a 'labels' field added
+        for loss masking.
 
     NOTE: Parameters affecting the tokenized dataset artifact (max_length, dev_size, plus all
     upstream dataset and tokenizer parameters) should be tracked in TokenizedDatasetConfig

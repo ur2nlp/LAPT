@@ -405,10 +405,10 @@ class GenerationChrfCallback(TrainerCallback):
     it. It is only comparable across runs sharing the same ``max_new_tokens``,
     since raising the cap lowers the rate without the model changing.
 
-    bpc is a weakly-correct proxy for generation quality (right sign, low
-    magnitude, and it misranks eras where a task mix inflates translation bpc
-    without hurting output; see ``.claude/gothic/bpc_vs_chrf.md``); chrF closes
-    that gap for run selection. Generation is far slower than the bpc forward
+    bpc is a weakly-correct proxy for generation quality: the right sign but
+    low magnitude (r about -0.45 across a run sweep), and it misranks eras
+    where a task mix inflates translation bpc without hurting output. chrF
+    closes that gap for run selection. Generation is far slower than the bpc forward
     pass, but the holdouts are small (tens of examples), so cost is bounded.
 
     The metric is *logged* by default, not selected. To make it drive

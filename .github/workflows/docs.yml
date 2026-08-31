@@ -1,0 +1,77 @@
+name: Docs
+
+# Only `main` publishes. Project branches fork this file and would otherwise
+# each overwrite the same GitHub Pages site with their own tree.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: build (mkdocs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # The project itself is deliberately not installed. mkdocstrings reads the
+      # source statically through griffe, so the API reference builds without
+      # torch or transformers -- which keeps this job at well under a minute.
+      - name: Install docs toolchain
+        run: pip install mkdocs-material "mkdocstrings[python]"
+
+      - name: Build site
+        run: mkdocs build 2>&1 | tee build.log
+
+      # Advisory, like the formatting check in ci.yml. Every current warning is
+      # a public parameter or return with no type annotation; failing the build
+      # on them would block docs on an unrelated burn-down. Surfacing the count
+      # keeps it from quietly growing.
+      - name: Report docstring warnings
+        run: |
+          count=$(grep -c "WARNING" build.log || true)
+          if [ "$count" -eq 0 ]; then
+            echo "::notice::No mkdocstrings warnings."
+          else
+            echo "::warning::Advisory, not blocking: $count mkdocstrings warning(s), all unannotated public signatures."
+          fi
+          {
+            echo "### Docs build"
+            echo ""
+            echo "\`$count\` mkdocstrings warning(s) — advisory."
+            echo ""
+            grep "WARNING" build.log | sed 's/.*griffe: /- /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: site
+
+  deploy:
+    name: deploy (github pages)
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
