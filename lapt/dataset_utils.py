@@ -254,7 +254,12 @@ def _apply_substitutions(
     return substituted_path
 
 
-def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = None) -> str:
+def load_untokenized_dataset(
+    dataset_config,
+    cache_dir: str,
+    dev_size: float = None,
+    seed: int = 1,
+) -> str:
     """
     Load untokenized dataset based on configuration.
 
@@ -264,6 +269,8 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         dataset_config: Dataset configuration object with type and source info
         cache_dir: Base directory for caching dataset artifacts
         dev_size: Fraction of data for dev set (only used for multinomial sampling)
+        seed: Global random seed. Sources that subsample record it, so it must
+            reach them rather than being read only from the global RNG state.
 
     Returns:
         Path to the untokenized dataset
@@ -294,7 +301,7 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
         split_into_lines = getattr(dataset_config, 'split_into_lines', True)
         untokenized_path = _load_huggingface_dataset(
             cache_dir, name, config, split, text_column, max_samples, min_words_per_line,
-            oversampling_factor, split_into_lines
+            oversampling_factor, split_into_lines, seed
         )
     elif dataset_type == 'plaintext':
         file_path = dataset_config.path
@@ -302,17 +309,17 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
     elif dataset_type == 'plaintext_dir':
         directory = dataset_config.directory
         pattern = getattr(dataset_config, 'pattern', '*.txt')
-        untokenized_path = _load_plaintext_dir_dataset(cache_dir, directory, pattern)
+        untokenized_path = _load_plaintext_dir_dataset(cache_dir, directory, pattern, seed)
     elif dataset_type == 'concat':
         sources = dataset_config.sources
         parent_id = _get_source_id(dataset_config, fallback=None)
-        untokenized_path = _load_concat_dataset(cache_dir, sources, parent_id)
+        untokenized_path = _load_concat_dataset(cache_dir, sources, parent_id, seed)
     elif dataset_type == 'multinomial':
         sources = dataset_config.sources
         alpha = dataset_config.get('alpha')
         total_samples = dataset_config.total_samples
         untokenized_path = _load_multinomial_dataset(
-            cache_dir, sources, alpha, total_samples, dev_size,
+            cache_dir, sources, alpha, total_samples, dev_size, seed,
         )
     elif dataset_type == 'instruction_jsonl':
         file_path = dataset_config.path
@@ -334,6 +341,7 @@ def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = N
             prompt_template,
             response_template,
             max_samples,
+            seed,
         )
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
@@ -401,6 +409,7 @@ class UntokenizedDataset(CachedArtifact):
             dataset_config=self.args.dataset,
             cache_dir=self.args.dataset.cache_dir,
             dev_size=resolve_dev_size(self.args),
+            seed=self.args.seed,
         )
 
     def build(self, deps) -> str:
@@ -502,7 +511,12 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
     return source.path
 
 
-def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '*.txt') -> str:
+def _load_plaintext_dir_dataset(
+    cache_dir: str,
+    directory: str,
+    pattern: str = '*.txt',
+    seed: int = 1,
+) -> str:
     """
     Load all plaintext files from a directory and concatenate them.
 
@@ -534,7 +548,7 @@ def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '
     ]
 
     # Reuse concat implementation
-    return _load_concat_dataset(cache_dir, sources)
+    return _load_concat_dataset(cache_dir, sources, seed=seed)
 
 
 def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
@@ -602,7 +616,12 @@ def _load_instruction_hf_dataset(
     return source.path
 
 
-def _load_concat_dataset(cache_dir: str, sources: list, parent_id: str = None) -> str:
+def _load_concat_dataset(
+    cache_dir: str,
+    sources: list,
+    parent_id: str = None,
+    seed: int = 1,
+) -> str:
     """
     Concatenate multiple dataset sources into a single dataset.
 
@@ -647,7 +666,8 @@ def _load_concat_dataset(cache_dir: str, sources: list, parent_id: str = None) -
         # Recursively load each source (supports nested concat/multinomial)
         source_path = load_untokenized_dataset(
             dataset_config=source_dict_config,
-            cache_dir=source_cache
+            cache_dir=source_cache,
+            seed=seed,
         )
 
         source_dataset = load_from_disk(source_path)
@@ -670,7 +690,12 @@ def _load_concat_dataset(cache_dir: str, sources: list, parent_id: str = None) -
 
 
 def _load_multinomial_dataset(
-    cache_dir: str, sources: list, alpha: float, total_samples: int, dev_size: float = None
+    cache_dir: str,
+    sources: list,
+    alpha: float,
+    total_samples: int,
+    dev_size: float = None,
+    seed: int = 1,
 ) -> str:
     """
     Sample from multiple dataset sources using temperature-scaled multinomial sampling.
@@ -760,7 +785,7 @@ def _load_multinomial_dataset(
         # Load all sources, split into train/dev, and record train sizes
         for idx, source_config in enumerate(sources):
             source_id, train_data, dev_data = _load_and_split_source(
-                source_config, cache_dir, dev_size, idx
+                source_config, cache_dir, dev_size, idx, seed
             )
 
             train_datasets.append(train_data)
@@ -928,7 +953,8 @@ def _load_and_split_source(
     source_config,
     cache_dir: str,
     global_dev_size: float,
-    idx: int
+    idx: int,
+    seed: int = 1,
 ) -> tuple:
     """
     Load a single source dataset and split into train/dev.
@@ -955,7 +981,8 @@ def _load_and_split_source(
 
     source_path = load_untokenized_dataset(
         dataset_config=source_dict_config,
-        cache_dir=source_cache
+        cache_dir=source_cache,
+        seed=seed,
     )
 
     source_dataset = load_from_disk(source_path)

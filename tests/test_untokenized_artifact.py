@@ -197,3 +197,32 @@ class TestSubstitutions:
         artifact.resolve()
         with open(artifact.config_path) as handle:
             assert 'substitutions' not in yaml.safe_load(handle)
+
+
+class TestSeedPropagation:
+    """`args.seed` must reach the sources that record it.
+
+    The subsampling sources key their cache on the seed, so a seed that is only
+    set in the global RNG would produce records claiming a value the run did
+    not use.
+    """
+
+    def test_configured_seed_reaches_a_subsampling_source(self, tmp_path, corpus):
+        from unittest.mock import patch
+
+        from datasets import Dataset
+
+        args = plaintext_args(tmp_path, corpus)
+        args.seed = 77
+        args.dataset.type = 'huggingface'
+        args.dataset.name = 'fake/ds'
+        args.dataset.max_samples = 2
+        args.dataset.split_into_lines = False
+
+        documents = Dataset.from_dict({'text': ["one two", "three four"]})
+        with patch('lapt.sources.huggingface.load_dataset', return_value=documents):
+            artifact = UntokenizedDataset(args)
+            artifact.resolve()
+
+        with open(os.path.join(artifact.path, 'config.yaml')) as record:
+            assert yaml.safe_load(record)['seed'] == 77
