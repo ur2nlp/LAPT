@@ -9,6 +9,14 @@ the parameters it is keyed on and the code that produces the dataset.
 `SourceDataset` adds one LAPT-specific concern: detecting caches written before
 sources became artifacts. Those carry a differently named config record, which
 would otherwise read as "no record at all" and be accepted silently.
+
+That concern is temporary, and so is this class. It is a tripwire, not a
+compatibility shim — it refuses pre-refactor caches rather than reading them, so
+nothing is lost by removing it once none remain. Delete it when every source
+type has been converted and the cache tree has been regenerated, at which point
+`SourceDataset` has no content left: `name` duplicates the default it inherits
+and `__init__` only renames a parameter. Concrete types then subclass
+`DatasetArtifact` directly and this module keeps only `SOURCE_TYPES`.
 """
 
 import os
