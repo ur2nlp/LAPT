@@ -6,6 +6,7 @@ import sys
 from datasets import Dataset, DatasetDict
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.factory import field
 
 
 class PlaintextDataset(SourceDataset):
@@ -63,5 +64,18 @@ class PlaintextDataset(SourceDataset):
 
         return DatasetDict({'train': Dataset.from_dict({'text': lines})})
 
+    @classmethod
+    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'PlaintextDataset':
+        """Construct from a dataset configuration entry.
+
+        Args:
+            cache_dir: Directory the `untokenized` subdirectory goes in.
+            source_config: Entry carrying `path`.
+            seed: Unused; nothing here is random.
+
+        Returns:
+            The configured source.
+        """
+        return cls(cache_dir, field(source_config, 'path'))
 
 SOURCE_TYPES.register(PlaintextDataset)

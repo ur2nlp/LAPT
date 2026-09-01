@@ -6,6 +6,7 @@ import sys
 from datasets import Dataset, DatasetDict, load_dataset
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.factory import field
 from lapt.sources.text_processing import collect_from_stream, docs_to_filtered_lines
 
 
@@ -270,5 +271,29 @@ class HuggingFaceDataset(SourceDataset):
 
         return DatasetDict({'train': dataset})
 
+    @classmethod
+    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'HuggingFaceDataset':
+        """Construct from a dataset configuration entry.
+
+        Args:
+            cache_dir: Directory the `untokenized` subdirectory goes in.
+            source_config: Entry carrying at least `name`.
+            seed: Global random seed, recorded when `max_samples` is set.
+
+        Returns:
+            The configured source.
+        """
+        return cls(
+            cache_dir,
+            field(source_config, 'name'),
+            config=field(source_config, 'config'),
+            split=field(source_config, 'split', 'train'),
+            text_column=field(source_config, 'text_column', 'text'),
+            max_samples=field(source_config, 'max_samples'),
+            min_words_per_line=field(source_config, 'min_words_per_line'),
+            oversampling_factor=field(source_config, 'oversampling_factor', 3),
+            split_into_lines=field(source_config, 'split_into_lines', True),
+            seed=seed,
+        )
 
 SOURCE_TYPES.register(HuggingFaceDataset)

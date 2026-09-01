@@ -6,6 +6,7 @@ import sys
 from datasets import Dataset, DatasetDict, load_dataset
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.factory import field
 
 
 class InstructionHFDataset(SourceDataset):
@@ -168,5 +169,28 @@ class InstructionHFDataset(SourceDataset):
             'train': raw.map(self._to_prompt_response, remove_columns=raw.column_names),
         })
 
+    @classmethod
+    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'InstructionHFDataset':
+        """Construct from a dataset configuration entry.
+
+        Args:
+            cache_dir: Directory the `untokenized` subdirectory goes in.
+            source_config: Entry carrying at least `name`.
+            seed: Global random seed, recorded when `max_samples` is set.
+
+        Returns:
+            The configured source.
+        """
+        return cls(
+            cache_dir,
+            field(source_config, 'name'),
+            config=field(source_config, 'config'),
+            split=field(source_config, 'split', 'train'),
+            messages_column=field(source_config, 'messages_column', 'messages'),
+            prompt_template=field(source_config, 'prompt_template', '{user} Response:'),
+            response_template=field(source_config, 'response_template', ' {assistant}'),
+            max_samples=field(source_config, 'max_samples'),
+            seed=seed,
+        )
 
 SOURCE_TYPES.register(InstructionHFDataset)

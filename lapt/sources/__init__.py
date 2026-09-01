@@ -8,6 +8,8 @@ happens and test subclasses do not pollute the table.
 """
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.concat import ConcatDataset
+from lapt.sources.factory import build_source
 from lapt.sources.huggingface import HuggingFaceDataset
 from lapt.sources.instruction_hf import InstructionHFDataset
 from lapt.sources.instruction_jsonl import InstructionJsonlDataset
@@ -16,10 +18,12 @@ from lapt.sources.plaintext import PlaintextDataset
 
 __all__ = [
     'SOURCE_TYPES',
+    'ConcatDataset',
     'HuggingFaceDataset',
     'InstructionHFDataset',
     'InstructionJsonlDataset',
     'OscarDataset',
     'PlaintextDataset',
     'SourceDataset',
+    'build_source',
 ]

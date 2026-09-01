@@ -5,6 +5,7 @@ import sys
 from datasets import DatasetDict, load_dataset
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.factory import field
 from lapt.sources.text_processing import docs_to_lines
 
 
@@ -55,5 +56,18 @@ class OscarDataset(SourceDataset):
             remove_columns=dataset['train'].column_names,  # type: ignore
         )
 
+    @classmethod
+    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'OscarDataset':
+        """Construct from a dataset configuration entry.
+
+        Args:
+            cache_dir: Directory the `untokenized` subdirectory goes in.
+            source_config: Entry carrying `language`.
+            seed: Unused; the whole split is taken.
+
+        Returns:
+            The configured source.
+        """
+        return cls(cache_dir, field(source_config, 'language'))
 
 SOURCE_TYPES.register(OscarDataset)

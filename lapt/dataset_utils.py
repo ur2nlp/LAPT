@@ -28,6 +28,7 @@ from lapt.artifact_configs import (
 )
 from lapt.core.artifacts import CachedArtifact
 from lapt.sources import (
+    ConcatDataset,
     HuggingFaceDataset,
     InstructionHFDataset,
     InstructionJsonlDataset,
@@ -625,68 +626,20 @@ def _load_concat_dataset(
     """
     Concatenate multiple dataset sources into a single dataset.
 
+    Thin path-returning wrapper over `ConcatDataset`; see `_load_plaintext_dataset`.
+
     Args:
         cache_dir: Base directory for caching dataset artifacts
         sources: List of dataset source configurations (may include 'id' field for naming)
         parent_id: Optional id from parent concat config (used for fallback naming)
+        seed: Global random seed, passed to children that subsample
 
     Returns:
         Path to the untokenized concatenated dataset
     """
-    if not sources:
-        raise ValueError("Cannot concatenate datasets: sources list is empty")
-
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-
-    normalized_sources = [
-        OmegaConf.to_container(DictConfig(s), resolve=True) for s in sources
-    ]
-    tracked = {'type': 'concat', 'sources': normalized_sources}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print(f"Concatenating {len(sources)} dataset sources", file=sys.stderr)
-
-    datasets_to_concat = []
-    for idx, source_config in enumerate(sources):
-        # Wrap in DictConfig for recursive dispatching
-        source_dict_config = DictConfig(source_config)
-
-        # Determine source cache name:
-        # 1. Use source's id field if present (or deprecated 'language')
-        # 2. Use parent_id_{idx} if parent has id
-        # 3. Fall back to source_{idx}
-        default_id = f"{parent_id}_{idx}" if parent_id else f"source_{idx}"
-        source_id = _get_source_id(source_dict_config, fallback=default_id)
-
-        source_cache = os.path.join(cache_dir, source_id)
-
-        # Recursively load each source (supports nested concat/multinomial)
-        source_path = load_untokenized_dataset(
-            dataset_config=source_dict_config,
-            cache_dir=source_cache,
-            seed=seed,
-        )
-
-        source_dataset = load_from_disk(source_path)
-        datasets_to_concat.append(source_dataset['train'])
-        print(
-            f"  Source {idx} ({source_id}): {len(source_dataset['train'])} examples",
-            file=sys.stderr
-        )
-
-    concatenated = concatenate_datasets(datasets_to_concat)
-    dataset_dict = DatasetDict({'train': concatenated})
-    dataset_dict.save_to_disk(untokenized_path)
-    print(
-        f"Concatenated dataset saved to {untokenized_path} ({len(concatenated)} total examples)",
-        file=sys.stderr
-    )
-    _save_source_cache_config(untokenized_path, tracked)
-
-    return untokenized_path
+    source = ConcatDataset(cache_dir, sources, parent_id=parent_id, seed=seed)
+    source.resolve()
+    return source.path
 
 
 def _load_multinomial_dataset(

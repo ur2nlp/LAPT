@@ -5,6 +5,7 @@ import sys
 from datasets import Dataset, DatasetDict
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.factory import field
 from lapt.sources.text_processing import read_instruction_jsonl
 
 
@@ -60,5 +61,20 @@ class InstructionJsonlDataset(SourceDataset):
             'train': Dataset.from_dict({'prompt': prompts, 'response': responses}),
         })
 
+    @classmethod
+    def from_config(
+        cls, cache_dir: str, source_config, seed: int = 1
+    ) -> 'InstructionJsonlDataset':
+        """Construct from a dataset configuration entry.
+
+        Args:
+            cache_dir: Directory the `untokenized` subdirectory goes in.
+            source_config: Entry carrying `path`.
+            seed: Unused; every example is kept in file order.
+
+        Returns:
+            The configured source.
+        """
+        return cls(cache_dir, field(source_config, 'path'))
 
 SOURCE_TYPES.register(InstructionJsonlDataset)
