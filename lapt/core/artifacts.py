@@ -274,11 +274,16 @@ class CachedArtifact(ABC):
             name and as the key in an `ArtifactGraph`.
         depends_on: Names of the stages whose values `build` requires.
         path_includes_digest: Whether to append a config digest to the path.
+        config_filename: Name of the YAML config record written inside the
+            artifact directory. Override when adopting `CachedArtifact` for
+            caches that already carry a record under a different name, so the
+            existing records are read rather than silently ignored.
     """
 
     name: str = "artifact"
     depends_on: tuple[str, ...] = ()
     path_includes_digest: bool = False
+    config_filename: str = CONFIG_FILENAME
 
     def __init__(self, root: str):
         """Initialize the artifact.
@@ -352,7 +357,7 @@ class CachedArtifact(ABC):
     @property
     def config_path(self) -> str:
         """Path of the YAML config record inside this artifact's directory."""
-        return os.path.join(self.path, CONFIG_FILENAME)
+        return os.path.join(self.path, self.config_filename)
 
     def exists(self) -> bool:
         """Whether a cached copy of this artifact is present on disk."""

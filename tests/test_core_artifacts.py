@@ -194,6 +194,48 @@ class TestCachedArtifactResolve:
         assert not os.path.exists(artifact.path)
 
 
+class TestConfigFilenameOverride:
+    """`config_filename` lets a subclass adopt caches that already carry a
+    record under a different name.
+
+    Without the override, an existing cache directory whose record is named
+    something else reads as "predates config tracking": validate() warns and
+    accepts it, so a stale artifact is used instead of rejected.
+    """
+
+    def test_record_is_written_under_the_overridden_name(self, tmp_path):
+        class LegacyNamed(RecordingArtifact):
+            config_filename = "source_config.yaml"
+
+        artifact = LegacyNamed(str(tmp_path))
+        artifact.resolve()
+
+        assert os.path.exists(os.path.join(artifact.path, "source_config.yaml"))
+        assert not os.path.exists(os.path.join(artifact.path, "config.yaml"))
+
+    def test_record_under_the_overridden_name_is_validated(self, tmp_path):
+        class LegacyNamed(RecordingArtifact):
+            config_filename = "source_config.yaml"
+
+        LegacyNamed(str(tmp_path), payload="v1").resolve()
+
+        with pytest.raises(ConfigMismatchError):
+            LegacyNamed(str(tmp_path), payload="v2").resolve()
+
+    def test_default_name_ignores_a_differently_named_record(self, tmp_path):
+        """Pins the silent-acceptance behavior this override exists to avoid."""
+        class LegacyNamed(RecordingArtifact):
+            config_filename = "source_config.yaml"
+
+        LegacyNamed(str(tmp_path), payload="v1").resolve()
+
+        # same cache dir, default filename: the existing record is not read, so
+        # a genuinely different config is accepted rather than rejected
+        stock = RecordingArtifact(str(tmp_path), payload="v2")
+        assert stock.path == LegacyNamed(str(tmp_path)).path
+        assert stock.validate() is True
+
+
 class TestDigestAddressedPaths:
     """path_includes_digest makes configurations coexist instead of colliding."""
 
