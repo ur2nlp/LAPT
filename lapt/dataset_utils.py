@@ -27,8 +27,15 @@ from lapt.artifact_configs import (
     resolve_dev_size,
 )
 from lapt.core.artifacts import CachedArtifact
-from lapt.sources import InstructionJsonlDataset, OscarDataset, PlaintextDataset
-from lapt.sources.text_processing import docs_to_lines, read_instruction_jsonl
+from lapt.sources import (
+    HuggingFaceDataset,
+    InstructionJsonlDataset,
+    OscarDataset,
+    PlaintextDataset,
+)
+from lapt.sources.text_processing import (
+    read_instruction_jsonl,
+)
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
 
@@ -129,25 +136,6 @@ def _get_source_id(config: DictConfig, fallback: str = None) -> str:
     if not source_id:
         source_id = fallback
     return source_id
-
-
-def collect_from_stream(stream, limit: int) -> Dataset:
-    """
-    Collect examples from a streaming dataset up to a limit.
-
-    Args:
-        stream: An iterable of examples (typically from load_dataset with streaming=True)
-        limit: Maximum number of examples to collect
-
-    Returns:
-        Dataset containing the collected examples
-    """
-    samples = []
-    for i, example in enumerate(stream):
-        if i >= limit:
-            break
-        samples.append(example)
-    return Dataset.from_list(samples)
 
 
 def _parse_substitutions(raw) -> list[tuple[str, str]]:
@@ -452,9 +440,13 @@ def _load_huggingface_dataset(
     min_words_per_line: int = None,
     oversampling_factor: int = 3,
     split_into_lines: bool = True,
+    seed: int = 1,
 ) -> str:
     """
     Load a generic HuggingFace dataset.
+
+    Thin path-returning wrapper over `HuggingFaceDataset`; see
+    `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
@@ -463,226 +455,29 @@ def _load_huggingface_dataset(
         split: Which split to load (default: 'train')
         text_column: Name of the column containing text (default: 'text')
         max_samples: Maximum number of examples to load, uses streaming if specified
-            (optional). An "example" is a line when split_into_lines is True, else a
-            whole document.
         min_words_per_line: Minimum number of space-separated words per example
-            (filters out titles/headers). Applies per line when splitting, per
-            document otherwise.
-        oversampling_factor: When max_samples specified, download this many times more documents
-            than estimated needed to maintain document diversity (default: 3). Higher values =
-            better diversity but more memory.
-        split_into_lines: If True (default), split each document into one example
-            per line (the historical behavior). If False, keep each document as a
-            single example with newlines preserved, parallel to the instruction
-            loaders (combine with ``substitutions`` to normalize whitespace).
+        oversampling_factor: Download this many times more documents than estimated
+            needed, to maintain document diversity (default: 3)
+        split_into_lines: Split each document into one example per line (default: True)
+        seed: Seed for the subsample taken when max_samples is set
 
     Returns:
         Path to the untokenized dataset
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {
-        'type': 'huggingface',
-        'name': name,
-        'config': config,
-        'split': split,
-        'text_column': text_column,
-        'max_samples': max_samples,
-        'min_words_per_line': min_words_per_line,
-        'oversampling_factor': oversampling_factor,
-        'split_into_lines': split_into_lines,
-    }
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-    else:
-        print(f"Downloading and preparing HuggingFace dataset: {name}", file=sys.stderr)
-        if config:
-            print(f"  Config: {config}", file=sys.stderr)
-        print(f"  Split: {split}", file=sys.stderr)
-        example_unit = "lines" if split_into_lines else "documents"
-        if max_samples:
-            print(f"  Max samples ({example_unit}): {max_samples}", file=sys.stderr)
-            print(f"  Oversampling factor: {oversampling_factor}x", file=sys.stderr)
-
-        # Use streaming if max_samples specified to avoid downloading entire dataset
-        if max_samples:
-            if split_into_lines:
-                # Estimate lines/doc so we download enough documents to yield
-                # max_samples lines. When not splitting, each document is exactly
-                # one example, so this estimation is unnecessary (see else branch).
-                stream = load_dataset(
-                    name,
-                    config,
-                    split=split,
-                    streaming=True
-                )
-
-                # Phase 1: Sample a small batch to estimate lines per document
-                # This helps us download the right number of documents
-                estimation_sample_size = min(1000, max_samples // 10)
-                print(
-                    f"  Phase 1: Sampling {estimation_sample_size} documents to estimate lines/doc",
-                    file=sys.stderr
-                )
-
-                # Convert estimation batch to dataset and measure lines/doc
-                # Use same processing pipeline as main data for accurate estimation
-                estimation_dataset = collect_from_stream(stream, estimation_sample_size)
-                num_estimation_docs = len(estimation_dataset)
-                estimation_dataset = _docs_to_filtered_lines(
-                    estimation_dataset, text_column, min_words_per_line, split_into_lines
-                )
-
-                lines_per_doc = (
-                    len(estimation_dataset) / num_estimation_docs if num_estimation_docs else 1
-                )
-                print(
-                    f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)",
-                    file=sys.stderr
-                )
-
-                # Check if estimation found any valid lines
-                if lines_per_doc == 0:
-                    raise ValueError(
-                        f"Estimation phase found 0 lines per document after filtering. "
-                        f"This suggests min_words_per_line={min_words_per_line} is too strict, "
-                        f"or the dataset has no suitable content."
-                    )
-
-                # Calculate how many documents to download with oversampling.
-                # We oversample to maintain document diversity, then randomly
-                # sample lines at the end.
-                docs_needed = int((max_samples / lines_per_doc) * oversampling_factor)
-            else:
-                # One example per document: download max_samples documents, plus
-                # the oversampling headroom for diversity and any min-words filtering.
-                docs_needed = max_samples * oversampling_factor
-
-            print(f"  Downloading {docs_needed} documents total", file=sys.stderr)
-
-            # Download all documents from a fresh stream.
-            # (Restarting the stream is simpler than resuming/combining with the
-            # estimation samples consumed above.)
-            stream = load_dataset(
-                name,
-                config,
-                split=split,
-                streaming=True
-            )
-
-            dataset = collect_from_stream(stream, docs_needed)
-            print(f"  Downloaded {len(dataset)} documents", file=sys.stderr)
-        else:
-            dataset = load_dataset(name, config, split=split)
-
-        # Convert to the target schema (rename column if needed; split docs on
-        # newlines unless split_into_lines is False).
-        # Note: Could also pass min_words_per_line here if detailed filtering logs aren't needed
-        dataset = _docs_to_filtered_lines(
-            dataset, text_column, min_words_per_line=None, split_into_lines=split_into_lines
-        )
-        if split_into_lines:
-            print(f"  Converted to {len(dataset)} lines from documents", file=sys.stderr)
-        else:
-            print(f"  Kept {len(dataset)} documents (no line splitting)", file=sys.stderr)
-
-        # Filter out short examples (e.g., section titles) if min_words_per_line specified
-        if min_words_per_line is not None:
-            original_size = len(dataset)
-            dataset = dataset.filter(
-                lambda x: len(x['text'].split()) >= min_words_per_line
-            )
-            filtered_size = len(dataset)
-            print(
-                f"  Filtered {original_size - filtered_size} {example_unit} with "
-                f"< {min_words_per_line} words ({filtered_size} {example_unit} remaining)",
-                file=sys.stderr
-            )
-
-            # Check if we have enough examples after filtering
-            if max_samples and filtered_size < max_samples:
-                print(
-                    f"Warning: After filtering, only {filtered_size} {example_unit} remain, but "
-                    f"{max_samples} requested. Consider increasing oversampling_factor "
-                    f"(current: {oversampling_factor}) or reducing min_words_per_line.",
-                    file=sys.stderr
-                )
-
-        # If max_samples specified, randomly sample to exactly that many examples
-        # This maintains document diversity from oversampling while controlling final size
-        if max_samples and len(dataset) > max_samples:
-            print(
-                f"  Randomly sampling {max_samples} {example_unit} from {len(dataset)} "
-                f"available {example_unit}",
-                file=sys.stderr
-            )
-            indices = random.sample(range(len(dataset)), max_samples)
-            dataset = dataset.select(sorted(indices))
-        elif max_samples and len(dataset) < max_samples:
-            print(
-                f"  Note: Got {len(dataset)} {example_unit}, which is less than requested "
-                f"{max_samples}",
-                file=sys.stderr
-            )
-
-        # Wrap in DatasetDict for consistency with other loaders
-        dataset_dict = DatasetDict({'train': dataset})
-        dataset_dict.save_to_disk(untokenized_path)
-        _save_source_cache_config(untokenized_path, tracked)
-        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
-
-
-def _docs_to_filtered_lines(
-    dataset: Dataset,
-    text_column: str = 'text',
-    min_words_per_line: int = None,
-    split_into_lines: bool = True,
-) -> Dataset:
-    """
-    Convert document-based dataset to (optionally) line-based format with filtering.
-
-    This helper standardizes the transformation pipeline used by HuggingFace dataset loaders.
-
-    Args:
-        dataset: Dataset with document text
-        text_column: Name of the text column (will be renamed to 'text' if different)
-        min_words_per_line: Minimum words per kept example (None to skip filtering).
-            Applies per line when splitting, per document otherwise.
-        split_into_lines: If True (default), split each document on newlines into
-            one example per line. If False, keep each document as a single example
-            (newlines preserved), parallel to the instruction-data loaders.
-
-    Returns:
-        Dataset with one example per line (or per document when
-        ``split_into_lines`` is False).
-    """
-    # Standardize column name to 'text' if needed
-    if text_column != 'text':
-        dataset = dataset.rename_column(text_column, 'text')
-
-    # Convert to line-based format (split documents on newlines)
-    if split_into_lines:
-        original_columns = dataset.column_names
-        dataset = dataset.map(
-            docs_to_lines,
-            batched=True,
-            remove_columns=original_columns
-        )
-    elif set(dataset.column_names) != {'text'}:
-        # Drop any extra metadata columns so the schema matches other loaders.
-        dataset = dataset.remove_columns(
-            [column for column in dataset.column_names if column != 'text']
-        )
-
-    # Filter short examples if specified
-    if min_words_per_line is not None:
-        dataset = dataset.filter(
-            lambda x: len(x['text'].split()) >= min_words_per_line
-        )
-
-    return dataset
+    source = HuggingFaceDataset(
+        cache_dir,
+        name,
+        config=config,
+        split=split,
+        text_column=text_column,
+        max_samples=max_samples,
+        min_words_per_line=min_words_per_line,
+        oversampling_factor=oversampling_factor,
+        split_into_lines=split_into_lines,
+        seed=seed,
+    )
+    source.resolve()
+    return source.path
 
 
 def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:

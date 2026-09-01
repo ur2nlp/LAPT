@@ -2222,7 +2222,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_split_into_lines_default(self, tmp_path):
         """By default each document is split into one example per line."""
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
             )
@@ -2234,7 +2234,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_no_split_keeps_documents_whole(self, tmp_path):
         """split_into_lines=False keeps documents intact with newlines preserved."""
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
                 split_into_lines=False,
@@ -2247,7 +2247,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_no_split_min_words_filters_per_document(self, tmp_path):
         """With no splitting, min_words_per_line filters whole documents."""
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
                 min_words_per_line=6, split_into_lines=False,
@@ -2268,8 +2268,8 @@ class TestHuggingFaceSplitIntoLines:
             collect_limits.append(limit)
             return docs.select(range(min(limit, len(docs))))
 
-        with patch('lapt.dataset_utils.load_dataset', return_value='STREAM'), \
-             patch('lapt.dataset_utils.collect_from_stream', side_effect=fake_collect):
+        with patch('lapt.sources.huggingface.load_dataset', return_value='STREAM'), \
+             patch('lapt.sources.huggingface.collect_from_stream', side_effect=fake_collect):
             _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
                 oversampling_factor=3, split_into_lines=False,
@@ -2286,8 +2286,8 @@ class TestHuggingFaceSplitIntoLines:
             collect_limits.append(limit)
             return docs.select(range(min(limit, len(docs))))
 
-        with patch('lapt.dataset_utils.load_dataset', return_value='STREAM'), \
-             patch('lapt.dataset_utils.collect_from_stream', side_effect=fake_collect):
+        with patch('lapt.sources.huggingface.load_dataset', return_value='STREAM'), \
+             patch('lapt.sources.huggingface.collect_from_stream', side_effect=fake_collect):
             _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
                 oversampling_factor=3, split_into_lines=True,
@@ -2298,12 +2298,12 @@ class TestHuggingFaceSplitIntoLines:
     def test_split_into_lines_tracked_in_cache(self, tmp_path):
         """Changing split_into_lines invalidates the per-source cache."""
         cache = str(tmp_path / 'cache')
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
                                       split_into_lines=True)
         # Same cache dir, different split flag -> mismatch error.
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
-            with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
+            with pytest.raises(ValueError, match="CONFIG MISMATCH"):
                 _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
                                           split_into_lines=False)
 
