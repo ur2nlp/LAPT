@@ -28,6 +28,7 @@ from lapt.artifact_configs import (
     resolve_dev_size,
 )
 from lapt.core.artifacts import CachedArtifact
+from lapt.sources import PlaintextDataset
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
 
@@ -400,6 +401,14 @@ class UntokenizedDataset(CachedArtifact):
 
     name = "untokenized"
 
+    # Transitional. Sources own `config.yaml` in this directory now, so this
+    # record needs a name of its own to avoid overwriting theirs. It still
+    # earns its place: `multinomial_mix_slug` keys the mix directory on alpha,
+    # total_samples, dev_size and the per-source overrides, but not on `seed`,
+    # which does change the sampled mix. Retire this together with the record
+    # once MultinomialDataset tracks `seed` itself.
+    config_filename = "dataset_config.yaml"
+
     def __init__(self, args: DictConfig):
         """Initialize from the full Hydra config.
 
@@ -719,6 +728,11 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
     """
     Load plaintext file(s) and convert to dataset format.
 
+    Thin path-returning wrapper over `PlaintextDataset`, which owns the cache
+    path, the config record, and the validate-or-build decision. Kept so the
+    dispatcher and the composite loaders can keep exchanging paths while the
+    remaining source types are converted.
+
     Args:
         cache_dir: Base directory for caching dataset artifacts
         file_path: Path to plaintext file (one line per training example)
@@ -726,33 +740,9 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
     Returns:
         Path to the untokenized dataset
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {'type': 'plaintext', 'path': file_path}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print(f"Loading plaintext data from {file_path}", file=sys.stderr)
-
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Plaintext file not found: {file_path}")
-
-    with open(file_path, encoding='utf-8') as f:
-        lines = [line.strip() for line in f if line.strip()]
-
-    if not lines:
-        raise ValueError(f"Plaintext file {file_path} contains no non-empty lines")
-
-    print(f"Loaded {len(lines)} lines from plaintext file", file=sys.stderr)
-
-    dataset = Dataset.from_dict({'text': lines})
-    dataset_dict = DatasetDict({'train': dataset})
-    dataset_dict.save_to_disk(untokenized_path)
-    _save_source_cache_config(untokenized_path, tracked)
-    print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
+    source = PlaintextDataset(cache_dir, file_path)
+    source.resolve()
+    return source.path
 
 
 def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '*.txt') -> str:
