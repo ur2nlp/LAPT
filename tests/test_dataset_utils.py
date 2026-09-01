@@ -37,6 +37,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from datasets import Dataset, DatasetDict, load_from_disk
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
@@ -1609,12 +1610,26 @@ class TestLoadTokenizedMultinomialDataset:
     """
 
     @staticmethod
-    def _write_source(cache_dir: Path, source_id: str, lines: list[str]) -> None:
-        """Persist a tiny plaintext source as an untokenized DatasetDict."""
+    def _write_source(
+        cache_dir: Path,
+        source_id: str,
+        lines: list[str],
+        source_path: str = 'unused',
+    ) -> None:
+        """Persist a tiny plaintext source as a valid untokenized cache.
+
+        The config record is written alongside the data, matching what
+        `PlaintextDataset.config()` produces, so the cache is reusable rather
+        than merely present. Building the data without a record would be
+        refused on read, and rightly so.
+        """
         source_dir = cache_dir / source_id
         source_dir.mkdir(parents=True, exist_ok=True)
+        untokenized_dir = source_dir / "untokenized"
         ds = DatasetDict({'train': Dataset.from_dict({'text': lines})})
-        ds.save_to_disk(str(source_dir / "untokenized"))
+        ds.save_to_disk(str(untokenized_dir))
+        with open(untokenized_dir / "config.yaml", 'w') as record:
+            yaml.dump({'type': 'plaintext', 'path': source_path}, record)
 
     def test_basic_end_to_end(self, tmp_path, base_tokenizer):
         cache_dir = tmp_path / "cache"

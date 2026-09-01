@@ -11,7 +11,7 @@ import pytest
 import yaml
 from omegaconf import OmegaConf
 
-from lapt.core.artifacts import ConfigMismatchError
+from lapt.core.artifacts import ConfigMismatchError, MissingConfigRecordError
 from lapt.dataset_utils import UntokenizedDataset
 
 
@@ -98,16 +98,15 @@ class TestConfigTracking:
         with open(UntokenizedDataset(args).config_path) as handle:
             assert yaml.safe_load(handle)['seed'] == 2
 
-    def test_untracked_legacy_cache_is_tolerated(self, tmp_path, corpus, capsys):
-        # a cache built before config tracking must keep working, not blow up
+    def test_cache_without_a_record_is_refused(self, tmp_path, corpus):
+        # an unverifiable cache is refused rather than reused; the leaf source
+        # holds its own record, so removing this one leaves the wrapper blind
         artifact = UntokenizedDataset(plaintext_args(tmp_path, corpus))
         artifact.resolve()
         os.remove(artifact.config_path)
-        capsys.readouterr()
 
-        reloaded = UntokenizedDataset(plaintext_args(tmp_path, corpus))
-        assert reloaded.resolve() == artifact.path
-        assert "without config tracking" in capsys.readouterr().err
+        with pytest.raises(MissingConfigRecordError):
+            UntokenizedDataset(plaintext_args(tmp_path, corpus)).resolve()
 
 
 class TestPathResolution:
