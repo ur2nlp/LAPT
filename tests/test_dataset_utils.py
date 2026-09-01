@@ -1843,7 +1843,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1869,7 +1869,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1892,7 +1892,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1909,7 +1909,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1928,7 +1928,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list, column='conversation')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1947,7 +1947,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1965,7 +1965,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1983,11 +1983,11 @@ class TestInstructionHFLoader:
         fake_ds = _fake_hf_dataset(messages_list)
         cache_dir = str(tmp_path / 'cache')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds) as mock_load:
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
             first_calls = mock_load.call_count
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds) as mock_load:
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
             second_calls = mock_load.call_count
 
@@ -2002,10 +2002,10 @@ class TestInstructionHFLoader:
         fake_ds = _fake_hf_dataset(messages_list)
         cache_dir = str(tmp_path / 'cache')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             with pytest.raises(Exception):
                 _load_instruction_hf_dataset(
                     cache_dir=cache_dir,
@@ -2023,7 +2023,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             with pytest.raises(ValueError, match='No examples remained'):
                 _load_instruction_hf_dataset(
                     cache_dir=str(tmp_path / 'cache'),
@@ -2042,7 +2042,7 @@ class TestInstructionHFLoader:
             'name': 'fake/dataset',
         })
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = load_untokenized_dataset(
                 dataset_config,
                 cache_dir=str(tmp_path / 'cache'),
