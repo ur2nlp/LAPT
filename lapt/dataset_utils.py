@@ -12,7 +12,6 @@ import os
 import random
 import re
 import sys
-from itertools import chain
 
 import numpy as np
 import yaml
@@ -28,7 +27,8 @@ from lapt.artifact_configs import (
     resolve_dev_size,
 )
 from lapt.core.artifacts import CachedArtifact
-from lapt.sources import PlaintextDataset
+from lapt.sources import InstructionJsonlDataset, OscarDataset, PlaintextDataset
+from lapt.sources.text_processing import docs_to_lines, read_instruction_jsonl
 
 SOURCE_CONFIG_FILENAME = "source_config.yaml"
 
@@ -129,27 +129,6 @@ def _get_source_id(config: DictConfig, fallback: str = None) -> str:
     if not source_id:
         source_id = fallback
     return source_id
-
-
-def docs_to_lines(examples):
-    """
-    Convert document-based examples to line-based examples.
-
-    OSCAR data comes as documents with newlines. This function splits
-    each document into individual lines for more granular training.
-
-    Args:
-        examples: Batch of examples with 'text' field containing documents
-
-    Returns:
-        Dictionary with 'text' field containing individual lines (blank lines filtered out)
-    """
-    return {
-        'text': list(chain(
-            *[[line.strip() for line in doc.split('\n') if line.strip()]
-              for doc in examples['text']]
-        ))
-    }
 
 
 def collect_from_stream(stream, limit: int) -> Dataset:
@@ -449,6 +428,8 @@ def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
     """
     Load or download OSCAR dataset for a specific language.
 
+    Thin path-returning wrapper over `OscarDataset`; see `_load_plaintext_dataset`.
+
     Args:
         cache_dir: Base directory for caching dataset artifacts
         language_code: Two-letter language code for OSCAR corpus
@@ -456,29 +437,9 @@ def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
     Returns:
         Path to the untokenized dataset
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {'type': 'oscar', 'language': language_code}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print("Downloading and preparing OSCAR dataset", file=sys.stderr)
-    dataset = load_dataset(
-        "oscar-corpus/OSCAR-2201",
-        token=True,
-        language=language_code
-    )
-    dataset = dataset.map(
-        docs_to_lines,
-        batched=True,
-        remove_columns=dataset['train'].column_names # type: ignore
-    )
-    dataset.save_to_disk(untokenized_path)
-    _save_source_cache_config(untokenized_path, tracked)
-    print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
+    source = OscarDataset(cache_dir, language_code)
+    source.resolve()
+    return source.path
 
 
 def _load_huggingface_dataset(
@@ -780,58 +741,12 @@ def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '
     return _load_concat_dataset(cache_dir, sources)
 
 
-def _load_instruction_jsonl_file(file_path: str) -> tuple[list[str], list[str]]:
-    """
-    Load prompts and responses from an instruction JSONL file.
-
-    Each line should be a JSON object with 'prompt' and 'response' fields:
-    {"prompt": "Translate to Gothic: hello\\nResponse:", "response": " hails"}
-
-    Args:
-        file_path: Path to JSONL file
-
-    Returns:
-        Tuple of (prompts, responses) lists
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Instruction JSONL file not found: {file_path}")
-
-    prompts = []
-    responses = []
-    with open(file_path, encoding='utf-8') as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON on line {line_num}: {e}")
-
-            if 'prompt' not in obj or 'response' not in obj:
-                raise ValueError(
-                    f"Line {line_num} missing 'prompt' or 'response' field. "
-                    f"Got keys: {list(obj.keys())}"
-                )
-            prompts.append(obj['prompt'])
-            responses.append(obj['response'])
-
-    if not prompts:
-        raise ValueError(f"JSONL file {file_path} contains no valid examples")
-
-    return prompts, responses
-
-
 def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     """
     Load instruction-tuning data from JSONL file(s).
 
-    Each line should be a JSON object with 'prompt' and 'response' fields:
-    {"prompt": "Translate to Gothic: hello\\nResponse:", "response": " hails"}
-
-    Unlike plaintext datasets (which have 'text' column), instruction datasets
-    have separate 'prompt' and 'response' columns. This allows for loss masking
-    during training where only the response tokens contribute to the loss.
+    Thin path-returning wrapper over `InstructionJsonlDataset`; see
+    `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
@@ -840,26 +755,9 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     Returns:
         Path to the untokenized dataset (with 'prompt' and 'response' columns)
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {'type': 'instruction_jsonl', 'path': file_path}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print(f"Loading instruction data from {file_path}", file=sys.stderr)
-
-    prompts, responses = _load_instruction_jsonl_file(file_path)
-
-    print(f"Loaded {len(prompts)} instruction examples from JSONL file", file=sys.stderr)
-
-    dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
-    dataset_dict = DatasetDict({'train': dataset})
-    dataset_dict.save_to_disk(untokenized_path)
-    _save_source_cache_config(untokenized_path, tracked)
-    print(f"Untokenized instruction dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
+    source = InstructionJsonlDataset(cache_dir, file_path)
+    source.resolve()
+    return source.path
 
 
 def _load_instruction_hf_dataset(
@@ -2206,7 +2104,7 @@ def load_external_eval_set(
 
     elif file_format == 'instruction_jsonl':
         # Load instruction JSONL with prompt/response fields
-        prompts, responses = _load_instruction_jsonl_file(path)
+        prompts, responses = read_instruction_jsonl(path)
         dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
         is_instruction = True
 
