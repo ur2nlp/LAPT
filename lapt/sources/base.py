@@ -56,11 +56,16 @@ class SourceDataset(DatasetArtifact):
     def validate(self, error_on_mismatch: bool = True) -> bool:
         """Validate a cached source, refusing pre-artifact caches explicitly.
 
-        A cache written before this refactor carries `source_config.yaml`
-        instead of `config.yaml`. The base implementation would find no record
-        under the name it expects, treat the cache as predating config tracking,
-        and accept it — turning a stale corpus into a warning rather than an
-        error. Detect that case and say what to do about it instead.
+        Sources tracked their parameters in `source_config.yaml` before they
+        became artifacts; they now use `config.yaml`. The base implementation
+        would find no record under the name it expects, treat the cache as
+        predating config tracking altogether, and accept it — turning a stale
+        corpus into a warning rather than an error. Detect that case instead.
+
+        Such a cache is not untracked and not unusable: its record is usually
+        the current one minus fields added since. Refusing it here is a
+        deliberate choice to keep that reconciliation in a one-off migration
+        rather than a tolerance mechanism carried in the code forever.
 
         Args:
             error_on_mismatch: Raise on mismatch when True.
@@ -78,12 +83,14 @@ class SourceDataset(DatasetArtifact):
                 f"\n{'=' * 70}\n"
                 f"PRE-REFACTOR SOURCE CACHE: {self.path}\n"
                 f"{'=' * 70}\n"
-                f"This cache carries {LEGACY_CONFIG_FILENAME}, written before\n"
-                f"sources became tracked artifacts. Its parameters are recorded\n"
-                f"under different keys than the current ones, so it cannot be\n"
-                f"validated and must not be reused silently.\n\n"
-                f"Regenerate it by passing fresh_dataset=true, or delete the\n"
-                f"directory above.\n"
+                f"This cache carries {LEGACY_CONFIG_FILENAME}, the record used\n"
+                f"before sources became artifacts. Its parameters are tracked,\n"
+                f"but under the previous filename and without any field added\n"
+                f"since it was written, so it cannot be validated as-is and\n"
+                f"must not be reused silently.\n\n"
+                f"Either regenerate it by passing fresh_dataset=true, or -- if\n"
+                f"rebuilding is expensive -- migrate the record: rename it to\n"
+                f"config.yaml and add the fields this source now tracks.\n"
                 f"{'=' * 70}\n"
             )
 
