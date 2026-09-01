@@ -13,6 +13,7 @@ from lapt.sources.factory import build_source
 from lapt.sources.huggingface import HuggingFaceDataset
 from lapt.sources.instruction_hf import InstructionHFDataset
 from lapt.sources.instruction_jsonl import InstructionJsonlDataset
+from lapt.sources.multinomial import MultinomialDataset
 from lapt.sources.oscar import OscarDataset
 from lapt.sources.plaintext import PlaintextDataset
 
@@ -22,6 +23,7 @@ __all__ = [
     'HuggingFaceDataset',
     'InstructionHFDataset',
     'InstructionJsonlDataset',
+    'MultinomialDataset',
     'OscarDataset',
     'PlaintextDataset',
     'SourceDataset',

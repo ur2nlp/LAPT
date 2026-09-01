@@ -44,7 +44,6 @@ from transformers import AutoTokenizer
 
 from lapt.dataset_utils import (
     _apply_substitutions,
-    _compute_sampling_probs,
     _load_concat_dataset,
     _load_huggingface_dataset,
     _load_instruction_hf_dataset,
@@ -58,6 +57,7 @@ from lapt.dataset_utils import (
     load_tokenized_multinomial_dataset,
     load_untokenized_dataset,
 )
+from lapt.sources.sampling import compute_sampling_probs
 
 
 class TestPlaintextLoader:
@@ -1313,7 +1313,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000, 7000]
         alpha = 1.0
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert len(probs) == 3
         assert abs(sum(probs) - 1.0) < 1e-9
@@ -1332,7 +1332,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 3000, 500000]
         alpha = 1.0
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert len(probs) == 3
         assert abs(sum(probs) - 1.0) < 1e-9
@@ -1355,7 +1355,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000, 2000, 500000]
         alpha = 1.0
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert abs(sum(probs) - 1.0) < 1e-9
         assert abs(probs[0] - 0.1) < 1e-9
@@ -1373,7 +1373,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
         alpha = 0.5
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert abs(probs[0] - 0.3) < 1e-9
         assert abs(probs[1] - 0.7) < 1e-9
@@ -1387,7 +1387,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="sum to"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_prob_at_one_raises_error(self):
         """sampling_prob=1.0 on a single source is an error."""
@@ -1398,7 +1398,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_prob_zero_raises_error(self):
         """sampling_prob=0 is an error."""
@@ -1409,7 +1409,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_prob_negative_raises_error(self):
         """Negative sampling_prob is an error."""
@@ -1420,7 +1420,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_sum_exceeds_one_raises_error(self):
         """Pinned probs summing to >= 1.0 raises error."""
@@ -1432,7 +1432,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000, 3000]
 
         with pytest.raises(ValueError, match="must be less than 1.0"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_alpha_affects_unpinned_distribution(self):
         """Alpha reweighting applies only to unpinned sources."""
@@ -1444,9 +1444,9 @@ class TestComputeSamplingProbs:
         train_sizes = [100, 10000, 999999]
 
         # With alpha=1.0, large source dominates unpinned budget
-        probs_a1 = _compute_sampling_probs(sources, train_sizes, alpha=1.0)
+        probs_a1 = compute_sampling_probs(sources, train_sizes, alpha=1.0)
         # With alpha=0.0001 (near 0), unpinned sources nearly equal
-        probs_a0 = _compute_sampling_probs(sources, train_sizes, alpha=0.0001)
+        probs_a0 = compute_sampling_probs(sources, train_sizes, alpha=0.0001)
 
         # Pinned source unchanged in both
         assert abs(probs_a1[2] - 0.5) < 1e-9
@@ -1468,7 +1468,7 @@ class TestComputeSamplingProbs:
         ]
         train_sizes = [100, 10000]
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha=None)
+        probs = compute_sampling_probs(sources, train_sizes, alpha=None)
 
         assert probs == [0.3, 0.7]
 
@@ -1481,8 +1481,8 @@ class TestComputeSamplingProbs:
         ]
         train_sizes = [100, 200, 10000]
 
-        probs_none = _compute_sampling_probs(sources, train_sizes, alpha=None)
-        probs_half = _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+        probs_none = compute_sampling_probs(sources, train_sizes, alpha=None)
+        probs_half = compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
         assert abs(probs_none[2] - 0.3) < 1e-9
         assert probs_none == probs_half
@@ -1497,7 +1497,7 @@ class TestComputeSamplingProbs:
         train_sizes = [100, 1000, 10000]
 
         with pytest.raises(ValueError, match="alpha is required"):
-            _compute_sampling_probs(sources, train_sizes, alpha=None)
+            compute_sampling_probs(sources, train_sizes, alpha=None)
 
     def test_unpinned_empty_source_raises_error(self):
         """All unpinned sources being empty raises error."""
@@ -1509,7 +1509,7 @@ class TestComputeSamplingProbs:
         train_sizes = [0, 0, 1000]
 
         with pytest.raises(ValueError, match="unpinned sources are empty"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
 
 class TestPartitionSourceIndices:

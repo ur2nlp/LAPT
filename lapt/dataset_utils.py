@@ -9,7 +9,6 @@ import glob
 import hashlib
 import json
 import os
-import random
 import re
 import sys
 
@@ -32,9 +31,11 @@ from lapt.sources import (
     HuggingFaceDataset,
     InstructionHFDataset,
     InstructionJsonlDataset,
+    MultinomialDataset,
     OscarDataset,
     PlaintextDataset,
 )
+from lapt.sources.sampling import compute_sampling_probs
 from lapt.sources.text_processing import (
     read_instruction_jsonl,
 )
@@ -653,365 +654,22 @@ def _load_multinomial_dataset(
     """
     Sample from multiple dataset sources using temperature-scaled multinomial sampling.
 
-    Splits each source into train/dev BEFORE upsampling to prevent dev set leakage.
-    Train splits are upsampled according to alpha, dev splits are kept at natural proportions.
+    Thin path-returning wrapper over `MultinomialDataset`; see `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (should have 'id' field for naming).
-            Each source can optionally include a 'dev_size' field to override the global dev_size.
+        sources: List of dataset source configurations
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
-        total_samples: Total number of training examples to sample (dev set size is separate)
-        dev_size: Global default fraction of each source to use for dev set (must be between 0 and
-            1). Individual sources can override this with their own dev_size field, which can be
-            fractional (0 < x < 1) or absolute (>= 1) for that specific source. Use -1 to skip dev
-            split (either globally or per-source).
+        total_samples: Total number of training examples to sample
+        dev_size: Global default fraction of each source to use for dev set, or -1 to skip
+        seed: Global random seed, which selects the sampled examples
 
     Returns:
         Path to the untokenized sampled dataset (DatasetDict with train and per-source dev splits)
     """
-    if not sources:
-        raise ValueError("Cannot sample from datasets: sources list is empty")
-    if total_samples <= 0:
-        raise ValueError(f"total_samples must be positive, got {total_samples}")
-    if alpha is not None and alpha <= 0:
-        raise ValueError(f"alpha must be positive, got {alpha}")
-    if dev_size is None:
-        raise ValueError("dev_size must be provided for multinomial sampling")
-
-    # Check for explicit "no dev split" flag
-    skip_dev_split = (dev_size == -1)
-
-    if dev_size == 0:
-        raise ValueError(
-            "dev_size=0 is ambiguous. Use dev_size=-1 to explicitly skip dev split, "
-            "or use a value > 0 for fractional split size."
-        )
-    elif not skip_dev_split and not (0 < dev_size < 1):
-        raise ValueError(
-            f"Multinomial sampling requires fractional dev_size (0 < dev_size < 1), got {dev_size}. "
-            "Use dev_size=-1 to skip dev split (e.g., when using external dev sets). "
-            "Fixed-size dev sets are not supported for multinomial sampling."
-        )
-
-    if skip_dev_split:
-        print("WARNING: dev_size=-1 skips dev split creation.", file=sys.stderr)
-        print(
-            "If using this dataset for model training (not FOCUS), this will cause dev-set "
-            "contamination as upsampled training data won't have a held-out dev set. Only use "
-            "dev_size=-1 for datasets that don't need evaluation (e.g., FOCUS training), or ones "
-            "that have an external dev set.",
-            file=sys.stderr
-        )
-
-    # Place the upsampled output inside a mix-keyed subdirectory so that
-    # changing alpha / total_samples / sampling_prob / upsampling_factor does
-    # not clobber the previous mix. Source subdirs stay at the parent level
-    # (untouched below) so they remain shared across mixes.
-    mix_config = {
-        'alpha': alpha,
-        'total_samples': total_samples,
-        'dev_size': dev_size,
-        'sources': [
-            OmegaConf.to_container(DictConfig(s), resolve=True) for s in sources
-        ],
-    }
-    mix_dir = os.path.join(cache_dir, multinomial_mix_slug(mix_config))
-    os.makedirs(mix_dir, exist_ok=True)
-    untokenized_path = os.path.join(mix_dir, "untokenized")
-
-    if not os.path.exists(untokenized_path):
-        print(
-            f"Multinomial sampling from {len(sources)} sources with alpha={alpha}", file=sys.stderr
-        )
-        print(f"Mix cache directory: {mix_dir}", file=sys.stderr)
-        if not skip_dev_split:
-            print(f"Dev split: {dev_size:.1%} of each source (before upsampling)", file=sys.stderr)
-        else:
-            print("No dev split (dev_size=-1, using all data for training)", file=sys.stderr)
-
-        train_datasets = []
-        dev_datasets = []
-        dev_names = []
-        train_sizes = []
-
-        # Load all sources, split into train/dev, and record train sizes
-        for idx, source_config in enumerate(sources):
-            source_id, train_data, dev_data = _load_and_split_source(
-                source_config, cache_dir, dev_size, idx, seed
-            )
-
-            train_datasets.append(train_data)
-            if dev_data is not None:
-                dev_datasets.append(dev_data)
-                dev_names.append(source_id)
-            train_sizes.append(len(train_data))
-
-        # Check for empty datasets
-        if all(size == 0 for size in train_sizes):
-            raise ValueError("Cannot sample: all source datasets are empty")
-
-        # Calculate sampling probabilities for TRAIN data
-        # Sources with explicit sampling_prob get their probability pinned directly.
-        # Remaining probability budget is distributed among unpinned sources using
-        # alpha-based reweighting: p_i = (size_i)^alpha / Z, scaled to fill the budget.
-        sampling_probs = _compute_sampling_probs(sources, train_sizes, alpha)
-
-        # Convert probabilities to integer sample counts
-        # Distribute remainder samples round-robin to handle rounding errors
-        samples_per_source = [int(prob * total_samples) for prob in sampling_probs]
-        remaining = total_samples - sum(samples_per_source)
-        for i in range(remaining):
-            samples_per_source[i % len(sources)] += 1
-
-        print("Train sampling distribution:", file=sys.stderr)
-        for idx, count in enumerate(samples_per_source):
-            percentage = 100 * count / total_samples
-            source_id = _get_source_id(DictConfig(sources[idx]), fallback=f"source_{idx}")
-            pinned = sources[idx].get('sampling_prob') is not None
-            pin_marker = " (pinned)" if pinned else ""
-            print(
-                f"  {source_id}: {count} samples ({percentage:.2f}%){pin_marker}",
-                file=sys.stderr,
-            )
-
-        # Sample and upsample TRAIN data only
-        selected_train_datasets = []
-        for dataset, num_samples in zip(train_datasets, samples_per_source):
-            indices = _exhaust_first_sample(len(dataset), num_samples)
-            selected = dataset.select(indices)
-            selected_train_datasets.append(selected)
-
-        # Concatenate and shuffle train data
-        concatenated_train = concatenate_datasets(selected_train_datasets)
-        concatenated_train = concatenated_train.shuffle(seed=1)
-
-        # Build DatasetDict with train and per-language dev splits
-        # Dev splits are NOT upsampled - kept at natural proportions
-        dataset_dict = {'train': concatenated_train}
-        for dev_name, dev_data in zip(dev_names, dev_datasets):
-            dataset_dict[dev_name] = dev_data
-
-        dataset_dict = DatasetDict(dataset_dict)
-        dataset_dict.save_to_disk(untokenized_path)
-
-        print(f"Multinomial sampled dataset saved to {untokenized_path}", file=sys.stderr)
-        print(f"  Train: {len(concatenated_train)} examples (upsampled)", file=sys.stderr)
-        if not skip_dev_split:
-            print(
-                f"  Dev splits: {', '.join(dev_names)} "
-                f"({sum(len(d) for d in dev_datasets)} examples total, natural proportions)",
-                file=sys.stderr
-            )
-
-    return untokenized_path
-
-
-def _compute_sampling_probs(
-    sources: list[dict],
-    train_sizes: list[int],
-    alpha: float | None,
-) -> list[float]:
-    """
-    Compute per-source sampling probabilities, respecting pinned sampling_prob values.
-
-    Sources with an explicit `sampling_prob` or `upsampling_factor field get that probability
-    directly. The remaining probability budget is distributed among unpinned sources using
-    alpha-based temperature scaling: p_i = (size_i)^alpha / Z, scaled to fill the budget.
-
-    Alpha may be None when it has nothing to do: when every source is pinned, or when
-    exactly one source is unpinned and therefore takes the whole remaining budget
-    regardless of the exponent. It is required whenever two or more sources are unpinned.
-
-    Args:
-        sources: List of source config dicts (may contain 'sampling_prob' field)
-        train_sizes: Number of training examples per source (after dev split)
-        alpha: Temperature parameter for unpinned source reweighting. May be None only
-            if it cannot affect the result.
-
-    Returns:
-        List of sampling probabilities (one per source, sums to 1.0)
-    """
-    num_sources = len(sources)
-    total_size = sum(train_sizes)
-    pinned_probs = {}
-    for idx, source in enumerate(sources):
-        prob = source.get('sampling_prob')
-        upsampling_factor = source.get('upsampling_factor')
-        if upsampling_factor is not None and prob is None:
-            pinned_probs[idx] = train_sizes[idx] * upsampling_factor / total_size
-        if prob is not None:
-            if prob <= 0 or prob >= 1.0:
-                source_id = _get_source_id(DictConfig(source), fallback=f"source_{idx}")
-                raise ValueError(
-                    f"Source '{source_id}': sampling_prob must be between 0 and 1 exclusive, "
-                    f"got {prob}"
-                )
-            pinned_probs[idx] = prob
-
-    pinned_total = sum(pinned_probs.values())
-
-    # If every source is pinned, they must sum to exactly 1.0
-    if len(pinned_probs) == num_sources:
-        if abs(pinned_total - 1.0) > 1e-9:
-            raise ValueError(
-                f"All sources have sampling_prob but they sum to {pinned_total:.6f}, not 1.0"
-            )
-        return [pinned_probs[i] for i in range(num_sources)]
-
-    # With unpinned sources present, pinned probs must leave room for them
-    if pinned_total >= 1.0:
-        raise ValueError(
-            f"Sum of pinned sampling_prob values is {pinned_total:.4f}, "
-            "must be less than 1.0 to leave budget for remaining sources"
-        )
-
-    # Distribute remaining budget among unpinned sources using alpha-based weighting
-    remaining_budget = 1.0 - pinned_total
-    unpinned_indices = [i for i in range(num_sources) if i not in pinned_probs]
-
-    unpinned_sizes = [train_sizes[i] for i in unpinned_indices]
-    if all(s == 0 for s in unpinned_sizes):
-        raise ValueError("Cannot compute sampling probabilities: all unpinned sources are empty")
-
-    # a lone unpinned source takes the whole remaining budget: its weight normalizes
-    # to 1.0 for any exponent, so alpha is not needed to resolve the mixture
-    if len(unpinned_indices) == 1:
-        lone_probs = dict(pinned_probs)
-        lone_probs[unpinned_indices[0]] = remaining_budget
-        return [lone_probs[i] for i in range(num_sources)]
-
-    if alpha is None:
-        unpinned_ids = [
-            _get_source_id(DictConfig(sources[i]), fallback=f"source_{i}")
-            for i in unpinned_indices
-        ]
-        raise ValueError(
-            f"alpha is required when two or more sources are unpinned "
-            f"({', '.join(unpinned_ids)}): it sets how the remaining probability "
-            "budget is split between them"
-        )
-
-    weights = [size ** alpha for size in unpinned_sizes]
-    total_weight = sum(weights)
-    unpinned_probs = {
-        idx: (weights[j] / total_weight) * remaining_budget
-        for j, idx in enumerate(unpinned_indices)
-    }
-
-    return [pinned_probs.get(i, unpinned_probs.get(i)) for i in range(num_sources)]
-
-
-def _load_and_split_source(
-    source_config,
-    cache_dir: str,
-    global_dev_size: float,
-    idx: int,
-    seed: int = 1,
-) -> tuple:
-    """
-    Load a single source dataset and split into train/dev.
-
-    Helper for _load_multinomial_dataset. Handles per-source dev_size overrides
-    and validation. Logs progress for this source.
-
-    Args:
-        source_config: Source configuration dict
-        cache_dir: Parent cache directory for this multinomial dataset
-        global_dev_size: Default dev_size (can be overridden per-source)
-        idx: Source index (for default naming and error messages)
-
-    Returns:
-        Tuple of (source_id, train_data, dev_data) where dev_data is None
-        if dev split was skipped for this source.
-    """
-    source_dict_config = DictConfig(source_config)
-
-    # Determine source id from id field (or deprecated 'language'), default to source_{idx}
-    source_id = _get_source_id(source_dict_config, fallback=f"source_{idx}")
-
-    source_cache = os.path.join(cache_dir, source_id)
-
-    source_path = load_untokenized_dataset(
-        dataset_config=source_dict_config,
-        cache_dir=source_cache,
-        seed=seed,
-    )
-
-    source_dataset = load_from_disk(source_path)
-    full_data = source_dataset['train']
-
-    # Check for per-source dev_size override (fallback to global dev_size)
-    source_dev_size = getattr(source_dict_config, 'dev_size', global_dev_size)
-    skip_source_dev_split = (source_dev_size == -1)
-
-    # Validate per-source dev_size
-    if source_dev_size == 0:
-        raise ValueError(
-            f"Source {idx}: dev_size=0 is ambiguous. "
-            "Use dev_size=-1 to explicitly skip dev split."
-        )
-    elif not skip_source_dev_split and source_dev_size < 0:
-        raise ValueError(
-            f"Source {idx}: dev_size must be positive or -1 to skip, got {source_dev_size}."
-        )
-
-    # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
-    if not skip_source_dev_split:
-        split_dataset = full_data.train_test_split(test_size=source_dev_size, seed=1)
-        train_data = split_dataset['train']
-        dev_data = split_dataset['test']
-    else:
-        train_data = full_data
-        dev_data = None
-
-    # Log with indication if using per-source override
-    dev_size_label = (
-        f"dev_size={source_dev_size}" if hasattr(source_dict_config, 'dev_size')
-        else f"global dev_size={source_dev_size}"
-    )
-    if dev_data is not None:
-        print(
-            f"  Source {idx} ({source_id}): "
-            f"{len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})",
-            file=sys.stderr
-        )
-    else:
-        print(
-            f"  Source {idx} ({source_id}): "
-            f"{len(train_data)} examples (no dev split, {dev_size_label})",
-            file=sys.stderr
-        )
-
-    return source_id, train_data, dev_data
-
-
-def _exhaust_first_sample(dataset_size: int, num_samples: int) -> list[int]:
-    """
-    Generate sample indices using exhaust-first strategy.
-
-    Helper for _load_multinomial_dataset. When num_samples > dataset_size,
-    includes ALL examples once before any duplication. This maximizes coverage
-    of unique examples, which is critical for low-resource datasets.
-
-    Args:
-        dataset_size: Number of examples in the dataset
-        num_samples: Number of samples to draw
-
-    Returns:
-        List of indices (may contain duplicates if num_samples > dataset_size)
-    """
-    if num_samples <= dataset_size:
-        # Sample without replacement
-        return random.sample(range(dataset_size), num_samples)
-    else:
-        # Include ALL examples once, then sample remainder with replacement
-        all_indices = list(range(dataset_size))
-        num_additional = num_samples - dataset_size
-        additional_indices = random.choices(range(dataset_size), k=num_additional)
-        indices = all_indices + additional_indices
-        random.shuffle(indices)  # Shuffle to mix exhaustive + repeated samples
-        return indices
+    source = MultinomialDataset(cache_dir, sources, alpha, total_samples, dev_size, seed=seed)
+    source.resolve()
+    return source.path
 
 
 def _tokenize_plaintext_with_labels(
@@ -1510,7 +1168,7 @@ def load_tokenized_multinomial_dataset(
     train_pool_sizes = [len(p) for p in train_pools]
     if all(s == 0 for s in train_pool_sizes):
         raise ValueError("Cannot sample: every source has an empty train pool")
-    sampling_probs = _compute_sampling_probs(sources, train_pool_sizes, alpha)
+    sampling_probs = compute_sampling_probs(sources, train_pool_sizes, alpha)
     samples_per_source = [int(p * total_samples) for p in sampling_probs]
     remaining = total_samples - sum(samples_per_source)
     for i in range(remaining):
