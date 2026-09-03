@@ -6,8 +6,8 @@ import pytest
 import yaml
 from datasets import Dataset, DatasetDict, load_from_disk
 
-from lapt.core.artifacts import ConfigMismatchError
 from lapt.sources.oscar import OscarDataset
+from lapt_core.artifacts import ConfigMismatchError
 
 
 @pytest.fixture

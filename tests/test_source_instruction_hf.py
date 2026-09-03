@@ -5,8 +5,8 @@ from unittest.mock import patch
 import pytest
 from datasets import Dataset, load_from_disk
 
-from lapt.core.artifacts import ConfigMismatchError
 from lapt.sources.instruction_hf import InstructionHFDataset
+from lapt_core.artifacts import ConfigMismatchError
 
 
 def chat_dataset():

@@ -1,4 +1,4 @@
-"""Tests for lapt.core.artifacts: config digests, cache resolution, and the graph."""
+"""Tests for lapt_core.artifacts: config digests, cache resolution, and the graph."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import os
 import pytest
 import yaml
 
-from lapt.core.artifacts import (
+from lapt_core.artifacts import (
     ArtifactGraph,
     CachedArtifact,
     ConfigMismatchError,

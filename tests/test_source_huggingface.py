@@ -11,8 +11,8 @@ import pytest
 import yaml
 from datasets import Dataset, DatasetDict, load_from_disk
 
-from lapt.core.artifacts import ConfigMismatchError
 from lapt.sources.huggingface import HuggingFaceDataset
+from lapt_core.artifacts import ConfigMismatchError
 
 
 def documents():

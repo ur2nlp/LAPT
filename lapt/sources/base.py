@@ -3,7 +3,7 @@
 A *source* is one entry resolvable from a dataset configuration's `type` field:
 a plaintext file, a HuggingFace dataset, or a composite of other sources. Each
 is a `DatasetArtifact`, so the cache-or-build decision, the config record, and
-the round trip to disk come from `lapt.core`; a concrete source supplies only
+the round trip to disk come from `lapt_core`; a concrete source supplies only
 the parameters it is keyed on and the code that produces the dataset.
 
 `SourceDataset` adds one LAPT-specific concern: detecting caches written before
@@ -21,8 +21,8 @@ and `__init__` only renames a parameter. Concrete types then subclass
 
 import os
 
-from lapt.core.artifacts import ConfigMismatchError
-from lapt.core.dataset_artifacts import DatasetArtifact, DatasetRegistry
+from lapt_core.artifacts import ConfigMismatchError
+from lapt_core.dataset_artifacts import DatasetArtifact, DatasetRegistry
 
 LEGACY_CONFIG_FILENAME = "source_config.yaml"
 

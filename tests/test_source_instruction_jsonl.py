@@ -7,8 +7,8 @@ import pytest
 import yaml
 from datasets import load_from_disk
 
-from lapt.core.artifacts import ConfigMismatchError
 from lapt.sources.instruction_jsonl import InstructionJsonlDataset
+from lapt_core.artifacts import ConfigMismatchError
 
 
 @pytest.fixture

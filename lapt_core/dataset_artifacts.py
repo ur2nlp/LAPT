@@ -1,6 +1,6 @@
 """A `CachedArtifact` specialization for corpora stored as HuggingFace datasets.
 
-`lapt.core.artifacts` is deliberately agnostic about what an artifact *is*: it
+`lapt_core.artifacts` is deliberately agnostic about what an artifact *is*: it
 knows how to decide whether a cached copy is valid and how to rebuild one, but
 `write` and `read` are left abstract. Most stages of a corpus pipeline answer
 those two the same way — serialize a `DatasetDict` with `save_to_disk`, restore
@@ -14,7 +14,7 @@ and a text corpus are cached identically. The loaders that produce them are not,
 so concrete subclasses live with the project that defines their sources.
 
 Note that this module imports `datasets`, which is roughly twenty times more
-expensive to import than `lapt.core.artifacts` itself. That is why
+expensive to import than `lapt_core.artifacts` itself. That is why
 `lapt/core/__init__.py` re-exports nothing: importing this module must not be a
 side effect of reaching for the caching primitives. Import what you need
 directly.
@@ -29,7 +29,7 @@ from typing import Any
 
 from datasets import DatasetDict, load_from_disk
 
-from lapt.core.artifacts import CachedArtifact
+from lapt_core.artifacts import CachedArtifact
 
 
 class DatasetArtifact(CachedArtifact):

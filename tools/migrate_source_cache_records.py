@@ -31,8 +31,8 @@ import yaml
 # Put the repository root on sys.path so `lapt` imports without an
 # editable install, for running this script straight from a checkout.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from lapt.core.artifacts import CONFIG_FILENAME
 from lapt.sources.base import LEGACY_CONFIG_FILENAME, SOURCE_TYPES
+from lapt_core.artifacts import CONFIG_FILENAME
 
 
 def find_legacy_records(root: str) -> list[str]:

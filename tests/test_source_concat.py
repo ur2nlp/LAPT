@@ -6,10 +6,10 @@ import pytest
 import yaml
 from datasets import load_from_disk
 
-from lapt.core.artifacts import ConfigMismatchError
 from lapt.sources import SOURCE_TYPES, ConcatDataset
 from lapt.sources.factory import build_source, source_type
 from lapt.sources.plaintext import PlaintextDataset
+from lapt_core.artifacts import ConfigMismatchError
 
 
 @pytest.fixture
