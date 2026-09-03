@@ -18,7 +18,6 @@ from transformers import PreTrainedTokenizer
 
 from lapt.artifact_configs import (
     DatasetConfig,
-    SourceCacheTracking,
     dict_diff,
     multinomial_mix_slug,
     resolve_dev_size,
@@ -38,77 +37,6 @@ from lapt.sources.sampling import compute_sampling_probs
 from lapt.sources.text_processing import (
     read_instruction_jsonl,
 )
-
-SOURCE_CONFIG_FILENAME = "source_config.yaml"
-
-
-def _validate_source_cache(untokenized_path: str, current: dict) -> None:
-    """
-    Validate that a cached source dataset was built with the same parameters
-    currently requested. Raises on mismatch so stale per-source caches can't
-    silently propagate into downstream mixes.
-
-    Pre-refactor caches without tracking are allowed through with a warning
-    so existing data isn't invalidated on upgrade; mismatches from that point
-    on require an explicit regeneration (e.g. fresh_dataset=true).
-
-    Tracked parameters added after a cache was built are tolerated via
-    SourceCacheTracking (keyed by dataset ``type``): a parameter the cached
-    config lacks is forgiven when the current value equals its registered
-    historical default, while a genuinely different value still mismatches.
-    """
-    config_path = os.path.join(untokenized_path, SOURCE_CONFIG_FILENAME)
-    if not os.path.exists(config_path):
-        print(
-            f"Note: cached source at {untokenized_path} has no source-level "
-            "config tracking (pre-dates tracking support). If you recently "
-            "changed source parameters, pass fresh_dataset=true to regenerate.",
-            file=sys.stderr,
-        )
-        return
-
-    with open(config_path) as f:
-        cached = yaml.safe_load(f) or {}
-
-    legacy_defaults = SourceCacheTracking.legacy_defaults(current.get('type'))
-    if legacy_defaults:
-        current = {
-            key: value
-            for key, value in current.items()
-            if not (
-                key in legacy_defaults
-                and key not in cached
-                and value == legacy_defaults[key]
-            )
-        }
-
-    diffs = dict_diff(cached, current)
-    if not diffs:
-        return
-
-    raise ValueError(
-        f"\n{'=' * 70}\n"
-        f"SOURCE CACHE MISMATCH: {untokenized_path}\n"
-        f"{'=' * 70}\n"
-        f"This cached source dataset was built with different parameters:\n\n"
-        + "\n".join(f"  {diff}" for diff in diffs)
-        + "\n\n"
-        f"This matters because the same source cache is reused across every\n"
-        f"mix that references this source id, so stale data would silently\n"
-        f"feed downstream sampling.\n\n"
-        f"To proceed, either:\n\n"
-        f"  1. Regenerate this source by passing fresh_dataset=true\n"
-        f"     (this will clear the cache dir and rebuild).\n\n"
-        f"  2. Change the source id so it resolves to a different cache dir.\n"
-        f"{'=' * 70}\n"
-    )
-
-
-def _save_source_cache_config(untokenized_path: str, current: dict) -> None:
-    """Write the source-level tracked config alongside a freshly built cache."""
-    config_path = os.path.join(untokenized_path, SOURCE_CONFIG_FILENAME)
-    with open(config_path, 'w') as f:
-        yaml.dump(current, f, default_flow_style=False, sort_keys=False)
 
 
 def _get_source_id(config: DictConfig, fallback: str = None) -> str:
@@ -187,13 +115,10 @@ class UntokenizedDataset(CachedArtifact):
     configured, move it again to a `_sub_{digest}` sibling.
 
     `build` and `read` therefore both delegate to the dispatcher, and `write` is
-    a no-op. That is not an accident of the port: the dispatcher already owns a
-    second, per-source caching mechanism (`_save_source_cache_config` /
-    `_validate_source_cache`) that predates `CachedArtifact` and has not been
-    ported yet. Until it is, the dispatcher is the only thing that can decide
-    which of those inner caches are valid and what the resulting path is, so
-    this class tracks the outer stage only. Porting the inner sources is what
-    will let `build` and `read` become genuinely different operations.
+    a no-op: the sources own their own caching now, so there is nothing left for
+    this class to build or write. It survives only to give `__main__` a path and
+    to record the seed, and both of those are now redundant -- see the note on
+    `config_filename`.
     """
 
     name = "untokenized"

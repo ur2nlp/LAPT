@@ -68,36 +68,6 @@ def resolve_dev_size(args: DictConfig):
     )
 
 
-class SourceCacheTracking:
-    """Backward-compatibility registry for per-source untokenized cache validation.
-
-    ``_validate_source_cache`` (in dataset_utils) compares the parameters a
-    cached source was built with against those currently requested, and raises
-    on any difference so stale caches can't feed downstream mixes. That strictness
-    becomes a problem when a *new* tracked parameter is introduced after caches
-    already exist: the cached config lacks the field, so every pre-existing cache
-    suddenly mismatches and would be needlessly regenerated.
-
-    Register such parameters here, keyed by dataset ``type``, mapping each to the
-    historical default that the old (field-less) caches were effectively built
-    with. A cached config missing the parameter is then treated as matching when
-    the current value equals that default; a non-default value still trips the
-    mismatch, since the data genuinely differs. This mirrors the legacy-field
-    tolerance ``TokenizerConfig`` applies via ``_embedding_only_fields``.
-    """
-
-    _LEGACY_DEFAULTS: dict[str, dict] = {
-        # split_into_lines was added to the huggingface loader's tracking after
-        # the original line-splitting behavior (== True) had shipped.
-        'huggingface': {'split_into_lines': True},
-    }
-
-    @classmethod
-    def legacy_defaults(cls, dataset_type: str | None) -> dict:
-        """Return {param: historical_default} for a source ``type`` (empty if none)."""
-        return dict(cls._LEGACY_DEFAULTS.get(dataset_type, {}))
-
-
 def get_model_shortname(hf_model: str) -> str:
     """
     Extract a short identifier from HuggingFace model name.
