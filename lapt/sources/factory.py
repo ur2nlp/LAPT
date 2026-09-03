@@ -1,0 +1,84 @@
+"""Construction of source artifacts from dataset configuration entries.
+
+This replaces the `if/elif` chain that dispatched on a config's `type` field.
+Each source class knows how to read its own parameters, via `from_config`, and
+the registry maps the type name to the class — so adding a source type touches
+one new file instead of a branch in a shared function.
+"""
+
+from typing import Any
+
+from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.substituted import SubstitutedDataset, parse_substitutions
+
+DEFAULT_DATASET_TYPE = 'oscar'
+
+
+def field(source_config: Any, name: str, default: Any = None) -> Any:
+    """Read one field from a source configuration.
+
+    Accepts both `DictConfig` and plain dicts, since sources arrive as either
+    depending on whether they came from Hydra or from a parent's `sources` list.
+
+    Args:
+        source_config: The configuration entry.
+        name: Field to read.
+        default: Value to return when the field is absent.
+
+    Returns:
+        The field's value, or `default`.
+    """
+    if isinstance(source_config, dict):
+        value = source_config.get(name, default)
+    else:
+        value = getattr(source_config, name, default)
+    return default if value is None and default is not None else value
+
+
+def source_type(source_config: Any) -> str:
+    """Return a configuration's dataset type, defaulting for older configs.
+
+    Args:
+        source_config: The configuration entry.
+
+    Returns:
+        The `type` field, or `oscar` when absent, which is what configs
+        predating the type field meant.
+    """
+    return field(source_config, 'type', DEFAULT_DATASET_TYPE)
+
+
+def build_source(
+    cache_dir: str,
+    source_config: Any,
+    seed: int = 1,
+    dev_size: float | None = None,
+) -> SourceDataset:
+    """Construct the source artifact a configuration entry describes.
+
+    A `substitutions` field wraps the result in a `SubstitutedDataset`, so the
+    transformation applies to any source type and reaches nested sources
+    identically -- a mix's children carry their own substitutions, and this is
+    the single place that is honored.
+
+    Args:
+        cache_dir: Directory the source's `untokenized` subdirectory goes in.
+        source_config: The configuration entry, carrying at least `type`.
+        seed: Global random seed, passed to sources that subsample.
+        dev_size: Resolved dev-split default, used by a mix that names none.
+
+    Returns:
+        An unresolved source artifact.
+
+    Raises:
+        ValueError: If no source type is registered under the config's `type`,
+            or if a substitution entry is malformed.
+    """
+    base = SOURCE_TYPES.get(source_type(source_config)).from_config(
+        cache_dir, source_config, seed, dev_size
+    )
+
+    substitutions = parse_substitutions(field(source_config, 'substitutions'))
+    if substitutions:
+        return SubstitutedDataset(base, substitutions)
+    return base

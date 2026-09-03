@@ -17,6 +17,7 @@ from lapt.artifact_configs import (
     TokenizerConfig,
     dict_diff,
     focus_embedding_hash,
+    multinomial_mix_slug,
 )
 
 
@@ -942,3 +943,35 @@ class TestTokenizerConfigEmbeddingFieldStripping:
         cfg_path = tmp_path / 'training_config.yaml'
         TokenizerConfig.from_args(args1).save(str(cfg_path))
         assert TokenizerConfig.from_args(args2).check_cached(str(cfg_path)) is True
+
+
+class TestMixSlugSeedKeying:
+    """A non-default seed gets its own mix directory; the default changes nothing.
+
+    Mixes that differ only by seed contain different samples, so they must not
+    share a directory. The key is omitted at the default so that slugs written
+    before seed-keying are unchanged -- 113 GiB of mix directories on the
+    cluster depend on that, and every one of them was built at the default.
+    """
+
+    BASE = {
+        'alpha': 0.5,
+        'total_samples': 5000000,
+        'dev_size': 0.1,
+        'sources': [{'id': 'a'}, {'id': 'b'}],
+    }
+
+    def test_default_seed_matches_an_absent_seed(self):
+        assert multinomial_mix_slug({**self.BASE, 'seed': 1}) == multinomial_mix_slug(self.BASE)
+
+    def test_non_default_seed_gets_its_own_slug(self):
+        assert multinomial_mix_slug({**self.BASE, 'seed': 2}) != multinomial_mix_slug(self.BASE)
+
+    def test_distinct_seeds_stay_distinct(self):
+        slugs = {multinomial_mix_slug({**self.BASE, 'seed': s}) for s in (1, 2, 3, 4)}
+        assert len(slugs) == 4
+
+    def test_the_readable_segments_are_unchanged_by_seed(self):
+        """Only the digest moves, so a mix stays recognizable in a listing."""
+        with_seed = multinomial_mix_slug({**self.BASE, 'seed': 7})
+        assert with_seed.startswith("mix_a0.5_s5m_")

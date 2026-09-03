@@ -147,6 +147,16 @@ class ConfigMismatchError(ValueError):
     """Raised when a cached artifact was built with a different configuration."""
 
 
+class MissingConfigRecordError(ConfigMismatchError):
+    """Raised when a cached artifact directory carries no config record.
+
+    A subclass of `ConfigMismatchError` because the consequence is the same —
+    the cache cannot be validated and must not be reused — while remaining
+    distinguishable for callers that want to offer a migration path.
+    """
+
+
+
 class ArtifactConfig:
     """Base class for the config record saved alongside a cached artifact.
 
@@ -274,11 +284,16 @@ class CachedArtifact(ABC):
             name and as the key in an `ArtifactGraph`.
         depends_on: Names of the stages whose values `build` requires.
         path_includes_digest: Whether to append a config digest to the path.
+        config_filename: Name of the YAML config record written inside the
+            artifact directory. Override when adopting `CachedArtifact` for
+            caches that already carry a record under a different name, so the
+            existing records are read rather than silently ignored.
     """
 
     name: str = "artifact"
     depends_on: tuple[str, ...] = ()
     path_includes_digest: bool = False
+    config_filename: str = CONFIG_FILENAME
 
     def __init__(self, root: str):
         """Initialize the artifact.
@@ -352,7 +367,7 @@ class CachedArtifact(ABC):
     @property
     def config_path(self) -> str:
         """Path of the YAML config record inside this artifact's directory."""
-        return os.path.join(self.path, CONFIG_FILENAME)
+        return os.path.join(self.path, self.config_filename)
 
     def exists(self) -> bool:
         """Whether a cached copy of this artifact is present on disk."""
@@ -365,30 +380,48 @@ class CachedArtifact(ABC):
     def validate(self, error_on_mismatch: bool = True) -> bool:
         """Check a cached artifact's recorded config against the current one.
 
-        An artifact directory with no config record predates config tracking (or
-        was written by hand); that is reported once and accepted rather than
-        treated as a mismatch.
+        An artifact directory with no config record is refused rather than
+        accepted. Such a directory may predate config tracking, may carry its
+        record under another name or beside the directory rather than inside it,
+        or may be the remains of a build interrupted between writing the data
+        and writing the record. None of those can be told apart from the outside,
+        and all of them mean the parameters cannot be verified — so reusing the
+        cache would train on data nobody has checked.
 
         Args:
-            error_on_mismatch: Raise on mismatch when True.
+            error_on_mismatch: Raise on a *parameter* mismatch when True. A
+                missing record always raises, since there is nothing to compare.
 
         Returns:
-            True when the cached config matches, is absent, or the artifact does
-            not exist yet.
+            True when the cached config matches, or the artifact does not exist
+            yet.
 
         Raises:
+            MissingConfigRecordError: If the artifact exists but has no record.
             ConfigMismatchError: If the configs differ and `error_on_mismatch`.
         """
         if not self.exists():
             return True
 
         if not os.path.exists(self.config_path):
-            print(
-                f"Note: using cached {self.name} at {self.path} without config tracking\n"
-                f"      (artifact predates config tracking; its parameters cannot be verified)",
-                file=sys.stderr,
+            raise MissingConfigRecordError(
+                f"\n{'=' * 70}\n"
+                f"NO CONFIG RECORD: {self.path}\n"
+                f"{'=' * 70}\n"
+                f"This cached {self.name} has no {self.config_filename}, so the\n"
+                f"parameters it was built with cannot be verified.\n\n"
+                f"Usual causes:\n\n"
+                f"  - it predates config tracking;\n"
+                f"  - its record is under an older name, or beside this\n"
+                f"    directory rather than inside it;\n"
+                f"  - a build was interrupted after the data was written but\n"
+                f"    before the record was.\n\n"
+                f"To proceed, either rebuild it from scratch, or -- if the data\n"
+                f"is expensive to regenerate and you know what produced it --\n"
+                f"write the record to:\n\n"
+                f"  {self.config_path}\n"
+                f"{'=' * 70}\n"
             )
-            return True
 
         return self.artifact_config().check_cached(
             self.config_path,

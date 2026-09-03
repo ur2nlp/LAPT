@@ -23,7 +23,7 @@ from lapt.artifact_configs import (
 from lapt.custom_trainer import FlooredPerExampleLossTrainer
 from lapt.dataset_utils import (
     DataCollatorForInstructionTuning,
-    UntokenizedDataset,
+    build_untokenized_source,
     is_instruction_dataset,
     load_tokenized_dataset,
     load_tokenized_multinomial_dataset,
@@ -331,12 +331,11 @@ def lapt(args: DictConfig):
     dev_size = resolve_dev_size(args)
 
     # Resolve the untokenized corpus (needed for FOCUS and for standard
-    # training alike). UntokenizedDataset owns the cache path, the config
-    # record beside it, and the validate-or-build decision; for multinomial
-    # mixes it resolves to the mix-keyed subfolder while per-source subdirs
-    # stay shared at the parent level.
-    untokenized_dataset = UntokenizedDataset(args)
-    untokenized_path = untokenized_dataset.resolve()
+    # training alike). The source owns its cache path, the config record
+    # beside it, and the validate-or-build decision.
+    untokenized_source = build_untokenized_source(args)
+    untokenized_source.resolve()
+    untokenized_path = untokenized_source.path
 
     # Initialize model and tokenizer (with optional FOCUS)
     model, tokenizer, tokenized_path = initialize_model_and_tokenizer(args)

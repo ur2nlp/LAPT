@@ -10,6 +10,7 @@ from lapt.core.artifacts import (
     ArtifactGraph,
     CachedArtifact,
     ConfigMismatchError,
+    MissingConfigRecordError,
     config_digest,
     dict_diff,
     format_number,
@@ -172,15 +173,24 @@ class TestCachedArtifactResolve:
         assert changed.resolve(fresh=True) == "v2"
         assert changed.build_count == 1
 
-    def test_untracked_cache_is_tolerated_not_rejected(self, tmp_path, capsys):
-        # an artifact directory predating config tracking must keep working
+    def test_cache_without_a_record_is_refused(self, tmp_path):
+        # nothing distinguishes a pre-tracking cache from an interrupted build,
+        # so an unverifiable cache must not be reused
         artifact = RecordingArtifact(str(tmp_path))
         artifact.resolve()
         os.remove(artifact.config_path)
 
-        reloaded = RecordingArtifact(str(tmp_path))
-        assert reloaded.resolve() == "v1"
-        assert "without config tracking" in capsys.readouterr().err
+        with pytest.raises(MissingConfigRecordError, match="NO CONFIG RECORD"):
+            RecordingArtifact(str(tmp_path)).resolve()
+
+    def test_a_refused_cache_can_still_be_rebuilt(self, tmp_path):
+        artifact = RecordingArtifact(str(tmp_path))
+        artifact.resolve()
+        os.remove(artifact.config_path)
+
+        rebuilt = RecordingArtifact(str(tmp_path))
+        assert rebuilt.resolve(fresh=True) == "v1"
+        assert os.path.exists(rebuilt.config_path)
 
     def test_missing_dependency_is_reported(self, tmp_path):
         derived = DerivedArtifact(str(tmp_path))
@@ -192,6 +202,49 @@ class TestCachedArtifactResolve:
         artifact.resolve()
         artifact.clear()
         assert not os.path.exists(artifact.path)
+
+
+class TestConfigFilenameOverride:
+    """`config_filename` lets a subclass adopt caches that already carry a
+    record under a different name.
+
+    Without the override, an existing cache directory whose record is named
+    something else reads as having no record at all, so the cache is refused
+    and its parameters go unread even though they are sitting right there.
+    """
+
+    def test_record_is_written_under_the_overridden_name(self, tmp_path):
+        class LegacyNamed(RecordingArtifact):
+            config_filename = "source_config.yaml"
+
+        artifact = LegacyNamed(str(tmp_path))
+        artifact.resolve()
+
+        assert os.path.exists(os.path.join(artifact.path, "source_config.yaml"))
+        assert not os.path.exists(os.path.join(artifact.path, "config.yaml"))
+
+    def test_record_under_the_overridden_name_is_validated(self, tmp_path):
+        class LegacyNamed(RecordingArtifact):
+            config_filename = "source_config.yaml"
+
+        LegacyNamed(str(tmp_path), payload="v1").resolve()
+
+        with pytest.raises(ConfigMismatchError):
+            LegacyNamed(str(tmp_path), payload="v2").resolve()
+
+    def test_default_name_does_not_see_a_differently_named_record(self, tmp_path):
+        """The override exists because the base class cannot find such a record."""
+        class LegacyNamed(RecordingArtifact):
+            config_filename = "source_config.yaml"
+
+        LegacyNamed(str(tmp_path), payload="v1").resolve()
+
+        # same cache dir, default filename: the existing record is not read, so
+        # the cache reads as unverifiable rather than as a mismatch
+        stock = RecordingArtifact(str(tmp_path), payload="v2")
+        assert stock.path == LegacyNamed(str(tmp_path)).path
+        with pytest.raises(MissingConfigRecordError):
+            stock.validate()
 
 
 class TestDigestAddressedPaths:

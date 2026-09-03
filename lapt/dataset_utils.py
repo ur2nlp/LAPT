@@ -6,99 +6,36 @@ tokenizing with provided tokenizers, and caching results.
 """
 
 import glob
-import hashlib
 import json
 import os
-import random
-import re
 import sys
-from itertools import chain
 
 import numpy as np
 import yaml
-from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
-from omegaconf import DictConfig, ListConfig, OmegaConf
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
+from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
 from lapt.artifact_configs import (
-    DatasetConfig,
-    SourceCacheTracking,
     dict_diff,
     multinomial_mix_slug,
     resolve_dev_size,
 )
-from lapt.core.artifacts import CachedArtifact
-
-SOURCE_CONFIG_FILENAME = "source_config.yaml"
-
-
-def _validate_source_cache(untokenized_path: str, current: dict) -> None:
-    """
-    Validate that a cached source dataset was built with the same parameters
-    currently requested. Raises on mismatch so stale per-source caches can't
-    silently propagate into downstream mixes.
-
-    Pre-refactor caches without tracking are allowed through with a warning
-    so existing data isn't invalidated on upgrade; mismatches from that point
-    on require an explicit regeneration (e.g. fresh_dataset=true).
-
-    Tracked parameters added after a cache was built are tolerated via
-    SourceCacheTracking (keyed by dataset ``type``): a parameter the cached
-    config lacks is forgiven when the current value equals its registered
-    historical default, while a genuinely different value still mismatches.
-    """
-    config_path = os.path.join(untokenized_path, SOURCE_CONFIG_FILENAME)
-    if not os.path.exists(config_path):
-        print(
-            f"Note: cached source at {untokenized_path} has no source-level "
-            "config tracking (pre-dates tracking support). If you recently "
-            "changed source parameters, pass fresh_dataset=true to regenerate.",
-            file=sys.stderr,
-        )
-        return
-
-    with open(config_path) as f:
-        cached = yaml.safe_load(f) or {}
-
-    legacy_defaults = SourceCacheTracking.legacy_defaults(current.get('type'))
-    if legacy_defaults:
-        current = {
-            key: value
-            for key, value in current.items()
-            if not (
-                key in legacy_defaults
-                and key not in cached
-                and value == legacy_defaults[key]
-            )
-        }
-
-    diffs = dict_diff(cached, current)
-    if not diffs:
-        return
-
-    raise ValueError(
-        f"\n{'=' * 70}\n"
-        f"SOURCE CACHE MISMATCH: {untokenized_path}\n"
-        f"{'=' * 70}\n"
-        f"This cached source dataset was built with different parameters:\n\n"
-        + "\n".join(f"  {diff}" for diff in diffs)
-        + "\n\n"
-        f"This matters because the same source cache is reused across every\n"
-        f"mix that references this source id, so stale data would silently\n"
-        f"feed downstream sampling.\n\n"
-        f"To proceed, either:\n\n"
-        f"  1. Regenerate this source by passing fresh_dataset=true\n"
-        f"     (this will clear the cache dir and rebuild).\n\n"
-        f"  2. Change the source id so it resolves to a different cache dir.\n"
-        f"{'=' * 70}\n"
-    )
-
-
-def _save_source_cache_config(untokenized_path: str, current: dict) -> None:
-    """Write the source-level tracked config alongside a freshly built cache."""
-    config_path = os.path.join(untokenized_path, SOURCE_CONFIG_FILENAME)
-    with open(config_path, 'w') as f:
-        yaml.dump(current, f, default_flow_style=False, sort_keys=False)
+from lapt.sources import (
+    ConcatDataset,
+    HuggingFaceDataset,
+    InstructionHFDataset,
+    InstructionJsonlDataset,
+    MultinomialDataset,
+    OscarDataset,
+    PlaintextDataset,
+)
+from lapt.sources.base import SourceDataset
+from lapt.sources.factory import build_source
+from lapt.sources.sampling import compute_sampling_probs
+from lapt.sources.text_processing import (
+    read_instruction_jsonl,
+)
 
 
 def _get_source_id(config: DictConfig, fallback: str = None) -> str:
@@ -130,315 +67,69 @@ def _get_source_id(config: DictConfig, fallback: str = None) -> str:
     return source_id
 
 
-def docs_to_lines(examples):
-    """
-    Convert document-based examples to line-based examples.
-
-    OSCAR data comes as documents with newlines. This function splits
-    each document into individual lines for more granular training.
-
-    Args:
-        examples: Batch of examples with 'text' field containing documents
-
-    Returns:
-        Dictionary with 'text' field containing individual lines (blank lines filtered out)
-    """
-    return {
-        'text': list(chain(
-            *[[line.strip() for line in doc.split('\n') if line.strip()]
-              for doc in examples['text']]
-        ))
-    }
-
-
-def collect_from_stream(stream, limit: int) -> Dataset:
-    """
-    Collect examples from a streaming dataset up to a limit.
-
-    Args:
-        stream: An iterable of examples (typically from load_dataset with streaming=True)
-        limit: Maximum number of examples to collect
-
-    Returns:
-        Dataset containing the collected examples
-    """
-    samples = []
-    for i, example in enumerate(stream):
-        if i >= limit:
-            break
-        samples.append(example)
-    return Dataset.from_list(samples)
-
-
-def _parse_substitutions(raw) -> list[tuple[str, str]]:
-    """
-    Normalize a dataset's optional ``substitutions`` config into (pattern,
-    replacement) pairs.
-
-    Accepts a list of ``{pattern, replacement}`` mappings (the YAML form). The
-    ``replacement`` defaults to an empty string if omitted. Returns an empty
-    list when no substitutions are configured.
-
-    Args:
-        raw: The raw ``substitutions`` value from the dataset config (a
-            ListConfig, list, or None).
-
-    Returns:
-        List of (pattern, replacement) string tuples, in declaration order.
-    """
-    if not raw:
-        return []
-    if isinstance(raw, (ListConfig, DictConfig)):
-        raw = OmegaConf.to_container(raw, resolve=True)
-
-    substitutions = []
-    for item in raw:
-        if 'pattern' not in item:
-            raise ValueError(
-                f"Each substitution must specify a 'pattern' (got {item!r})."
-            )
-        pattern = item['pattern']
-        replacement = item.get('replacement', '')
-        # Fail fast on a malformed regex rather than at map time.
-        re.compile(pattern)
-        substitutions.append((pattern, replacement))
-    return substitutions
-
-
-def _apply_substitutions(
-    base_path: str,
-    substitutions: list[tuple[str, str]],
+def load_untokenized_dataset(
+    dataset_config,
+    cache_dir: str,
+    dev_size: float = None,
+    seed: int = 1,
 ) -> str:
-    """
-    Apply a sequence of regex substitutions to every string column of an
-    untokenized dataset, caching the result in a sibling directory.
-
-    The substitutions are applied in order to each value of each string-valued
-    column (e.g. 'text', or 'prompt'/'response' for instruction sources), so a
-    pattern like ``\\n+`` -> ``' '`` collapses newlines to spaces across any
-    dataset type. The original (raw) cache at ``base_path`` is left untouched;
-    the substituted copy lives at ``{base_path}_sub_{hash}`` keyed on the
-    substitution list so changing the patterns rebuilds rather than clobbers.
-
-    Args:
-        base_path: Path to the untokenized DatasetDict to transform.
-        substitutions: Ordered (pattern, replacement) pairs to apply.
-
-    Returns:
-        Path to the substituted untokenized dataset.
-    """
-    normalized = [
-        {'pattern': pattern, 'replacement': replacement}
-        for pattern, replacement in substitutions
-    ]
-    digest = hashlib.sha256(
-        json.dumps(normalized, sort_keys=True).encode()
-    ).hexdigest()[:8]
-    substituted_path = f"{base_path}_sub_{digest}"
-    tracked = {
-        'type': 'substituted',
-        'base': os.path.basename(base_path),
-        'substitutions': normalized,
-    }
-
-    if os.path.exists(substituted_path):
-        _validate_source_cache(substituted_path, tracked)
-        return substituted_path
-
-    print(
-        f"Applying {len(substitutions)} regex substitution(s) to {base_path}",
-        file=sys.stderr,
-    )
-    compiled = [(re.compile(pattern), replacement) for pattern, replacement in substitutions]
-    dataset_dict = load_from_disk(base_path)
-
-    def substitute_batch(examples, string_columns):
-        for column in string_columns:
-            new_values = []
-            for value in examples[column]:
-                for pattern, replacement in compiled:
-                    value = pattern.sub(replacement, value)
-                new_values.append(value)
-            examples[column] = new_values
-        return examples
-
-    substituted_splits = {}
-    for split_name, split_dataset in dataset_dict.items():
-        string_columns = [
-            name
-            for name, feature in split_dataset.features.items()
-            if getattr(feature, 'dtype', None) == 'string'
-        ]
-        substituted_splits[split_name] = split_dataset.map(
-            lambda examples, columns=string_columns: substitute_batch(examples, columns),
-            batched=True,
-        )
-
-    substituted_dict = DatasetDict(substituted_splits)
-    substituted_dict.save_to_disk(substituted_path)
-    _save_source_cache_config(substituted_path, tracked)
-    print(
-        f"Substituted untokenized dataset saved to {substituted_path}",
-        file=sys.stderr,
-    )
-
-    return substituted_path
-
-
-def load_untokenized_dataset(dataset_config, cache_dir: str, dev_size: float = None) -> str:
     """
     Load untokenized dataset based on configuration.
 
-    This dispatcher routes to the appropriate loader based on dataset type.
+    Thin path-returning wrapper over `build_source`, which maps the config's
+    ``type`` to a source class through the registry and applies any
+    ``substitutions`` the entry carries. Kept so callers that exchange paths
+    keep working; new code should use `build_source` and hold the artifact.
 
     Args:
         dataset_config: Dataset configuration object with type and source info
         cache_dir: Base directory for caching dataset artifacts
         dev_size: Fraction of data for dev set (only used for multinomial sampling)
+        seed: Global random seed. Sources that subsample record it, so it must
+            reach them rather than being read only from the global RNG state.
 
     Returns:
         Path to the untokenized dataset
 
-    NOTE: Parameters affecting the dataset artifact vary by type (language for OSCAR, path for
-    plaintext, alpha/total_samples for multinomial, etc.). When adding new dataset types or
-    parameters, update DatasetConfig in artifact_configs.py to track them.
-
-    Any dataset may also carry an optional ``substitutions`` field — a list of
-    ``{pattern, replacement}`` regexes applied to every string column after the
-    type-specific loader runs (see ``_apply_substitutions``). This is type-agnostic
-    because all loaders funnel through this dispatcher.
+    NOTE: The parameters a source is keyed on are declared by its class in
+    `lapt/sources/`, in a single `config()` method that doubles as the
+    cache-validation record. Adding a dataset type means adding a class there
+    and registering it; there is no separate list to keep in step.
     """
-    # Default to oscar for backward compatibility if type not specified
-    dataset_type = getattr(dataset_config, 'type', 'oscar')
-
-    if dataset_type == 'oscar':
-        language_code = dataset_config.language
-        untokenized_path = _load_oscar_dataset(cache_dir, language_code)
-    elif dataset_type == 'huggingface':
-        name = dataset_config.name
-        config = getattr(dataset_config, 'config', None)
-        split = getattr(dataset_config, 'split', 'train')
-        text_column = getattr(dataset_config, 'text_column', 'text')
-        max_samples = getattr(dataset_config, 'max_samples', None)
-        min_words_per_line = getattr(dataset_config, 'min_words_per_line', None)
-        oversampling_factor = getattr(dataset_config, 'oversampling_factor', 3)
-        split_into_lines = getattr(dataset_config, 'split_into_lines', True)
-        untokenized_path = _load_huggingface_dataset(
-            cache_dir, name, config, split, text_column, max_samples, min_words_per_line,
-            oversampling_factor, split_into_lines
-        )
-    elif dataset_type == 'plaintext':
-        file_path = dataset_config.path
-        untokenized_path = _load_plaintext_dataset(cache_dir, file_path)
-    elif dataset_type == 'plaintext_dir':
-        directory = dataset_config.directory
-        pattern = getattr(dataset_config, 'pattern', '*.txt')
-        untokenized_path = _load_plaintext_dir_dataset(cache_dir, directory, pattern)
-    elif dataset_type == 'concat':
-        sources = dataset_config.sources
-        parent_id = _get_source_id(dataset_config, fallback=None)
-        untokenized_path = _load_concat_dataset(cache_dir, sources, parent_id)
-    elif dataset_type == 'multinomial':
-        sources = dataset_config.sources
-        alpha = dataset_config.get('alpha')
-        total_samples = dataset_config.total_samples
-        untokenized_path = _load_multinomial_dataset(
-            cache_dir, sources, alpha, total_samples, dev_size,
-        )
-    elif dataset_type == 'instruction_jsonl':
-        file_path = dataset_config.path
-        untokenized_path = _load_instruction_jsonl_dataset(cache_dir, file_path)
-    elif dataset_type == 'instruction_hf':
-        name = dataset_config.name
-        config = getattr(dataset_config, 'config', None)
-        split = getattr(dataset_config, 'split', 'train')
-        messages_column = getattr(dataset_config, 'messages_column', 'messages')
-        prompt_template = getattr(dataset_config, 'prompt_template', '{user} Response:')
-        response_template = getattr(dataset_config, 'response_template', ' {assistant}')
-        max_samples = getattr(dataset_config, 'max_samples', None)
-        untokenized_path = _load_instruction_hf_dataset(
-            cache_dir,
-            name,
-            config,
-            split,
-            messages_column,
-            prompt_template,
-            response_template,
-            max_samples,
-        )
-    else:
-        raise ValueError(f"Unsupported dataset type: {dataset_type}")
-
-    substitutions = _parse_substitutions(getattr(dataset_config, 'substitutions', None))
-    if substitutions:
-        untokenized_path = _apply_substitutions(untokenized_path, substitutions)
-
-    return untokenized_path
+    source = build_source(cache_dir, dataset_config, seed, dev_size)
+    source.resolve()
+    return source.path
 
 
-class UntokenizedDataset(CachedArtifact):
-    """The raw, untokenized corpus stage, as a tracked pipeline artifact.
+def build_untokenized_source(args: DictConfig) -> SourceDataset:
+    """Construct the untokenized corpus source a full Hydra config describes.
 
-    Wraps `load_untokenized_dataset` so that the config record beside the cache
-    is written and validated by the same object that resolves the path, instead
-    of by ~35 lines of glue in `__main__`.
+    The single entry point from the training pipeline into `lapt.sources`. The
+    returned artifact owns its cache path, the config record beside it, and the
+    validate-or-build decision, so a caller resolves it and reads `.path`.
 
-    The value of this stage is a *path*, not a dataset: downstream tokenization
-    reads it from disk, and for multinomial mixes it is a mix-keyed subfolder
-    resolved by `DatasetConfig.effective_cache_dir`. Substitutions, when
-    configured, move it again to a `_sub_{digest}` sibling.
+    Args:
+        args: Full Hydra configuration, read for `dataset` and `seed`.
 
-    `build` and `read` therefore both delegate to the dispatcher, and `write` is
-    a no-op. That is not an accident of the port: the dispatcher already owns a
-    second, per-source caching mechanism (`_save_source_cache_config` /
-    `_validate_source_cache`) that predates `CachedArtifact` and has not been
-    ported yet. Until it is, the dispatcher is the only thing that can decide
-    which of those inner caches are valid and what the resulting path is, so
-    this class tracks the outer stage only. Porting the inner sources is what
-    will let `build` and `read` become genuinely different operations.
+    Returns:
+        An unresolved source. For a multinomial mix this resolves into the
+        mix-keyed subfolder while per-source subdirectories stay shared at the
+        parent level; with substitutions configured it is the `_sub_{digest}`
+        sibling of whatever the underlying type produced.
     """
-
-    name = "untokenized"
-
-    def __init__(self, args: DictConfig):
-        """Initialize from the full Hydra config.
-
-        Args:
-            args: Full Hydra configuration, read for `dataset` and `seed`.
-        """
-        self.args = args
-        self._dataset_config = DatasetConfig.from_args(args)
-        super().__init__(self._dataset_config.effective_cache_dir(args.dataset.cache_dir))
-
-    def config(self) -> dict:
-        """Return the tracked parameters for this dataset (see `DatasetConfig`)."""
-        return self._dataset_config.to_dict()
-
-    def artifact_config(self) -> DatasetConfig:
-        """Use `DatasetConfig` itself, so mismatch messages keep their name."""
-        return self._dataset_config
-
-    def _dispatch(self) -> str:
-        """Run the cache-aware loader and return the resulting path."""
-        return load_untokenized_dataset(
-            dataset_config=self.args.dataset,
-            cache_dir=self.args.dataset.cache_dir,
-            dev_size=resolve_dev_size(self.args),
-        )
-
-    def build(self, deps) -> str:
-        return self._dispatch()
-
-    def read(self, path: str) -> str:
-        return self._dispatch()
-
-    def write(self, value: str, path: str) -> None:
-        """No-op: the dispatcher writes its own output."""
+    return build_source(
+        args.dataset.cache_dir,
+        args.dataset,
+        args.seed,
+        resolve_dev_size(args),
+    )
 
 
 def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
     """
     Load or download OSCAR dataset for a specific language.
+
+    Thin path-returning wrapper over `OscarDataset`; see `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
@@ -447,29 +138,9 @@ def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
     Returns:
         Path to the untokenized dataset
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {'type': 'oscar', 'language': language_code}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print("Downloading and preparing OSCAR dataset", file=sys.stderr)
-    dataset = load_dataset(
-        "oscar-corpus/OSCAR-2201",
-        token=True,
-        language=language_code
-    )
-    dataset = dataset.map(
-        docs_to_lines,
-        batched=True,
-        remove_columns=dataset['train'].column_names # type: ignore
-    )
-    dataset.save_to_disk(untokenized_path)
-    _save_source_cache_config(untokenized_path, tracked)
-    print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
+    source = OscarDataset(cache_dir, language_code)
+    source.resolve()
+    return source.path
 
 
 def _load_huggingface_dataset(
@@ -482,9 +153,13 @@ def _load_huggingface_dataset(
     min_words_per_line: int = None,
     oversampling_factor: int = 3,
     split_into_lines: bool = True,
+    seed: int = 1,
 ) -> str:
     """
     Load a generic HuggingFace dataset.
+
+    Thin path-returning wrapper over `HuggingFaceDataset`; see
+    `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
@@ -493,231 +168,39 @@ def _load_huggingface_dataset(
         split: Which split to load (default: 'train')
         text_column: Name of the column containing text (default: 'text')
         max_samples: Maximum number of examples to load, uses streaming if specified
-            (optional). An "example" is a line when split_into_lines is True, else a
-            whole document.
         min_words_per_line: Minimum number of space-separated words per example
-            (filters out titles/headers). Applies per line when splitting, per
-            document otherwise.
-        oversampling_factor: When max_samples specified, download this many times more documents
-            than estimated needed to maintain document diversity (default: 3). Higher values =
-            better diversity but more memory.
-        split_into_lines: If True (default), split each document into one example
-            per line (the historical behavior). If False, keep each document as a
-            single example with newlines preserved, parallel to the instruction
-            loaders (combine with ``substitutions`` to normalize whitespace).
+        oversampling_factor: Download this many times more documents than estimated
+            needed, to maintain document diversity (default: 3)
+        split_into_lines: Split each document into one example per line (default: True)
+        seed: Seed for the subsample taken when max_samples is set
 
     Returns:
         Path to the untokenized dataset
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {
-        'type': 'huggingface',
-        'name': name,
-        'config': config,
-        'split': split,
-        'text_column': text_column,
-        'max_samples': max_samples,
-        'min_words_per_line': min_words_per_line,
-        'oversampling_factor': oversampling_factor,
-        'split_into_lines': split_into_lines,
-    }
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-    else:
-        print(f"Downloading and preparing HuggingFace dataset: {name}", file=sys.stderr)
-        if config:
-            print(f"  Config: {config}", file=sys.stderr)
-        print(f"  Split: {split}", file=sys.stderr)
-        example_unit = "lines" if split_into_lines else "documents"
-        if max_samples:
-            print(f"  Max samples ({example_unit}): {max_samples}", file=sys.stderr)
-            print(f"  Oversampling factor: {oversampling_factor}x", file=sys.stderr)
-
-        # Use streaming if max_samples specified to avoid downloading entire dataset
-        if max_samples:
-            if split_into_lines:
-                # Estimate lines/doc so we download enough documents to yield
-                # max_samples lines. When not splitting, each document is exactly
-                # one example, so this estimation is unnecessary (see else branch).
-                stream = load_dataset(
-                    name,
-                    config,
-                    split=split,
-                    streaming=True
-                )
-
-                # Phase 1: Sample a small batch to estimate lines per document
-                # This helps us download the right number of documents
-                estimation_sample_size = min(1000, max_samples // 10)
-                print(
-                    f"  Phase 1: Sampling {estimation_sample_size} documents to estimate lines/doc",
-                    file=sys.stderr
-                )
-
-                # Convert estimation batch to dataset and measure lines/doc
-                # Use same processing pipeline as main data for accurate estimation
-                estimation_dataset = collect_from_stream(stream, estimation_sample_size)
-                num_estimation_docs = len(estimation_dataset)
-                estimation_dataset = _docs_to_filtered_lines(
-                    estimation_dataset, text_column, min_words_per_line, split_into_lines
-                )
-
-                lines_per_doc = (
-                    len(estimation_dataset) / num_estimation_docs if num_estimation_docs else 1
-                )
-                print(
-                    f"  Estimated {lines_per_doc:.1f} lines per document (after all filters)",
-                    file=sys.stderr
-                )
-
-                # Check if estimation found any valid lines
-                if lines_per_doc == 0:
-                    raise ValueError(
-                        f"Estimation phase found 0 lines per document after filtering. "
-                        f"This suggests min_words_per_line={min_words_per_line} is too strict, "
-                        f"or the dataset has no suitable content."
-                    )
-
-                # Calculate how many documents to download with oversampling.
-                # We oversample to maintain document diversity, then randomly
-                # sample lines at the end.
-                docs_needed = int((max_samples / lines_per_doc) * oversampling_factor)
-            else:
-                # One example per document: download max_samples documents, plus
-                # the oversampling headroom for diversity and any min-words filtering.
-                docs_needed = max_samples * oversampling_factor
-
-            print(f"  Downloading {docs_needed} documents total", file=sys.stderr)
-
-            # Download all documents from a fresh stream.
-            # (Restarting the stream is simpler than resuming/combining with the
-            # estimation samples consumed above.)
-            stream = load_dataset(
-                name,
-                config,
-                split=split,
-                streaming=True
-            )
-
-            dataset = collect_from_stream(stream, docs_needed)
-            print(f"  Downloaded {len(dataset)} documents", file=sys.stderr)
-        else:
-            dataset = load_dataset(name, config, split=split)
-
-        # Convert to the target schema (rename column if needed; split docs on
-        # newlines unless split_into_lines is False).
-        # Note: Could also pass min_words_per_line here if detailed filtering logs aren't needed
-        dataset = _docs_to_filtered_lines(
-            dataset, text_column, min_words_per_line=None, split_into_lines=split_into_lines
-        )
-        if split_into_lines:
-            print(f"  Converted to {len(dataset)} lines from documents", file=sys.stderr)
-        else:
-            print(f"  Kept {len(dataset)} documents (no line splitting)", file=sys.stderr)
-
-        # Filter out short examples (e.g., section titles) if min_words_per_line specified
-        if min_words_per_line is not None:
-            original_size = len(dataset)
-            dataset = dataset.filter(
-                lambda x: len(x['text'].split()) >= min_words_per_line
-            )
-            filtered_size = len(dataset)
-            print(
-                f"  Filtered {original_size - filtered_size} {example_unit} with "
-                f"< {min_words_per_line} words ({filtered_size} {example_unit} remaining)",
-                file=sys.stderr
-            )
-
-            # Check if we have enough examples after filtering
-            if max_samples and filtered_size < max_samples:
-                print(
-                    f"Warning: After filtering, only {filtered_size} {example_unit} remain, but "
-                    f"{max_samples} requested. Consider increasing oversampling_factor "
-                    f"(current: {oversampling_factor}) or reducing min_words_per_line.",
-                    file=sys.stderr
-                )
-
-        # If max_samples specified, randomly sample to exactly that many examples
-        # This maintains document diversity from oversampling while controlling final size
-        if max_samples and len(dataset) > max_samples:
-            print(
-                f"  Randomly sampling {max_samples} {example_unit} from {len(dataset)} "
-                f"available {example_unit}",
-                file=sys.stderr
-            )
-            indices = random.sample(range(len(dataset)), max_samples)
-            dataset = dataset.select(sorted(indices))
-        elif max_samples and len(dataset) < max_samples:
-            print(
-                f"  Note: Got {len(dataset)} {example_unit}, which is less than requested "
-                f"{max_samples}",
-                file=sys.stderr
-            )
-
-        # Wrap in DatasetDict for consistency with other loaders
-        dataset_dict = DatasetDict({'train': dataset})
-        dataset_dict.save_to_disk(untokenized_path)
-        _save_source_cache_config(untokenized_path, tracked)
-        print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
-
-
-def _docs_to_filtered_lines(
-    dataset: Dataset,
-    text_column: str = 'text',
-    min_words_per_line: int = None,
-    split_into_lines: bool = True,
-) -> Dataset:
-    """
-    Convert document-based dataset to (optionally) line-based format with filtering.
-
-    This helper standardizes the transformation pipeline used by HuggingFace dataset loaders.
-
-    Args:
-        dataset: Dataset with document text
-        text_column: Name of the text column (will be renamed to 'text' if different)
-        min_words_per_line: Minimum words per kept example (None to skip filtering).
-            Applies per line when splitting, per document otherwise.
-        split_into_lines: If True (default), split each document on newlines into
-            one example per line. If False, keep each document as a single example
-            (newlines preserved), parallel to the instruction-data loaders.
-
-    Returns:
-        Dataset with one example per line (or per document when
-        ``split_into_lines`` is False).
-    """
-    # Standardize column name to 'text' if needed
-    if text_column != 'text':
-        dataset = dataset.rename_column(text_column, 'text')
-
-    # Convert to line-based format (split documents on newlines)
-    if split_into_lines:
-        original_columns = dataset.column_names
-        dataset = dataset.map(
-            docs_to_lines,
-            batched=True,
-            remove_columns=original_columns
-        )
-    elif set(dataset.column_names) != {'text'}:
-        # Drop any extra metadata columns so the schema matches other loaders.
-        dataset = dataset.remove_columns(
-            [column for column in dataset.column_names if column != 'text']
-        )
-
-    # Filter short examples if specified
-    if min_words_per_line is not None:
-        dataset = dataset.filter(
-            lambda x: len(x['text'].split()) >= min_words_per_line
-        )
-
-    return dataset
+    source = HuggingFaceDataset(
+        cache_dir,
+        name,
+        config=config,
+        split=split,
+        text_column=text_column,
+        max_samples=max_samples,
+        min_words_per_line=min_words_per_line,
+        oversampling_factor=oversampling_factor,
+        split_into_lines=split_into_lines,
+        seed=seed,
+    )
+    source.resolve()
+    return source.path
 
 
 def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
     """
     Load plaintext file(s) and convert to dataset format.
+
+    Thin path-returning wrapper over `PlaintextDataset`, which owns the cache
+    path, the config record, and the validate-or-build decision. Kept so the
+    dispatcher and the composite loaders can keep exchanging paths while the
+    remaining source types are converted.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
@@ -726,36 +209,17 @@ def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
     Returns:
         Path to the untokenized dataset
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {'type': 'plaintext', 'path': file_path}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print(f"Loading plaintext data from {file_path}", file=sys.stderr)
-
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Plaintext file not found: {file_path}")
-
-    with open(file_path, encoding='utf-8') as f:
-        lines = [line.strip() for line in f if line.strip()]
-
-    if not lines:
-        raise ValueError(f"Plaintext file {file_path} contains no non-empty lines")
-
-    print(f"Loaded {len(lines)} lines from plaintext file", file=sys.stderr)
-
-    dataset = Dataset.from_dict({'text': lines})
-    dataset_dict = DatasetDict({'train': dataset})
-    dataset_dict.save_to_disk(untokenized_path)
-    _save_source_cache_config(untokenized_path, tracked)
-    print(f"Untokenized dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
+    source = PlaintextDataset(cache_dir, file_path)
+    source.resolve()
+    return source.path
 
 
-def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '*.txt') -> str:
+def _load_plaintext_dir_dataset(
+    cache_dir: str,
+    directory: str,
+    pattern: str = '*.txt',
+    seed: int = 1,
+) -> str:
     """
     Load all plaintext files from a directory and concatenate them.
 
@@ -787,61 +251,15 @@ def _load_plaintext_dir_dataset(cache_dir: str, directory: str, pattern: str = '
     ]
 
     # Reuse concat implementation
-    return _load_concat_dataset(cache_dir, sources)
-
-
-def _load_instruction_jsonl_file(file_path: str) -> tuple[list[str], list[str]]:
-    """
-    Load prompts and responses from an instruction JSONL file.
-
-    Each line should be a JSON object with 'prompt' and 'response' fields:
-    {"prompt": "Translate to Gothic: hello\\nResponse:", "response": " hails"}
-
-    Args:
-        file_path: Path to JSONL file
-
-    Returns:
-        Tuple of (prompts, responses) lists
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Instruction JSONL file not found: {file_path}")
-
-    prompts = []
-    responses = []
-    with open(file_path, encoding='utf-8') as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON on line {line_num}: {e}")
-
-            if 'prompt' not in obj or 'response' not in obj:
-                raise ValueError(
-                    f"Line {line_num} missing 'prompt' or 'response' field. "
-                    f"Got keys: {list(obj.keys())}"
-                )
-            prompts.append(obj['prompt'])
-            responses.append(obj['response'])
-
-    if not prompts:
-        raise ValueError(f"JSONL file {file_path} contains no valid examples")
-
-    return prompts, responses
+    return _load_concat_dataset(cache_dir, sources, seed=seed)
 
 
 def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     """
     Load instruction-tuning data from JSONL file(s).
 
-    Each line should be a JSON object with 'prompt' and 'response' fields:
-    {"prompt": "Translate to Gothic: hello\\nResponse:", "response": " hails"}
-
-    Unlike plaintext datasets (which have 'text' column), instruction datasets
-    have separate 'prompt' and 'response' columns. This allows for loss masking
-    during training where only the response tokens contribute to the loss.
+    Thin path-returning wrapper over `InstructionJsonlDataset`; see
+    `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
@@ -850,26 +268,9 @@ def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
     Returns:
         Path to the untokenized dataset (with 'prompt' and 'response' columns)
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {'type': 'instruction_jsonl', 'path': file_path}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print(f"Loading instruction data from {file_path}", file=sys.stderr)
-
-    prompts, responses = _load_instruction_jsonl_file(file_path)
-
-    print(f"Loaded {len(prompts)} instruction examples from JSONL file", file=sys.stderr)
-
-    dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
-    dataset_dict = DatasetDict({'train': dataset})
-    dataset_dict.save_to_disk(untokenized_path)
-    _save_source_cache_config(untokenized_path, tracked)
-    print(f"Untokenized instruction dataset saved to {untokenized_path}", file=sys.stderr)
-
-    return untokenized_path
+    source = InstructionJsonlDataset(cache_dir, file_path)
+    source.resolve()
+    return source.path
 
 
 def _load_instruction_hf_dataset(
@@ -881,19 +282,13 @@ def _load_instruction_hf_dataset(
     prompt_template: str = '{user} Response:',
     response_template: str = ' {assistant}',
     max_samples: int | None = None,
+    seed: int = 1,
 ) -> str:
     """
     Load an instruction-tuning dataset from HuggingFace.
 
-    Expects a column of chat-formatted messages, where each entry is a list of
-    {role, content} dicts (the OpenAI Chat Completions convention used by
-    no_robots, Tulu, UltraChat, OpenHermes, etc.). Only examples shaped as
-    exactly [user, assistant] are kept; multi-turn and system-prompt examples
-    are dropped to match the framework's single-turn prompt/response schema.
-
-    Each kept example is flattened to {prompt, response} columns by applying
-    prompt_template and response_template, so the downstream tokenizer can
-    consume it identically to instruction_jsonl sources.
+    Thin path-returning wrapper over `InstructionHFDataset`; see
+    `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
@@ -901,519 +296,81 @@ def _load_instruction_hf_dataset(
         config: Dataset configuration/subset, optional
         split: Which split to load (default: 'train')
         messages_column: Column name holding the list of {role, content} dicts
-        prompt_template: Format string with a {user} placeholder, applied to
-            the user message to produce the 'prompt' column
-        response_template: Format string with an {assistant} placeholder,
-            applied to the assistant message to produce the 'response' column
+        prompt_template: Format string with a {user} placeholder
+        response_template: Format string with an {assistant} placeholder
         max_samples: Optional cap on number of examples (random subsample)
+        seed: Seed for that subsample
 
     Returns:
         Path to the untokenized dataset (with 'prompt' and 'response' columns)
     """
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-    tracked = {
-        'type': 'instruction_hf',
-        'name': name,
-        'config': config,
-        'split': split,
-        'messages_column': messages_column,
-        'prompt_template': prompt_template,
-        'response_template': response_template,
-        'max_samples': max_samples,
-    }
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print(f"Downloading instruction dataset from HuggingFace: {name}", file=sys.stderr)
-    if config:
-        print(f"  Config: {config}", file=sys.stderr)
-    print(f"  Split: {split}", file=sys.stderr)
-
-    raw = load_dataset(name, config, split=split)
-
-    def is_simple_pair(ex):
-        msgs = ex[messages_column]
-        return (
-            len(msgs) == 2
-            and msgs[0]['role'] == 'user'
-            and msgs[1]['role'] == 'assistant'
-        )
-
-    n_before = len(raw)
-    raw = raw.filter(is_simple_pair)
-    n_after = len(raw)
-    print(
-        f"  Kept {n_after}/{n_before} examples after filtering to single-turn "
-        f"[user, assistant] pairs",
-        file=sys.stderr,
+    source = InstructionHFDataset(
+        cache_dir,
+        name,
+        config=config,
+        split=split,
+        messages_column=messages_column,
+        prompt_template=prompt_template,
+        response_template=response_template,
+        max_samples=max_samples,
+        seed=seed,
     )
-
-    if n_after == 0:
-        raise ValueError(
-            f"No examples remained after filtering. Check that '{messages_column}' "
-            f"contains [{{'role': 'user', ...}}, {{'role': 'assistant', ...}}] pairs."
-        )
-
-    if max_samples is not None and n_after > max_samples:
-        print(
-            f"  Subsampling to {max_samples} examples from {n_after}",
-            file=sys.stderr,
-        )
-        indices = random.sample(range(n_after), max_samples)
-        raw = raw.select(sorted(indices))
-
-    def to_prompt_response(ex):
-        user = ex[messages_column][0]['content']
-        assistant = ex[messages_column][1]['content']
-        return {
-            'prompt': prompt_template.format(user=user),
-            'response': response_template.format(assistant=assistant),
-        }
-
-    dataset = raw.map(to_prompt_response, remove_columns=raw.column_names)
-    dataset_dict = DatasetDict({'train': dataset})
-    dataset_dict.save_to_disk(untokenized_path)
-    _save_source_cache_config(untokenized_path, tracked)
-    print(
-        f"Untokenized instruction dataset saved to {untokenized_path}",
-        file=sys.stderr,
-    )
-
-    return untokenized_path
+    source.resolve()
+    return source.path
 
 
-def _load_concat_dataset(cache_dir: str, sources: list, parent_id: str = None) -> str:
+def _load_concat_dataset(
+    cache_dir: str,
+    sources: list,
+    parent_id: str = None,
+    seed: int = 1,
+) -> str:
     """
     Concatenate multiple dataset sources into a single dataset.
+
+    Thin path-returning wrapper over `ConcatDataset`; see `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
         sources: List of dataset source configurations (may include 'id' field for naming)
         parent_id: Optional id from parent concat config (used for fallback naming)
+        seed: Global random seed, passed to children that subsample
 
     Returns:
         Path to the untokenized concatenated dataset
     """
-    if not sources:
-        raise ValueError("Cannot concatenate datasets: sources list is empty")
-
-    untokenized_path = os.path.join(cache_dir, "untokenized")
-
-    normalized_sources = [
-        OmegaConf.to_container(DictConfig(s), resolve=True) for s in sources
-    ]
-    tracked = {'type': 'concat', 'sources': normalized_sources}
-
-    if os.path.exists(untokenized_path):
-        _validate_source_cache(untokenized_path, tracked)
-        return untokenized_path
-
-    print(f"Concatenating {len(sources)} dataset sources", file=sys.stderr)
-
-    datasets_to_concat = []
-    for idx, source_config in enumerate(sources):
-        # Wrap in DictConfig for recursive dispatching
-        source_dict_config = DictConfig(source_config)
-
-        # Determine source cache name:
-        # 1. Use source's id field if present (or deprecated 'language')
-        # 2. Use parent_id_{idx} if parent has id
-        # 3. Fall back to source_{idx}
-        default_id = f"{parent_id}_{idx}" if parent_id else f"source_{idx}"
-        source_id = _get_source_id(source_dict_config, fallback=default_id)
-
-        source_cache = os.path.join(cache_dir, source_id)
-
-        # Recursively load each source (supports nested concat/multinomial)
-        source_path = load_untokenized_dataset(
-            dataset_config=source_dict_config,
-            cache_dir=source_cache
-        )
-
-        source_dataset = load_from_disk(source_path)
-        datasets_to_concat.append(source_dataset['train'])
-        print(
-            f"  Source {idx} ({source_id}): {len(source_dataset['train'])} examples",
-            file=sys.stderr
-        )
-
-    concatenated = concatenate_datasets(datasets_to_concat)
-    dataset_dict = DatasetDict({'train': concatenated})
-    dataset_dict.save_to_disk(untokenized_path)
-    print(
-        f"Concatenated dataset saved to {untokenized_path} ({len(concatenated)} total examples)",
-        file=sys.stderr
-    )
-    _save_source_cache_config(untokenized_path, tracked)
-
-    return untokenized_path
+    source = ConcatDataset(cache_dir, sources, parent_id=parent_id, seed=seed)
+    source.resolve()
+    return source.path
 
 
 def _load_multinomial_dataset(
-    cache_dir: str, sources: list, alpha: float, total_samples: int, dev_size: float = None
+    cache_dir: str,
+    sources: list,
+    alpha: float,
+    total_samples: int,
+    dev_size: float = None,
+    seed: int = 1,
 ) -> str:
     """
     Sample from multiple dataset sources using temperature-scaled multinomial sampling.
 
-    Splits each source into train/dev BEFORE upsampling to prevent dev set leakage.
-    Train splits are upsampled according to alpha, dev splits are kept at natural proportions.
+    Thin path-returning wrapper over `MultinomialDataset`; see `_load_plaintext_dataset`.
 
     Args:
         cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (should have 'id' field for naming).
-            Each source can optionally include a 'dev_size' field to override the global dev_size.
+        sources: List of dataset source configurations
         alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
-        total_samples: Total number of training examples to sample (dev set size is separate)
-        dev_size: Global default fraction of each source to use for dev set (must be between 0 and
-            1). Individual sources can override this with their own dev_size field, which can be
-            fractional (0 < x < 1) or absolute (>= 1) for that specific source. Use -1 to skip dev
-            split (either globally or per-source).
+        total_samples: Total number of training examples to sample
+        dev_size: Global default fraction of each source to use for dev set, or -1 to skip
+        seed: Global random seed, which selects the sampled examples
 
     Returns:
         Path to the untokenized sampled dataset (DatasetDict with train and per-source dev splits)
     """
-    if not sources:
-        raise ValueError("Cannot sample from datasets: sources list is empty")
-    if total_samples <= 0:
-        raise ValueError(f"total_samples must be positive, got {total_samples}")
-    if alpha is not None and alpha <= 0:
-        raise ValueError(f"alpha must be positive, got {alpha}")
-    if dev_size is None:
-        raise ValueError("dev_size must be provided for multinomial sampling")
-
-    # Check for explicit "no dev split" flag
-    skip_dev_split = (dev_size == -1)
-
-    if dev_size == 0:
-        raise ValueError(
-            "dev_size=0 is ambiguous. Use dev_size=-1 to explicitly skip dev split, "
-            "or use a value > 0 for fractional split size."
-        )
-    elif not skip_dev_split and not (0 < dev_size < 1):
-        raise ValueError(
-            f"Multinomial sampling requires fractional dev_size (0 < dev_size < 1), got {dev_size}. "
-            "Use dev_size=-1 to skip dev split (e.g., when using external dev sets). "
-            "Fixed-size dev sets are not supported for multinomial sampling."
-        )
-
-    if skip_dev_split:
-        print("WARNING: dev_size=-1 skips dev split creation.", file=sys.stderr)
-        print(
-            "If using this dataset for model training (not FOCUS), this will cause dev-set "
-            "contamination as upsampled training data won't have a held-out dev set. Only use "
-            "dev_size=-1 for datasets that don't need evaluation (e.g., FOCUS training), or ones "
-            "that have an external dev set.",
-            file=sys.stderr
-        )
-
-    # Place the upsampled output inside a mix-keyed subdirectory so that
-    # changing alpha / total_samples / sampling_prob / upsampling_factor does
-    # not clobber the previous mix. Source subdirs stay at the parent level
-    # (untouched below) so they remain shared across mixes.
-    mix_config = {
-        'alpha': alpha,
-        'total_samples': total_samples,
-        'dev_size': dev_size,
-        'sources': [
-            OmegaConf.to_container(DictConfig(s), resolve=True) for s in sources
-        ],
-    }
-    mix_dir = os.path.join(cache_dir, multinomial_mix_slug(mix_config))
-    os.makedirs(mix_dir, exist_ok=True)
-    untokenized_path = os.path.join(mix_dir, "untokenized")
-
-    if not os.path.exists(untokenized_path):
-        print(
-            f"Multinomial sampling from {len(sources)} sources with alpha={alpha}", file=sys.stderr
-        )
-        print(f"Mix cache directory: {mix_dir}", file=sys.stderr)
-        if not skip_dev_split:
-            print(f"Dev split: {dev_size:.1%} of each source (before upsampling)", file=sys.stderr)
-        else:
-            print("No dev split (dev_size=-1, using all data for training)", file=sys.stderr)
-
-        train_datasets = []
-        dev_datasets = []
-        dev_names = []
-        train_sizes = []
-
-        # Load all sources, split into train/dev, and record train sizes
-        for idx, source_config in enumerate(sources):
-            source_id, train_data, dev_data = _load_and_split_source(
-                source_config, cache_dir, dev_size, idx
-            )
-
-            train_datasets.append(train_data)
-            if dev_data is not None:
-                dev_datasets.append(dev_data)
-                dev_names.append(source_id)
-            train_sizes.append(len(train_data))
-
-        # Check for empty datasets
-        if all(size == 0 for size in train_sizes):
-            raise ValueError("Cannot sample: all source datasets are empty")
-
-        # Calculate sampling probabilities for TRAIN data
-        # Sources with explicit sampling_prob get their probability pinned directly.
-        # Remaining probability budget is distributed among unpinned sources using
-        # alpha-based reweighting: p_i = (size_i)^alpha / Z, scaled to fill the budget.
-        sampling_probs = _compute_sampling_probs(sources, train_sizes, alpha)
-
-        # Convert probabilities to integer sample counts
-        # Distribute remainder samples round-robin to handle rounding errors
-        samples_per_source = [int(prob * total_samples) for prob in sampling_probs]
-        remaining = total_samples - sum(samples_per_source)
-        for i in range(remaining):
-            samples_per_source[i % len(sources)] += 1
-
-        print("Train sampling distribution:", file=sys.stderr)
-        for idx, count in enumerate(samples_per_source):
-            percentage = 100 * count / total_samples
-            source_id = _get_source_id(DictConfig(sources[idx]), fallback=f"source_{idx}")
-            pinned = sources[idx].get('sampling_prob') is not None
-            pin_marker = " (pinned)" if pinned else ""
-            print(
-                f"  {source_id}: {count} samples ({percentage:.2f}%){pin_marker}",
-                file=sys.stderr,
-            )
-
-        # Sample and upsample TRAIN data only
-        selected_train_datasets = []
-        for dataset, num_samples in zip(train_datasets, samples_per_source):
-            indices = _exhaust_first_sample(len(dataset), num_samples)
-            selected = dataset.select(indices)
-            selected_train_datasets.append(selected)
-
-        # Concatenate and shuffle train data
-        concatenated_train = concatenate_datasets(selected_train_datasets)
-        concatenated_train = concatenated_train.shuffle(seed=1)
-
-        # Build DatasetDict with train and per-language dev splits
-        # Dev splits are NOT upsampled - kept at natural proportions
-        dataset_dict = {'train': concatenated_train}
-        for dev_name, dev_data in zip(dev_names, dev_datasets):
-            dataset_dict[dev_name] = dev_data
-
-        dataset_dict = DatasetDict(dataset_dict)
-        dataset_dict.save_to_disk(untokenized_path)
-
-        print(f"Multinomial sampled dataset saved to {untokenized_path}", file=sys.stderr)
-        print(f"  Train: {len(concatenated_train)} examples (upsampled)", file=sys.stderr)
-        if not skip_dev_split:
-            print(
-                f"  Dev splits: {', '.join(dev_names)} "
-                f"({sum(len(d) for d in dev_datasets)} examples total, natural proportions)",
-                file=sys.stderr
-            )
-
-    return untokenized_path
-
-
-def _compute_sampling_probs(
-    sources: list[dict],
-    train_sizes: list[int],
-    alpha: float | None,
-) -> list[float]:
-    """
-    Compute per-source sampling probabilities, respecting pinned sampling_prob values.
-
-    Sources with an explicit `sampling_prob` or `upsampling_factor field get that probability
-    directly. The remaining probability budget is distributed among unpinned sources using
-    alpha-based temperature scaling: p_i = (size_i)^alpha / Z, scaled to fill the budget.
-
-    Alpha may be None when it has nothing to do: when every source is pinned, or when
-    exactly one source is unpinned and therefore takes the whole remaining budget
-    regardless of the exponent. It is required whenever two or more sources are unpinned.
-
-    Args:
-        sources: List of source config dicts (may contain 'sampling_prob' field)
-        train_sizes: Number of training examples per source (after dev split)
-        alpha: Temperature parameter for unpinned source reweighting. May be None only
-            if it cannot affect the result.
-
-    Returns:
-        List of sampling probabilities (one per source, sums to 1.0)
-    """
-    num_sources = len(sources)
-    total_size = sum(train_sizes)
-    pinned_probs = {}
-    for idx, source in enumerate(sources):
-        prob = source.get('sampling_prob')
-        upsampling_factor = source.get('upsampling_factor')
-        if upsampling_factor is not None and prob is None:
-            pinned_probs[idx] = train_sizes[idx] * upsampling_factor / total_size
-        if prob is not None:
-            if prob <= 0 or prob >= 1.0:
-                source_id = _get_source_id(DictConfig(source), fallback=f"source_{idx}")
-                raise ValueError(
-                    f"Source '{source_id}': sampling_prob must be between 0 and 1 exclusive, "
-                    f"got {prob}"
-                )
-            pinned_probs[idx] = prob
-
-    pinned_total = sum(pinned_probs.values())
-
-    # If every source is pinned, they must sum to exactly 1.0
-    if len(pinned_probs) == num_sources:
-        if abs(pinned_total - 1.0) > 1e-9:
-            raise ValueError(
-                f"All sources have sampling_prob but they sum to {pinned_total:.6f}, not 1.0"
-            )
-        return [pinned_probs[i] for i in range(num_sources)]
-
-    # With unpinned sources present, pinned probs must leave room for them
-    if pinned_total >= 1.0:
-        raise ValueError(
-            f"Sum of pinned sampling_prob values is {pinned_total:.4f}, "
-            "must be less than 1.0 to leave budget for remaining sources"
-        )
-
-    # Distribute remaining budget among unpinned sources using alpha-based weighting
-    remaining_budget = 1.0 - pinned_total
-    unpinned_indices = [i for i in range(num_sources) if i not in pinned_probs]
-
-    unpinned_sizes = [train_sizes[i] for i in unpinned_indices]
-    if all(s == 0 for s in unpinned_sizes):
-        raise ValueError("Cannot compute sampling probabilities: all unpinned sources are empty")
-
-    # a lone unpinned source takes the whole remaining budget: its weight normalizes
-    # to 1.0 for any exponent, so alpha is not needed to resolve the mixture
-    if len(unpinned_indices) == 1:
-        lone_probs = dict(pinned_probs)
-        lone_probs[unpinned_indices[0]] = remaining_budget
-        return [lone_probs[i] for i in range(num_sources)]
-
-    if alpha is None:
-        unpinned_ids = [
-            _get_source_id(DictConfig(sources[i]), fallback=f"source_{i}")
-            for i in unpinned_indices
-        ]
-        raise ValueError(
-            f"alpha is required when two or more sources are unpinned "
-            f"({', '.join(unpinned_ids)}): it sets how the remaining probability "
-            "budget is split between them"
-        )
-
-    weights = [size ** alpha for size in unpinned_sizes]
-    total_weight = sum(weights)
-    unpinned_probs = {
-        idx: (weights[j] / total_weight) * remaining_budget
-        for j, idx in enumerate(unpinned_indices)
-    }
-
-    return [pinned_probs.get(i, unpinned_probs.get(i)) for i in range(num_sources)]
-
-
-def _load_and_split_source(
-    source_config,
-    cache_dir: str,
-    global_dev_size: float,
-    idx: int
-) -> tuple:
-    """
-    Load a single source dataset and split into train/dev.
-
-    Helper for _load_multinomial_dataset. Handles per-source dev_size overrides
-    and validation. Logs progress for this source.
-
-    Args:
-        source_config: Source configuration dict
-        cache_dir: Parent cache directory for this multinomial dataset
-        global_dev_size: Default dev_size (can be overridden per-source)
-        idx: Source index (for default naming and error messages)
-
-    Returns:
-        Tuple of (source_id, train_data, dev_data) where dev_data is None
-        if dev split was skipped for this source.
-    """
-    source_dict_config = DictConfig(source_config)
-
-    # Determine source id from id field (or deprecated 'language'), default to source_{idx}
-    source_id = _get_source_id(source_dict_config, fallback=f"source_{idx}")
-
-    source_cache = os.path.join(cache_dir, source_id)
-
-    source_path = load_untokenized_dataset(
-        dataset_config=source_dict_config,
-        cache_dir=source_cache
-    )
-
-    source_dataset = load_from_disk(source_path)
-    full_data = source_dataset['train']
-
-    # Check for per-source dev_size override (fallback to global dev_size)
-    source_dev_size = getattr(source_dict_config, 'dev_size', global_dev_size)
-    skip_source_dev_split = (source_dev_size == -1)
-
-    # Validate per-source dev_size
-    if source_dev_size == 0:
-        raise ValueError(
-            f"Source {idx}: dev_size=0 is ambiguous. "
-            "Use dev_size=-1 to explicitly skip dev split."
-        )
-    elif not skip_source_dev_split and source_dev_size < 0:
-        raise ValueError(
-            f"Source {idx}: dev_size must be positive or -1 to skip, got {source_dev_size}."
-        )
-
-    # Split into train/dev BEFORE upsampling (skip if dev_size=-1)
-    if not skip_source_dev_split:
-        split_dataset = full_data.train_test_split(test_size=source_dev_size, seed=1)
-        train_data = split_dataset['train']
-        dev_data = split_dataset['test']
-    else:
-        train_data = full_data
-        dev_data = None
-
-    # Log with indication if using per-source override
-    dev_size_label = (
-        f"dev_size={source_dev_size}" if hasattr(source_dict_config, 'dev_size')
-        else f"global dev_size={source_dev_size}"
-    )
-    if dev_data is not None:
-        print(
-            f"  Source {idx} ({source_id}): "
-            f"{len(train_data)} train, {len(dev_data)} dev examples ({dev_size_label})",
-            file=sys.stderr
-        )
-    else:
-        print(
-            f"  Source {idx} ({source_id}): "
-            f"{len(train_data)} examples (no dev split, {dev_size_label})",
-            file=sys.stderr
-        )
-
-    return source_id, train_data, dev_data
-
-
-def _exhaust_first_sample(dataset_size: int, num_samples: int) -> list[int]:
-    """
-    Generate sample indices using exhaust-first strategy.
-
-    Helper for _load_multinomial_dataset. When num_samples > dataset_size,
-    includes ALL examples once before any duplication. This maximizes coverage
-    of unique examples, which is critical for low-resource datasets.
-
-    Args:
-        dataset_size: Number of examples in the dataset
-        num_samples: Number of samples to draw
-
-    Returns:
-        List of indices (may contain duplicates if num_samples > dataset_size)
-    """
-    if num_samples <= dataset_size:
-        # Sample without replacement
-        return random.sample(range(dataset_size), num_samples)
-    else:
-        # Include ALL examples once, then sample remainder with replacement
-        all_indices = list(range(dataset_size))
-        num_additional = num_samples - dataset_size
-        additional_indices = random.choices(range(dataset_size), k=num_additional)
-        indices = all_indices + additional_indices
-        random.shuffle(indices)  # Shuffle to mix exhaustive + repeated samples
-        return indices
+    source = MultinomialDataset(cache_dir, sources, alpha, total_samples, dev_size, seed=seed)
+    source.resolve()
+    return source.path
 
 
 def _tokenize_plaintext_with_labels(
@@ -1912,7 +869,7 @@ def load_tokenized_multinomial_dataset(
     train_pool_sizes = [len(p) for p in train_pools]
     if all(s == 0 for s in train_pool_sizes):
         raise ValueError("Cannot sample: every source has an empty train pool")
-    sampling_probs = _compute_sampling_probs(sources, train_pool_sizes, alpha)
+    sampling_probs = compute_sampling_probs(sources, train_pool_sizes, alpha)
     samples_per_source = [int(p * total_samples) for p in sampling_probs]
     remaining = total_samples - sum(samples_per_source)
     for i in range(remaining):
@@ -2216,7 +1173,7 @@ def load_external_eval_set(
 
     elif file_format == 'instruction_jsonl':
         # Load instruction JSONL with prompt/response fields
-        prompts, responses = _load_instruction_jsonl_file(path)
+        prompts, responses = read_instruction_jsonl(path)
         dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
         is_instruction = True
 

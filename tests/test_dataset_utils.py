@@ -37,26 +37,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from datasets import Dataset, DatasetDict, load_from_disk
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
 from lapt.dataset_utils import (
-    _apply_substitutions,
-    _compute_sampling_probs,
     _load_concat_dataset,
     _load_huggingface_dataset,
     _load_instruction_hf_dataset,
     _load_plaintext_dataset,
     _load_plaintext_dir_dataset,
-    _parse_substitutions,
     _partition_source_indices,
-    _save_source_cache_config,
-    _validate_source_cache,
     load_external_eval_set,
     load_tokenized_multinomial_dataset,
     load_untokenized_dataset,
 )
+from lapt.sources.sampling import compute_sampling_probs
 
 
 class TestPlaintextLoader:
@@ -204,71 +201,36 @@ class TestConcatLoader:
     """
 
     def test_concat_two_sources(self, tmp_path):
-        """
-        Test concatenating two plaintext sources.
+        """Concatenate two plaintext sources, preserving configuration order."""
+        first = tmp_path / "first.txt"
+        first.write_text("Line 1\nLine 2\n")
+        second = tmp_path / "second.txt"
+        second.write_text("Line 3\nLine 4\nLine 5\n")
 
-        Mocking strategy:
-        - We'll create real datasets in tmp_path for the sources
-        - Mock load_untokenized_dataset to return those paths
-        - Verify concat combines them correctly
-
-        This is a "semi-mock" approach - we create real datasets but mock
-        the recursive loading call.
-        """
-        # Create two synthetic source datasets
-        source1_dir = tmp_path / "source1" / "untokenized"
-        source1_dir.mkdir(parents=True)
-        dataset1 = DatasetDict({
-            'train': Dataset.from_dict({'text': ['Line 1', 'Line 2']})
-        })
-        dataset1.save_to_disk(str(source1_dir))
-
-        source2_dir = tmp_path / "source2" / "untokenized"
-        source2_dir.mkdir(parents=True)
-        dataset2 = DatasetDict({
-            'train': Dataset.from_dict({'text': ['Line 3', 'Line 4', 'Line 5']})
-        })
-        dataset2.save_to_disk(str(source2_dir))
-
-        # Define sources configuration
         sources = [
-            {'type': 'plaintext', 'path': 'dummy1.txt'},
-            {'type': 'plaintext', 'path': 'dummy2.txt'},
+            {'type': 'plaintext', 'id': 'first', 'path': str(first)},
+            {'type': 'plaintext', 'id': 'second', 'path': str(second)},
         ]
-
         cache_dir = tmp_path / "concat_cache"
 
-        # Mock the recursive calls to load_untokenized_dataset
-        # It will be called twice (once per source), return our synthetic paths
-        with patch('lapt.dataset_utils.load_untokenized_dataset') as mock_load:
-            mock_load.side_effect = [str(source1_dir), str(source2_dir)]
+        result_path = _load_concat_dataset(cache_dir=str(cache_dir), sources=sources)
 
-            # Act: Concatenate the sources
-            result_path = _load_concat_dataset(
-                cache_dir=str(cache_dir),
-                sources=sources
-            )
-
-        # Assert: Load and verify concatenated dataset
-        expected_path = cache_dir / "untokenized"
-        assert result_path == str(expected_path)
-
+        assert result_path == str(cache_dir / "untokenized")
         dataset_dict = load_from_disk(result_path)
-        assert 'train' in dataset_dict
+        assert dataset_dict['train']['text'] == [
+            'Line 1', 'Line 2', 'Line 3', 'Line 4', 'Line 5',
+        ]
 
-        # Should have 2 + 3 = 5 lines total
-        assert len(dataset_dict['train']) == 5
+    def test_concat_children_cache_under_their_ids(self, tmp_path):
+        """Each child caches in its own subdirectory, so mixes can share it."""
+        first = tmp_path / "first.txt"
+        first.write_text("Line 1\n")
+        sources = [{'type': 'plaintext', 'id': 'first', 'path': str(first)}]
+        cache_dir = tmp_path / "concat_cache"
 
-        # Verify order is preserved (source1 then source2)
-        texts = dataset_dict['train']['text']
-        assert texts[0] == 'Line 1'
-        assert texts[1] == 'Line 2'
-        assert texts[2] == 'Line 3'
-        assert texts[3] == 'Line 4'
-        assert texts[4] == 'Line 5'
+        _load_concat_dataset(cache_dir=str(cache_dir), sources=sources)
 
-        # Verify load_untokenized_dataset was called correctly
-        assert mock_load.call_count == 2
+        assert (cache_dir / "first" / "untokenized" / "config.yaml").exists()
 
     def test_concat_empty_sources(self, tmp_path):
         """
@@ -285,40 +247,20 @@ class TestConcatLoader:
         assert "empty" in str(exc_info.value).lower()
 
     def test_concat_caching(self, tmp_path):
-        """
-        Test that concat respects caching - doesn't reload if cache exists.
-
-        Strategy: Call once, verify sources were loaded.
-        Call again, verify sources were NOT loaded again.
-        """
-        # Create a synthetic source dataset
-        source_dir = tmp_path / "source" / "untokenized"
-        source_dir.mkdir(parents=True)
-        dataset = DatasetDict({
-            'train': Dataset.from_dict({'text': ['Data']})
-        })
-        dataset.save_to_disk(str(source_dir))
-
-        sources = [{'type': 'plaintext', 'path': 'dummy.txt'}]
+        """A second call serves the cache without re-reading the sources."""
+        source_file = tmp_path / "data.txt"
+        source_file.write_text("Data\n")
+        sources = [{'type': 'plaintext', 'id': 'only', 'path': str(source_file)}]
         cache_dir = tmp_path / "concat_cache"
 
-        # First call - should load sources
-        with patch('lapt.dataset_utils.load_untokenized_dataset') as mock_load:
-            mock_load.return_value = str(source_dir)
-            result_path1 = _load_concat_dataset(str(cache_dir), sources)
-            first_call_count = mock_load.call_count
+        first_path = _load_concat_dataset(str(cache_dir), sources)
 
-        assert first_call_count == 1
+        # a cache hit must not consult the source file
+        source_file.unlink()
+        second_path = _load_concat_dataset(str(cache_dir), sources)
 
-        # Second call - should use cache, NOT call load_untokenized_dataset
-        with patch('lapt.dataset_utils.load_untokenized_dataset') as mock_load:
-            mock_load.return_value = str(source_dir)
-            result_path2 = _load_concat_dataset(str(cache_dir), sources)
-            second_call_count = mock_load.call_count
-
-        # Should NOT have called load_untokenized_dataset because cache exists
-        assert second_call_count == 0
-        assert result_path1 == result_path2
+        assert first_path == second_path
+        assert load_from_disk(second_path)['train']['text'] == ['Data']
 
 
 class TestPlaintextDirLoader:
@@ -493,7 +435,7 @@ class TestPlaintextDirLoader:
         assert dataset2['train']['text'][0] == "Original line"
 
         (data_dir / "file2.txt").write_text("New line")
-        with pytest.raises(ValueError, match="source cache"):
+        with pytest.raises(ValueError, match="CONFIG MISMATCH"):
             _load_plaintext_dir_dataset(
                 cache_dir=str(cache_dir),
                 directory=str(data_dir),
@@ -1367,7 +1309,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000, 7000]
         alpha = 1.0
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert len(probs) == 3
         assert abs(sum(probs) - 1.0) < 1e-9
@@ -1386,7 +1328,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 3000, 500000]
         alpha = 1.0
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert len(probs) == 3
         assert abs(sum(probs) - 1.0) < 1e-9
@@ -1409,7 +1351,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000, 2000, 500000]
         alpha = 1.0
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert abs(sum(probs) - 1.0) < 1e-9
         assert abs(probs[0] - 0.1) < 1e-9
@@ -1427,7 +1369,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
         alpha = 0.5
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha)
+        probs = compute_sampling_probs(sources, train_sizes, alpha)
 
         assert abs(probs[0] - 0.3) < 1e-9
         assert abs(probs[1] - 0.7) < 1e-9
@@ -1441,7 +1383,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="sum to"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_prob_at_one_raises_error(self):
         """sampling_prob=1.0 on a single source is an error."""
@@ -1452,7 +1394,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_prob_zero_raises_error(self):
         """sampling_prob=0 is an error."""
@@ -1463,7 +1405,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_prob_negative_raises_error(self):
         """Negative sampling_prob is an error."""
@@ -1474,7 +1416,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000]
 
         with pytest.raises(ValueError, match="between 0 and 1 exclusive"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_pinned_sum_exceeds_one_raises_error(self):
         """Pinned probs summing to >= 1.0 raises error."""
@@ -1486,7 +1428,7 @@ class TestComputeSamplingProbs:
         train_sizes = [1000, 2000, 3000]
 
         with pytest.raises(ValueError, match="must be less than 1.0"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
     def test_alpha_affects_unpinned_distribution(self):
         """Alpha reweighting applies only to unpinned sources."""
@@ -1498,9 +1440,9 @@ class TestComputeSamplingProbs:
         train_sizes = [100, 10000, 999999]
 
         # With alpha=1.0, large source dominates unpinned budget
-        probs_a1 = _compute_sampling_probs(sources, train_sizes, alpha=1.0)
+        probs_a1 = compute_sampling_probs(sources, train_sizes, alpha=1.0)
         # With alpha=0.0001 (near 0), unpinned sources nearly equal
-        probs_a0 = _compute_sampling_probs(sources, train_sizes, alpha=0.0001)
+        probs_a0 = compute_sampling_probs(sources, train_sizes, alpha=0.0001)
 
         # Pinned source unchanged in both
         assert abs(probs_a1[2] - 0.5) < 1e-9
@@ -1522,7 +1464,7 @@ class TestComputeSamplingProbs:
         ]
         train_sizes = [100, 10000]
 
-        probs = _compute_sampling_probs(sources, train_sizes, alpha=None)
+        probs = compute_sampling_probs(sources, train_sizes, alpha=None)
 
         assert probs == [0.3, 0.7]
 
@@ -1535,8 +1477,8 @@ class TestComputeSamplingProbs:
         ]
         train_sizes = [100, 200, 10000]
 
-        probs_none = _compute_sampling_probs(sources, train_sizes, alpha=None)
-        probs_half = _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+        probs_none = compute_sampling_probs(sources, train_sizes, alpha=None)
+        probs_half = compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
         assert abs(probs_none[2] - 0.3) < 1e-9
         assert probs_none == probs_half
@@ -1551,7 +1493,7 @@ class TestComputeSamplingProbs:
         train_sizes = [100, 1000, 10000]
 
         with pytest.raises(ValueError, match="alpha is required"):
-            _compute_sampling_probs(sources, train_sizes, alpha=None)
+            compute_sampling_probs(sources, train_sizes, alpha=None)
 
     def test_unpinned_empty_source_raises_error(self):
         """All unpinned sources being empty raises error."""
@@ -1563,7 +1505,7 @@ class TestComputeSamplingProbs:
         train_sizes = [0, 0, 1000]
 
         with pytest.raises(ValueError, match="unpinned sources are empty"):
-            _compute_sampling_probs(sources, train_sizes, alpha=0.5)
+            compute_sampling_probs(sources, train_sizes, alpha=0.5)
 
 
 class TestPartitionSourceIndices:
@@ -1609,12 +1551,26 @@ class TestLoadTokenizedMultinomialDataset:
     """
 
     @staticmethod
-    def _write_source(cache_dir: Path, source_id: str, lines: list[str]) -> None:
-        """Persist a tiny plaintext source as an untokenized DatasetDict."""
+    def _write_source(
+        cache_dir: Path,
+        source_id: str,
+        lines: list[str],
+        source_path: str = 'unused',
+    ) -> None:
+        """Persist a tiny plaintext source as a valid untokenized cache.
+
+        The config record is written alongside the data, matching what
+        `PlaintextDataset.config()` produces, so the cache is reusable rather
+        than merely present. Building the data without a record would be
+        refused on read, and rightly so.
+        """
         source_dir = cache_dir / source_id
         source_dir.mkdir(parents=True, exist_ok=True)
+        untokenized_dir = source_dir / "untokenized"
         ds = DatasetDict({'train': Dataset.from_dict({'text': lines})})
-        ds.save_to_disk(str(source_dir / "untokenized"))
+        ds.save_to_disk(str(untokenized_dir))
+        with open(untokenized_dir / "config.yaml", 'w') as record:
+            yaml.dump({'type': 'plaintext', 'path': source_path}, record)
 
     def test_basic_end_to_end(self, tmp_path, base_tokenizer):
         cache_dir = tmp_path / "cache"
@@ -1828,7 +1784,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1854,7 +1810,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1877,7 +1833,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1894,7 +1850,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1913,7 +1869,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list, column='conversation')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1932,7 +1888,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1950,7 +1906,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = _load_instruction_hf_dataset(
                 cache_dir=str(tmp_path / 'cache'),
                 name='fake/dataset',
@@ -1968,11 +1924,11 @@ class TestInstructionHFLoader:
         fake_ds = _fake_hf_dataset(messages_list)
         cache_dir = str(tmp_path / 'cache')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds) as mock_load:
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
             first_calls = mock_load.call_count
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds) as mock_load:
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds) as mock_load:
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
             second_calls = mock_load.call_count
 
@@ -1987,10 +1943,10 @@ class TestInstructionHFLoader:
         fake_ds = _fake_hf_dataset(messages_list)
         cache_dir = str(tmp_path / 'cache')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             _load_instruction_hf_dataset(cache_dir=cache_dir, name='fake/dataset')
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             with pytest.raises(Exception):
                 _load_instruction_hf_dataset(
                     cache_dir=cache_dir,
@@ -2008,7 +1964,7 @@ class TestInstructionHFLoader:
         ]
         fake_ds = _fake_hf_dataset(messages_list)
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             with pytest.raises(ValueError, match='No examples remained'):
                 _load_instruction_hf_dataset(
                     cache_dir=str(tmp_path / 'cache'),
@@ -2027,7 +1983,7 @@ class TestInstructionHFLoader:
             'name': 'fake/dataset',
         })
 
-        with patch('lapt.dataset_utils.load_dataset', return_value=fake_ds):
+        with patch('lapt.sources.instruction_hf.load_dataset', return_value=fake_ds):
             result_path = load_untokenized_dataset(
                 dataset_config,
                 cache_dir=str(tmp_path / 'cache'),
@@ -2037,158 +1993,6 @@ class TestInstructionHFLoader:
         assert len(ds) == 1
         assert ds[0]['prompt'] == 'Hi Response:'
         assert ds[0]['response'] == ' Hello.'
-
-
-class TestSubstitutions:
-    """
-    Tests for the optional per-dataset regex substitution layer.
-
-    Substitutions are applied generically by load_untokenized_dataset after the
-    type-specific loader runs, to every string column of the untokenized
-    dataset. The canonical use case is collapsing newlines to spaces in chat
-    data so it matches the single-line formatting of other sources.
-    """
-
-    def test_parse_substitutions_empty(self):
-        """None or an empty list yields no substitutions."""
-        assert _parse_substitutions(None) == []
-        assert _parse_substitutions([]) == []
-
-    def test_parse_substitutions_default_replacement(self):
-        """A missing 'replacement' defaults to deletion (empty string)."""
-        parsed = _parse_substitutions([{'pattern': r'\d+'}])
-        assert parsed == [(r'\d+', '')]
-
-    def test_parse_substitutions_rejects_bad_regex(self):
-        """A malformed pattern fails at parse time, not at map time."""
-        with pytest.raises(Exception):
-            _parse_substitutions([{'pattern': '([unclosed'}])
-
-    def test_parse_substitutions_requires_pattern(self):
-        """A substitution entry without a 'pattern' is rejected."""
-        with pytest.raises(ValueError):
-            _parse_substitutions([{'replacement': ' '}])
-
-    def test_apply_substitutions_collapses_newlines(self, tmp_path):
-        """
-        Newline runs (with surrounding whitespace) collapse to a single space
-        across all string columns, leaving newline-free values untouched.
-        """
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'prompt': ['Hello\nworld', 'no newline'],
-            'response': ['line1\n\n  line2', 'plain'],
-        })}).save_to_disk(str(base_path))
-
-        substitutions = _parse_substitutions(
-            [{'pattern': r'\s*\n+\s*', 'replacement': ' '}]
-        )
-        out_path = _apply_substitutions(str(base_path), substitutions)
-
-        result = load_from_disk(out_path)['train']
-        assert result['prompt'] == ['Hello world', 'no newline']
-        assert result['response'] == ['line1 line2', 'plain']
-
-    def test_apply_substitutions_leaves_base_untouched(self, tmp_path):
-        """The raw cache is preserved; the substituted copy lives elsewhere."""
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'text': ['a\nb'],
-        })}).save_to_disk(str(base_path))
-
-        substitutions = _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
-        out_path = _apply_substitutions(str(base_path), substitutions)
-
-        assert out_path != str(base_path)
-        assert load_from_disk(str(base_path))['train']['text'] == ['a\nb']
-        assert load_from_disk(out_path)['train']['text'] == ['a b']
-
-    def test_apply_substitutions_cached(self, tmp_path):
-        """A second call with identical patterns reuses the cached path."""
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'text': ['x\ny'],
-        })}).save_to_disk(str(base_path))
-
-        substitutions = _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
-        first = _apply_substitutions(str(base_path), substitutions)
-        second = _apply_substitutions(str(base_path), substitutions)
-        assert first == second
-
-    def test_apply_substitutions_cache_key_is_pinned(self, tmp_path):
-        """The cache directory suffix is a compatibility surface, so pin it.
-
-        The digest names directories that already exist on disk and on the
-        cluster, so any change to how it is derived orphans them: the next run
-        misses, rebuilds, and the old directories linger. Nothing about that
-        looks like a failure. Pinning the literal value turns it into a
-        deliberate decision -- update the constant, and say so in the commit
-        message.
-
-        The realistic trigger is *adding* a field to the hashed dict (regex
-        flags, a match limit, a per-column scope), not renaming one: these key
-        names are internal, rebuilt here from the tuples _parse_substitutions
-        returns, so renaming them would not even touch the YAML schema and
-        there is no reason anyone would. Tests that compare two digests to each
-        other cannot see either change, since both preserve "same patterns
-        agree" and "different patterns differ".
-
-        Stakes are modest -- a rebuild, not corruption. Correctness is
-        _validate_source_cache's job, and it is tested separately.
-
-        NOT covered here, and worth knowing: only `substitutions` feeds the
-        digest, while `tracked` also carries `type` and `base`. Adding a field
-        to `tracked` alone leaves the digest unchanged, so the same directory
-        is reused with a mismatched config and _validate_source_cache raises on
-        every existing cache until someone passes fresh_dataset=true. That is a
-        worse outcome than a silent rebuild and nothing flags it.
-        """
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({'text': ['x\ny']})}).save_to_disk(
-            str(base_path)
-        )
-
-        substitutions = _parse_substitutions([{'pattern': r'\n+', 'replacement': ' '}])
-        out_path = _apply_substitutions(str(base_path), substitutions)
-
-        assert out_path == f"{base_path}_sub_9ec26528"
-
-    def test_apply_substitutions_distinct_patterns_distinct_paths(self, tmp_path):
-        """Different patterns hash to different cache directories."""
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'text': ['x\ny'],
-        })}).save_to_disk(str(base_path))
-
-        path_a = _apply_substitutions(
-            str(base_path), _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
-        )
-        path_b = _apply_substitutions(
-            str(base_path), _parse_substitutions([{'pattern': r'x', 'replacement': 'z'}])
-        )
-        assert path_a != path_b
-
-    def test_dispatcher_applies_substitutions(self, tmp_path):
-        """
-        load_untokenized_dataset wires substitutions through for any type:
-        here a plaintext source with a word-level substitution.
-        """
-        test_file = tmp_path / "data.txt"
-        test_file.write_text("the colour of honour")
-
-        dataset_config = DictConfig({
-            'type': 'plaintext',
-            'path': str(test_file),
-            'substitutions': [
-                {'pattern': 'ou', 'replacement': 'o'},
-            ],
-        })
-        result_path = load_untokenized_dataset(
-            dataset_config, cache_dir=str(tmp_path / 'cache')
-        )
-
-        text = load_from_disk(result_path)['train']['text']
-        assert text == ['the color of honor']
 
 
 class TestHuggingFaceSplitIntoLines:
@@ -2207,7 +2011,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_split_into_lines_default(self, tmp_path):
         """By default each document is split into one example per line."""
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
             )
@@ -2219,7 +2023,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_no_split_keeps_documents_whole(self, tmp_path):
         """split_into_lines=False keeps documents intact with newlines preserved."""
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
                 split_into_lines=False,
@@ -2232,7 +2036,7 @@ class TestHuggingFaceSplitIntoLines:
 
     def test_no_split_min_words_filters_per_document(self, tmp_path):
         """With no splitting, min_words_per_line filters whole documents."""
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             path = _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', text_column='content',
                 min_words_per_line=6, split_into_lines=False,
@@ -2253,8 +2057,8 @@ class TestHuggingFaceSplitIntoLines:
             collect_limits.append(limit)
             return docs.select(range(min(limit, len(docs))))
 
-        with patch('lapt.dataset_utils.load_dataset', return_value='STREAM'), \
-             patch('lapt.dataset_utils.collect_from_stream', side_effect=fake_collect):
+        with patch('lapt.sources.huggingface.load_dataset', return_value='STREAM'), \
+             patch('lapt.sources.huggingface.collect_from_stream', side_effect=fake_collect):
             _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
                 oversampling_factor=3, split_into_lines=False,
@@ -2271,8 +2075,8 @@ class TestHuggingFaceSplitIntoLines:
             collect_limits.append(limit)
             return docs.select(range(min(limit, len(docs))))
 
-        with patch('lapt.dataset_utils.load_dataset', return_value='STREAM'), \
-             patch('lapt.dataset_utils.collect_from_stream', side_effect=fake_collect):
+        with patch('lapt.sources.huggingface.load_dataset', return_value='STREAM'), \
+             patch('lapt.sources.huggingface.collect_from_stream', side_effect=fake_collect):
             _load_huggingface_dataset(
                 str(tmp_path / 'cache'), 'fake/ds', max_samples=10,
                 oversampling_factor=3, split_into_lines=True,
@@ -2283,51 +2087,11 @@ class TestHuggingFaceSplitIntoLines:
     def test_split_into_lines_tracked_in_cache(self, tmp_path):
         """Changing split_into_lines invalidates the per-source cache."""
         cache = str(tmp_path / 'cache')
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
             _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
                                       split_into_lines=True)
         # Same cache dir, different split flag -> mismatch error.
-        with patch('lapt.dataset_utils.load_dataset', return_value=self._docs()):
-            with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
+        with patch('lapt.sources.huggingface.load_dataset', return_value=self._docs()):
+            with pytest.raises(ValueError, match="CONFIG MISMATCH"):
                 _load_huggingface_dataset(cache, 'fake/ds', text_column='content',
                                           split_into_lines=False)
-
-    def test_legacy_cache_forgives_registered_default(self, tmp_path):
-        """
-        A cache built before split_into_lines was tracked must not be
-        invalidated when the current request uses the registered historical
-        default (True), but a genuinely different value (False) must still trip
-        the mismatch. The tolerated params come from SourceCacheTracking, keyed
-        by dataset type -- no per-loader literal.
-        """
-        untok = tmp_path / "untokenized"
-        untok.mkdir()
-        # Legacy huggingface cache config: no split_into_lines key.
-        _save_source_cache_config(str(untok), {'type': 'huggingface', 'name': 'x'})
-
-        # Current == registered default -> forgiven, validates without raising.
-        _validate_source_cache(
-            str(untok),
-            {'type': 'huggingface', 'name': 'x', 'split_into_lines': True},
-        )
-
-        # Current != default -> real change -> must still raise.
-        with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
-            _validate_source_cache(
-                str(untok),
-                {'type': 'huggingface', 'name': 'x', 'split_into_lines': False},
-            )
-
-    def test_no_legacy_tolerance_for_unregistered_type(self, tmp_path):
-        """
-        A dataset type with no SourceCacheTracking entry gets no forgiveness:
-        a tracked field absent from the cached config still trips the mismatch.
-        """
-        untok = tmp_path / "untokenized"
-        untok.mkdir()
-        _save_source_cache_config(str(untok), {'type': 'plaintext', 'path': 'p'})
-        with pytest.raises(ValueError, match="SOURCE CACHE MISMATCH"):
-            _validate_source_cache(
-                str(untok),
-                {'type': 'plaintext', 'path': 'p', 'some_new_field': True},
-            )

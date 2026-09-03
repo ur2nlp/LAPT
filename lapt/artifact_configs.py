@@ -68,36 +68,6 @@ def resolve_dev_size(args: DictConfig):
     )
 
 
-class SourceCacheTracking:
-    """Backward-compatibility registry for per-source untokenized cache validation.
-
-    ``_validate_source_cache`` (in dataset_utils) compares the parameters a
-    cached source was built with against those currently requested, and raises
-    on any difference so stale caches can't feed downstream mixes. That strictness
-    becomes a problem when a *new* tracked parameter is introduced after caches
-    already exist: the cached config lacks the field, so every pre-existing cache
-    suddenly mismatches and would be needlessly regenerated.
-
-    Register such parameters here, keyed by dataset ``type``, mapping each to the
-    historical default that the old (field-less) caches were effectively built
-    with. A cached config missing the parameter is then treated as matching when
-    the current value equals that default; a non-default value still trips the
-    mismatch, since the data genuinely differs. This mirrors the legacy-field
-    tolerance ``TokenizerConfig`` applies via ``_embedding_only_fields``.
-    """
-
-    _LEGACY_DEFAULTS: dict[str, dict] = {
-        # split_into_lines was added to the huggingface loader's tracking after
-        # the original line-splitting behavior (== True) had shipped.
-        'huggingface': {'split_into_lines': True},
-    }
-
-    @classmethod
-    def legacy_defaults(cls, dataset_type: str | None) -> dict:
-        """Return {param: historical_default} for a source ``type`` (empty if none)."""
-        return dict(cls._LEGACY_DEFAULTS.get(dataset_type, {}))
-
-
 def get_model_shortname(hf_model: str) -> str:
     """
     Extract a short identifier from HuggingFace model name.
@@ -112,15 +82,18 @@ def get_model_shortname(hf_model: str) -> str:
     return model_name.lower().replace('-', '').replace('.', '')
 
 
+DEFAULT_SEED = 1
+
+
 def multinomial_mix_slug(dataset_config: dict) -> str:
     """
     Build a deterministic subdirectory name for a multinomial dataset mix.
 
     The upsampled training split produced by multinomial sampling depends on
-    alpha, total_samples, dev_size, and per-source sampling_prob /
-    upsampling_factor / dev_size overrides, but NOT on the underlying source
-    datasets (which live in parent-level subdirectories and can be shared
-    across mixes). Caching mix-dependent artifacts inside {cache_dir}/{slug}/
+    alpha, total_samples, dev_size, per-source sampling_prob /
+    upsampling_factor / dev_size overrides, and the seed, but NOT on the
+    underlying source datasets (which live in parent-level subdirectories and
+    can be shared across mixes). Caching mix-dependent artifacts inside {cache_dir}/{slug}/
     instead of directly under {cache_dir}/ means sweeping alpha or sample
     counts no longer clobbers the previous mix and source caches are
     transparently shared.
@@ -129,6 +102,7 @@ def multinomial_mix_slug(dataset_config: dict) -> str:
         dataset_config: Dict with at least 'total_samples' and 'sources'. Must
             correspond to a multinomial dataset. 'alpha' is optional, since it is
             omissible for mixes where it cannot affect the sampling probabilities.
+            'seed' is optional and defaults to DEFAULT_SEED.
 
     Returns:
         Slug like "mix_a0.5_s5m_ab12cd34", or "mix_s5m_ab12cd34" without alpha.
@@ -151,6 +125,16 @@ def multinomial_mix_slug(dataset_config: dict) -> str:
             for source in dataset_config.get('sources', [])
         ],
     }
+    # a non-default seed changes which examples are sampled and repeated, so
+    # mixes that differ only by seed must not share a directory. the key is
+    # omitted at the default so that slugs predating seed-keying are unchanged
+    # -- every mix built before this was built at DEFAULT_SEED, so the omission
+    # records a fact rather than papering over one. the seed is recorded in the
+    # config unconditionally either way, so validation is unaffected.
+    seed = dataset_config.get('seed', DEFAULT_SEED)
+    if seed != DEFAULT_SEED:
+        mix_keys['seed'] = seed
+
     digest = config_digest(mix_keys)
 
     # omit the alpha segment when the config has no alpha, rather than writing
