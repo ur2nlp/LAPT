@@ -5,8 +5,8 @@ import os
 import pytest
 import yaml
 
-from lapt.core.artifacts import ConfigMismatchError
 from lapt.sources.multinomial import MultinomialDataset
+from lapt_core.artifacts import ConfigMismatchError
 
 
 @pytest.fixture

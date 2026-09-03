@@ -5,8 +5,8 @@ import os
 import pytest
 from datasets import Dataset, DatasetDict
 
-from lapt.core.artifacts import ConfigMismatchError
-from lapt.core.dataset_artifacts import DatasetArtifact, DatasetRegistry
+from lapt_core.artifacts import ConfigMismatchError
+from lapt_core.dataset_artifacts import DatasetArtifact, DatasetRegistry
 
 
 class LinesDataset(DatasetArtifact):

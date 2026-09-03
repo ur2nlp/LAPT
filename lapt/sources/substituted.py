@@ -15,8 +15,8 @@ import sys
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-from lapt.core.artifacts import config_digest
 from lapt.sources.base import SourceDataset
+from lapt_core.artifacts import config_digest
 
 
 def parse_substitutions(raw) -> list[tuple[str, str]]:

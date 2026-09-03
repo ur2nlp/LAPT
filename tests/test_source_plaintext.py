@@ -6,9 +6,9 @@ import pytest
 import yaml
 from datasets import load_from_disk
 
-from lapt.core.artifacts import ConfigMismatchError
 from lapt.sources.base import LEGACY_CONFIG_FILENAME
 from lapt.sources.plaintext import PlaintextDataset
+from lapt_core.artifacts import ConfigMismatchError
 
 
 @pytest.fixture

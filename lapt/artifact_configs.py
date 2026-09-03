@@ -8,7 +8,7 @@ Each artifact (tokenizer, dataset, model) has a config class that:
 4. Provides save() / check_cached() for config tracking
 
 The tracking machinery itself -- the `ArtifactConfig` base class, config
-diffing, and path digests -- lives in `lapt.core.artifacts`, which is shared
+diffing, and path digests -- lives in `lapt_core.artifacts`, which is shared
 with sibling projects. This module holds only what is specific to LAPT's Hydra
 schema and cache layout.
 """
@@ -22,7 +22,7 @@ from typing import Optional
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
-from lapt.core.artifacts import (
+from lapt_core.artifacts import (
     ArtifactConfig,
     ConfigMismatchError,
     config_digest,

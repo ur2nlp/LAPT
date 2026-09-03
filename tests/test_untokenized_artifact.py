@@ -15,8 +15,8 @@ import yaml
 from datasets import load_from_disk
 from omegaconf import OmegaConf
 
-from lapt.core.artifacts import ConfigMismatchError, MissingConfigRecordError
 from lapt.dataset_utils import build_untokenized_source
+from lapt_core.artifacts import ConfigMismatchError, MissingConfigRecordError
 
 
 @pytest.fixture
