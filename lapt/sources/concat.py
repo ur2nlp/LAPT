@@ -70,13 +70,20 @@ class ConcatDataset(SourceDataset):
         self.seed = seed
 
     @classmethod
-    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'ConcatDataset':
+    def from_config(
+        cls,
+        cache_dir: str,
+        source_config,
+        seed: int = 1,
+        dev_size: float | None = None,
+    ) -> 'ConcatDataset':
         """Construct from a dataset configuration entry.
 
         Args:
             cache_dir: Directory the `untokenized` subdirectory goes in.
             source_config: Entry carrying `sources`.
             seed: Global random seed, passed to children.
+            dev_size: Unused; only a mix holds out a dev split.
 
         Returns:
             The configured composite.

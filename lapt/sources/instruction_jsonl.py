@@ -63,7 +63,11 @@ class InstructionJsonlDataset(SourceDataset):
 
     @classmethod
     def from_config(
-        cls, cache_dir: str, source_config, seed: int = 1
+        cls,
+        cache_dir: str,
+        source_config,
+        seed: int = 1,
+        dev_size: float | None = None,
     ) -> 'InstructionJsonlDataset':
         """Construct from a dataset configuration entry.
 
@@ -71,6 +75,7 @@ class InstructionJsonlDataset(SourceDataset):
             cache_dir: Directory the `untokenized` subdirectory goes in.
             source_config: Entry carrying `path`.
             seed: Unused; every example is kept in file order.
+            dev_size: Unused; only a mix holds out a dev split.
 
         Returns:
             The configured source.

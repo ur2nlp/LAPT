@@ -170,13 +170,20 @@ class InstructionHFDataset(SourceDataset):
         })
 
     @classmethod
-    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'InstructionHFDataset':
+    def from_config(
+        cls,
+        cache_dir: str,
+        source_config,
+        seed: int = 1,
+        dev_size: float | None = None,
+    ) -> 'InstructionHFDataset':
         """Construct from a dataset configuration entry.
 
         Args:
             cache_dir: Directory the `untokenized` subdirectory goes in.
             source_config: Entry carrying at least `name`.
             seed: Global random seed, recorded when `max_samples` is set.
+            dev_size: Unused; only a mix holds out a dev split.
 
         Returns:
             The configured source.

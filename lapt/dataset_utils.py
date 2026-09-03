@@ -6,16 +6,14 @@ tokenizing with provided tokenizers, and caching results.
 """
 
 import glob
-import hashlib
 import json
 import os
-import re
 import sys
 
 import numpy as np
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
-from omegaconf import DictConfig, ListConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
 from lapt.artifact_configs import (
@@ -35,6 +33,7 @@ from lapt.sources import (
     OscarDataset,
     PlaintextDataset,
 )
+from lapt.sources.factory import build_source
 from lapt.sources.sampling import compute_sampling_probs
 from lapt.sources.text_processing import (
     read_instruction_jsonl,
@@ -141,121 +140,6 @@ def _get_source_id(config: DictConfig, fallback: str = None) -> str:
     return source_id
 
 
-def _parse_substitutions(raw) -> list[tuple[str, str]]:
-    """
-    Normalize a dataset's optional ``substitutions`` config into (pattern,
-    replacement) pairs.
-
-    Accepts a list of ``{pattern, replacement}`` mappings (the YAML form). The
-    ``replacement`` defaults to an empty string if omitted. Returns an empty
-    list when no substitutions are configured.
-
-    Args:
-        raw: The raw ``substitutions`` value from the dataset config (a
-            ListConfig, list, or None).
-
-    Returns:
-        List of (pattern, replacement) string tuples, in declaration order.
-    """
-    if not raw:
-        return []
-    if isinstance(raw, (ListConfig, DictConfig)):
-        raw = OmegaConf.to_container(raw, resolve=True)
-
-    substitutions = []
-    for item in raw:
-        if 'pattern' not in item:
-            raise ValueError(
-                f"Each substitution must specify a 'pattern' (got {item!r})."
-            )
-        pattern = item['pattern']
-        replacement = item.get('replacement', '')
-        # Fail fast on a malformed regex rather than at map time.
-        re.compile(pattern)
-        substitutions.append((pattern, replacement))
-    return substitutions
-
-
-def _apply_substitutions(
-    base_path: str,
-    substitutions: list[tuple[str, str]],
-) -> str:
-    """
-    Apply a sequence of regex substitutions to every string column of an
-    untokenized dataset, caching the result in a sibling directory.
-
-    The substitutions are applied in order to each value of each string-valued
-    column (e.g. 'text', or 'prompt'/'response' for instruction sources), so a
-    pattern like ``\\n+`` -> ``' '`` collapses newlines to spaces across any
-    dataset type. The original (raw) cache at ``base_path`` is left untouched;
-    the substituted copy lives at ``{base_path}_sub_{hash}`` keyed on the
-    substitution list so changing the patterns rebuilds rather than clobbers.
-
-    Args:
-        base_path: Path to the untokenized DatasetDict to transform.
-        substitutions: Ordered (pattern, replacement) pairs to apply.
-
-    Returns:
-        Path to the substituted untokenized dataset.
-    """
-    normalized = [
-        {'pattern': pattern, 'replacement': replacement}
-        for pattern, replacement in substitutions
-    ]
-    digest = hashlib.sha256(
-        json.dumps(normalized, sort_keys=True).encode()
-    ).hexdigest()[:8]
-    substituted_path = f"{base_path}_sub_{digest}"
-    tracked = {
-        'type': 'substituted',
-        'base': os.path.basename(base_path),
-        'substitutions': normalized,
-    }
-
-    if os.path.exists(substituted_path):
-        _validate_source_cache(substituted_path, tracked)
-        return substituted_path
-
-    print(
-        f"Applying {len(substitutions)} regex substitution(s) to {base_path}",
-        file=sys.stderr,
-    )
-    compiled = [(re.compile(pattern), replacement) for pattern, replacement in substitutions]
-    dataset_dict = load_from_disk(base_path)
-
-    def substitute_batch(examples, string_columns):
-        for column in string_columns:
-            new_values = []
-            for value in examples[column]:
-                for pattern, replacement in compiled:
-                    value = pattern.sub(replacement, value)
-                new_values.append(value)
-            examples[column] = new_values
-        return examples
-
-    substituted_splits = {}
-    for split_name, split_dataset in dataset_dict.items():
-        string_columns = [
-            name
-            for name, feature in split_dataset.features.items()
-            if getattr(feature, 'dtype', None) == 'string'
-        ]
-        substituted_splits[split_name] = split_dataset.map(
-            lambda examples, columns=string_columns: substitute_batch(examples, columns),
-            batched=True,
-        )
-
-    substituted_dict = DatasetDict(substituted_splits)
-    substituted_dict.save_to_disk(substituted_path)
-    _save_source_cache_config(substituted_path, tracked)
-    print(
-        f"Substituted untokenized dataset saved to {substituted_path}",
-        file=sys.stderr,
-    )
-
-    return substituted_path
-
-
 def load_untokenized_dataset(
     dataset_config,
     cache_dir: str,
@@ -265,7 +149,10 @@ def load_untokenized_dataset(
     """
     Load untokenized dataset based on configuration.
 
-    This dispatcher routes to the appropriate loader based on dataset type.
+    Thin path-returning wrapper over `build_source`, which maps the config's
+    ``type`` to a source class through the registry and applies any
+    ``substitutions`` the entry carries. Kept so callers that exchange paths
+    keep working; new code should use `build_source` and hold the artifact.
 
     Args:
         dataset_config: Dataset configuration object with type and source info
@@ -277,82 +164,14 @@ def load_untokenized_dataset(
     Returns:
         Path to the untokenized dataset
 
-    NOTE: Parameters affecting the dataset artifact vary by type (language for OSCAR, path for
-    plaintext, alpha/total_samples for multinomial, etc.). When adding new dataset types or
-    parameters, update DatasetConfig in artifact_configs.py to track them.
-
-    Any dataset may also carry an optional ``substitutions`` field — a list of
-    ``{pattern, replacement}`` regexes applied to every string column after the
-    type-specific loader runs (see ``_apply_substitutions``). This is type-agnostic
-    because all loaders funnel through this dispatcher.
+    NOTE: The parameters a source is keyed on are declared by its class in
+    `lapt/sources/`, in a single `config()` method that doubles as the
+    cache-validation record. Adding a dataset type means adding a class there
+    and registering it; there is no separate list to keep in step.
     """
-    # Default to oscar for backward compatibility if type not specified
-    dataset_type = getattr(dataset_config, 'type', 'oscar')
-
-    if dataset_type == 'oscar':
-        language_code = dataset_config.language
-        untokenized_path = _load_oscar_dataset(cache_dir, language_code)
-    elif dataset_type == 'huggingface':
-        name = dataset_config.name
-        config = getattr(dataset_config, 'config', None)
-        split = getattr(dataset_config, 'split', 'train')
-        text_column = getattr(dataset_config, 'text_column', 'text')
-        max_samples = getattr(dataset_config, 'max_samples', None)
-        min_words_per_line = getattr(dataset_config, 'min_words_per_line', None)
-        oversampling_factor = getattr(dataset_config, 'oversampling_factor', 3)
-        split_into_lines = getattr(dataset_config, 'split_into_lines', True)
-        untokenized_path = _load_huggingface_dataset(
-            cache_dir, name, config, split, text_column, max_samples, min_words_per_line,
-            oversampling_factor, split_into_lines, seed
-        )
-    elif dataset_type == 'plaintext':
-        file_path = dataset_config.path
-        untokenized_path = _load_plaintext_dataset(cache_dir, file_path)
-    elif dataset_type == 'plaintext_dir':
-        directory = dataset_config.directory
-        pattern = getattr(dataset_config, 'pattern', '*.txt')
-        untokenized_path = _load_plaintext_dir_dataset(cache_dir, directory, pattern, seed)
-    elif dataset_type == 'concat':
-        sources = dataset_config.sources
-        parent_id = _get_source_id(dataset_config, fallback=None)
-        untokenized_path = _load_concat_dataset(cache_dir, sources, parent_id, seed)
-    elif dataset_type == 'multinomial':
-        sources = dataset_config.sources
-        alpha = dataset_config.get('alpha')
-        total_samples = dataset_config.total_samples
-        untokenized_path = _load_multinomial_dataset(
-            cache_dir, sources, alpha, total_samples, dev_size, seed,
-        )
-    elif dataset_type == 'instruction_jsonl':
-        file_path = dataset_config.path
-        untokenized_path = _load_instruction_jsonl_dataset(cache_dir, file_path)
-    elif dataset_type == 'instruction_hf':
-        name = dataset_config.name
-        config = getattr(dataset_config, 'config', None)
-        split = getattr(dataset_config, 'split', 'train')
-        messages_column = getattr(dataset_config, 'messages_column', 'messages')
-        prompt_template = getattr(dataset_config, 'prompt_template', '{user} Response:')
-        response_template = getattr(dataset_config, 'response_template', ' {assistant}')
-        max_samples = getattr(dataset_config, 'max_samples', None)
-        untokenized_path = _load_instruction_hf_dataset(
-            cache_dir,
-            name,
-            config,
-            split,
-            messages_column,
-            prompt_template,
-            response_template,
-            max_samples,
-            seed,
-        )
-    else:
-        raise ValueError(f"Unsupported dataset type: {dataset_type}")
-
-    substitutions = _parse_substitutions(getattr(dataset_config, 'substitutions', None))
-    if substitutions:
-        untokenized_path = _apply_substitutions(untokenized_path, substitutions)
-
-    return untokenized_path
+    source = build_source(cache_dir, dataset_config, seed, dev_size)
+    source.resolve()
+    return source.path
 
 
 class UntokenizedDataset(CachedArtifact):

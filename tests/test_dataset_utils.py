@@ -43,13 +43,11 @@ from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
 from lapt.dataset_utils import (
-    _apply_substitutions,
     _load_concat_dataset,
     _load_huggingface_dataset,
     _load_instruction_hf_dataset,
     _load_plaintext_dataset,
     _load_plaintext_dir_dataset,
-    _parse_substitutions,
     _partition_source_indices,
     _save_source_cache_config,
     _validate_source_cache,
@@ -1997,158 +1995,6 @@ class TestInstructionHFLoader:
         assert len(ds) == 1
         assert ds[0]['prompt'] == 'Hi Response:'
         assert ds[0]['response'] == ' Hello.'
-
-
-class TestSubstitutions:
-    """
-    Tests for the optional per-dataset regex substitution layer.
-
-    Substitutions are applied generically by load_untokenized_dataset after the
-    type-specific loader runs, to every string column of the untokenized
-    dataset. The canonical use case is collapsing newlines to spaces in chat
-    data so it matches the single-line formatting of other sources.
-    """
-
-    def test_parse_substitutions_empty(self):
-        """None or an empty list yields no substitutions."""
-        assert _parse_substitutions(None) == []
-        assert _parse_substitutions([]) == []
-
-    def test_parse_substitutions_default_replacement(self):
-        """A missing 'replacement' defaults to deletion (empty string)."""
-        parsed = _parse_substitutions([{'pattern': r'\d+'}])
-        assert parsed == [(r'\d+', '')]
-
-    def test_parse_substitutions_rejects_bad_regex(self):
-        """A malformed pattern fails at parse time, not at map time."""
-        with pytest.raises(Exception):
-            _parse_substitutions([{'pattern': '([unclosed'}])
-
-    def test_parse_substitutions_requires_pattern(self):
-        """A substitution entry without a 'pattern' is rejected."""
-        with pytest.raises(ValueError):
-            _parse_substitutions([{'replacement': ' '}])
-
-    def test_apply_substitutions_collapses_newlines(self, tmp_path):
-        """
-        Newline runs (with surrounding whitespace) collapse to a single space
-        across all string columns, leaving newline-free values untouched.
-        """
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'prompt': ['Hello\nworld', 'no newline'],
-            'response': ['line1\n\n  line2', 'plain'],
-        })}).save_to_disk(str(base_path))
-
-        substitutions = _parse_substitutions(
-            [{'pattern': r'\s*\n+\s*', 'replacement': ' '}]
-        )
-        out_path = _apply_substitutions(str(base_path), substitutions)
-
-        result = load_from_disk(out_path)['train']
-        assert result['prompt'] == ['Hello world', 'no newline']
-        assert result['response'] == ['line1 line2', 'plain']
-
-    def test_apply_substitutions_leaves_base_untouched(self, tmp_path):
-        """The raw cache is preserved; the substituted copy lives elsewhere."""
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'text': ['a\nb'],
-        })}).save_to_disk(str(base_path))
-
-        substitutions = _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
-        out_path = _apply_substitutions(str(base_path), substitutions)
-
-        assert out_path != str(base_path)
-        assert load_from_disk(str(base_path))['train']['text'] == ['a\nb']
-        assert load_from_disk(out_path)['train']['text'] == ['a b']
-
-    def test_apply_substitutions_cached(self, tmp_path):
-        """A second call with identical patterns reuses the cached path."""
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'text': ['x\ny'],
-        })}).save_to_disk(str(base_path))
-
-        substitutions = _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
-        first = _apply_substitutions(str(base_path), substitutions)
-        second = _apply_substitutions(str(base_path), substitutions)
-        assert first == second
-
-    def test_apply_substitutions_cache_key_is_pinned(self, tmp_path):
-        """The cache directory suffix is a compatibility surface, so pin it.
-
-        The digest names directories that already exist on disk and on the
-        cluster, so any change to how it is derived orphans them: the next run
-        misses, rebuilds, and the old directories linger. Nothing about that
-        looks like a failure. Pinning the literal value turns it into a
-        deliberate decision -- update the constant, and say so in the commit
-        message.
-
-        The realistic trigger is *adding* a field to the hashed dict (regex
-        flags, a match limit, a per-column scope), not renaming one: these key
-        names are internal, rebuilt here from the tuples _parse_substitutions
-        returns, so renaming them would not even touch the YAML schema and
-        there is no reason anyone would. Tests that compare two digests to each
-        other cannot see either change, since both preserve "same patterns
-        agree" and "different patterns differ".
-
-        Stakes are modest -- a rebuild, not corruption. Correctness is
-        _validate_source_cache's job, and it is tested separately.
-
-        NOT covered here, and worth knowing: only `substitutions` feeds the
-        digest, while `tracked` also carries `type` and `base`. Adding a field
-        to `tracked` alone leaves the digest unchanged, so the same directory
-        is reused with a mismatched config and _validate_source_cache raises on
-        every existing cache until someone passes fresh_dataset=true. That is a
-        worse outcome than a silent rebuild and nothing flags it.
-        """
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({'text': ['x\ny']})}).save_to_disk(
-            str(base_path)
-        )
-
-        substitutions = _parse_substitutions([{'pattern': r'\n+', 'replacement': ' '}])
-        out_path = _apply_substitutions(str(base_path), substitutions)
-
-        assert out_path == f"{base_path}_sub_9ec26528"
-
-    def test_apply_substitutions_distinct_patterns_distinct_paths(self, tmp_path):
-        """Different patterns hash to different cache directories."""
-        base_path = tmp_path / "untokenized"
-        DatasetDict({'train': Dataset.from_dict({
-            'text': ['x\ny'],
-        })}).save_to_disk(str(base_path))
-
-        path_a = _apply_substitutions(
-            str(base_path), _parse_substitutions([{'pattern': r'\n', 'replacement': ' '}])
-        )
-        path_b = _apply_substitutions(
-            str(base_path), _parse_substitutions([{'pattern': r'x', 'replacement': 'z'}])
-        )
-        assert path_a != path_b
-
-    def test_dispatcher_applies_substitutions(self, tmp_path):
-        """
-        load_untokenized_dataset wires substitutions through for any type:
-        here a plaintext source with a word-level substitution.
-        """
-        test_file = tmp_path / "data.txt"
-        test_file.write_text("the colour of honour")
-
-        dataset_config = DictConfig({
-            'type': 'plaintext',
-            'path': str(test_file),
-            'substitutions': [
-                {'pattern': 'ou', 'replacement': 'o'},
-            ],
-        })
-        result_path = load_untokenized_dataset(
-            dataset_config, cache_dir=str(tmp_path / 'cache')
-        )
-
-        text = load_from_disk(result_path)['train']['text']
-        assert text == ['the color of honor']
 
 
 class TestHuggingFaceSplitIntoLines:

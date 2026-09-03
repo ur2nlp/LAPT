@@ -9,6 +9,7 @@ one new file instead of a branch in a shared function.
 from typing import Any
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.substituted import SubstitutedDataset, parse_substitutions
 
 DEFAULT_DATASET_TYPE = 'oscar'
 
@@ -47,20 +48,37 @@ def source_type(source_config: Any) -> str:
     return field(source_config, 'type', DEFAULT_DATASET_TYPE)
 
 
-def build_source(cache_dir: str, source_config: Any, seed: int = 1) -> SourceDataset:
+def build_source(
+    cache_dir: str,
+    source_config: Any,
+    seed: int = 1,
+    dev_size: float | None = None,
+) -> SourceDataset:
     """Construct the source artifact a configuration entry describes.
+
+    A `substitutions` field wraps the result in a `SubstitutedDataset`, so the
+    transformation applies to any source type and reaches nested sources
+    identically -- a mix's children carry their own substitutions, and this is
+    the single place that is honored.
 
     Args:
         cache_dir: Directory the source's `untokenized` subdirectory goes in.
         source_config: The configuration entry, carrying at least `type`.
         seed: Global random seed, passed to sources that subsample.
+        dev_size: Resolved dev-split default, used by a mix that names none.
 
     Returns:
         An unresolved source artifact.
 
     Raises:
-        ValueError: If no source type is registered under the config's `type`.
+        ValueError: If no source type is registered under the config's `type`,
+            or if a substitution entry is malformed.
     """
-    return SOURCE_TYPES.get(source_type(source_config)).from_config(
-        cache_dir, source_config, seed
+    base = SOURCE_TYPES.get(source_type(source_config)).from_config(
+        cache_dir, source_config, seed, dev_size
     )
+
+    substitutions = parse_substitutions(field(source_config, 'substitutions'))
+    if substitutions:
+        return SubstitutedDataset(base, substitutions)
+    return base

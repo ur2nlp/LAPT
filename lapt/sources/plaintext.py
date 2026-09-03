@@ -65,13 +65,20 @@ class PlaintextDataset(SourceDataset):
         return DatasetDict({'train': Dataset.from_dict({'text': lines})})
 
     @classmethod
-    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'PlaintextDataset':
+    def from_config(
+        cls,
+        cache_dir: str,
+        source_config,
+        seed: int = 1,
+        dev_size: float | None = None,
+    ) -> 'PlaintextDataset':
         """Construct from a dataset configuration entry.
 
         Args:
             cache_dir: Directory the `untokenized` subdirectory goes in.
             source_config: Entry carrying `path`.
             seed: Unused; nothing here is random.
+            dev_size: Unused; only a mix holds out a dev split.
 
         Returns:
             The configured source.

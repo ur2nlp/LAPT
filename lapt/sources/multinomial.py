@@ -88,7 +88,13 @@ class MultinomialDataset(SourceDataset):
         self.seed = seed
 
     @classmethod
-    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'MultinomialDataset':
+    def from_config(
+        cls,
+        cache_dir: str,
+        source_config,
+        seed: int = 1,
+        dev_size: float | None = None,
+    ) -> 'MultinomialDataset':
         """Construct from a dataset configuration entry.
 
         Args:
@@ -96,6 +102,9 @@ class MultinomialDataset(SourceDataset):
             source_config: Entry carrying `sources`, `total_samples`, and
                 `dev_size`, optionally `alpha`.
             seed: Global random seed.
+            dev_size: Resolved default from the caller, used when the entry
+                names none. This is how the deprecated `training.dev_size`
+                fallback still reaches a mix.
 
         Returns:
             The configured mix.
@@ -105,7 +114,7 @@ class MultinomialDataset(SourceDataset):
             field(source_config, 'sources'),
             field(source_config, 'alpha'),
             field(source_config, 'total_samples'),
-            field(source_config, 'dev_size'),
+            field(source_config, 'dev_size', dev_size),
             seed=seed,
         )
 

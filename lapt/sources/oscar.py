@@ -57,13 +57,20 @@ class OscarDataset(SourceDataset):
         )
 
     @classmethod
-    def from_config(cls, cache_dir: str, source_config, seed: int = 1) -> 'OscarDataset':
+    def from_config(
+        cls,
+        cache_dir: str,
+        source_config,
+        seed: int = 1,
+        dev_size: float | None = None,
+    ) -> 'OscarDataset':
         """Construct from a dataset configuration entry.
 
         Args:
             cache_dir: Directory the `untokenized` subdirectory goes in.
             source_config: Entry carrying `language`.
             seed: Unused; the whole split is taken.
+            dev_size: Unused; only a mix holds out a dev split.
 
         Returns:
             The configured source.
