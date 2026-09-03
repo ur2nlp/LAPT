@@ -17,12 +17,10 @@ from omegaconf import DictConfig, OmegaConf
 from transformers import PreTrainedTokenizer
 
 from lapt.artifact_configs import (
-    DatasetConfig,
     dict_diff,
     multinomial_mix_slug,
     resolve_dev_size,
 )
-from lapt.core.artifacts import CachedArtifact
 from lapt.sources import (
     ConcatDataset,
     HuggingFaceDataset,
@@ -32,6 +30,7 @@ from lapt.sources import (
     OscarDataset,
     PlaintextDataset,
 )
+from lapt.sources.base import SourceDataset
 from lapt.sources.factory import build_source
 from lapt.sources.sampling import compute_sampling_probs
 from lapt.sources.text_processing import (
@@ -102,70 +101,28 @@ def load_untokenized_dataset(
     return source.path
 
 
-class UntokenizedDataset(CachedArtifact):
-    """The raw, untokenized corpus stage, as a tracked pipeline artifact.
+def build_untokenized_source(args: DictConfig) -> SourceDataset:
+    """Construct the untokenized corpus source a full Hydra config describes.
 
-    Wraps `load_untokenized_dataset` so that the config record beside the cache
-    is written and validated by the same object that resolves the path, instead
-    of by ~35 lines of glue in `__main__`.
+    The single entry point from the training pipeline into `lapt.sources`. The
+    returned artifact owns its cache path, the config record beside it, and the
+    validate-or-build decision, so a caller resolves it and reads `.path`.
 
-    The value of this stage is a *path*, not a dataset: downstream tokenization
-    reads it from disk, and for multinomial mixes it is a mix-keyed subfolder
-    resolved by `DatasetConfig.effective_cache_dir`. Substitutions, when
-    configured, move it again to a `_sub_{digest}` sibling.
+    Args:
+        args: Full Hydra configuration, read for `dataset` and `seed`.
 
-    `build` and `read` therefore both delegate to the dispatcher, and `write` is
-    a no-op: the sources own their own caching now, so there is nothing left for
-    this class to build or write. It survives only to give `__main__` a path and
-    to record the seed, and both of those are now redundant -- see the note on
-    `config_filename`.
+    Returns:
+        An unresolved source. For a multinomial mix this resolves into the
+        mix-keyed subfolder while per-source subdirectories stay shared at the
+        parent level; with substitutions configured it is the `_sub_{digest}`
+        sibling of whatever the underlying type produced.
     """
-
-    name = "untokenized"
-
-    # Transitional. Sources own `config.yaml` in this directory now, so this
-    # record needs a name of its own to avoid overwriting theirs. It still
-    # earns its place: `multinomial_mix_slug` keys the mix directory on alpha,
-    # total_samples, dev_size and the per-source overrides, but not on `seed`,
-    # which does change the sampled mix. Retire this together with the record
-    # once MultinomialDataset tracks `seed` itself.
-    config_filename = "dataset_config.yaml"
-
-    def __init__(self, args: DictConfig):
-        """Initialize from the full Hydra config.
-
-        Args:
-            args: Full Hydra configuration, read for `dataset` and `seed`.
-        """
-        self.args = args
-        self._dataset_config = DatasetConfig.from_args(args)
-        super().__init__(self._dataset_config.effective_cache_dir(args.dataset.cache_dir))
-
-    def config(self) -> dict:
-        """Return the tracked parameters for this dataset (see `DatasetConfig`)."""
-        return self._dataset_config.to_dict()
-
-    def artifact_config(self) -> DatasetConfig:
-        """Use `DatasetConfig` itself, so mismatch messages keep their name."""
-        return self._dataset_config
-
-    def _dispatch(self) -> str:
-        """Run the cache-aware loader and return the resulting path."""
-        return load_untokenized_dataset(
-            dataset_config=self.args.dataset,
-            cache_dir=self.args.dataset.cache_dir,
-            dev_size=resolve_dev_size(self.args),
-            seed=self.args.seed,
-        )
-
-    def build(self, deps) -> str:
-        return self._dispatch()
-
-    def read(self, path: str) -> str:
-        return self._dispatch()
-
-    def write(self, value: str, path: str) -> None:
-        """No-op: the dispatcher writes its own output."""
+    return build_source(
+        args.dataset.cache_dir,
+        args.dataset,
+        args.seed,
+        resolve_dev_size(args),
+    )
 
 
 def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:

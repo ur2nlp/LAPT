@@ -1,18 +1,22 @@
-"""Behavioral tests for UntokenizedDataset, the first stage ported to CachedArtifact.
+"""Behavioral tests for `build_untokenized_source`, the pipeline's entry point.
 
-These exercise the real dispatcher against on-disk plaintext corpora rather than
-mocking it, since the point of the port is that path resolution, config
-tracking, and building stay consistent with each other.
+The per-type tests build source classes directly; these are the only ones that
+go from a full Hydra config through to a resolved cache, so they cover the
+argument extraction and cache-directory rules that sit between the two.
+
+They run against on-disk plaintext corpora rather than mocks, since the point is
+that path resolution, config tracking, and building stay consistent.
 """
 
 import os
 
 import pytest
 import yaml
+from datasets import load_from_disk
 from omegaconf import OmegaConf
 
 from lapt.core.artifacts import ConfigMismatchError, MissingConfigRecordError
-from lapt.dataset_utils import UntokenizedDataset
+from lapt.dataset_utils import build_untokenized_source
 
 
 @pytest.fixture
@@ -36,94 +40,103 @@ def plaintext_args(tmp_path, corpus_path, **overrides):
 
 
 class TestResolve:
-    """The build-or-load decision the port moved out of __main__."""
+    """The build-or-load decision the entry point performs."""
 
-    def test_builds_and_returns_a_real_path(self, tmp_path, corpus):
-        artifact = UntokenizedDataset(plaintext_args(tmp_path, corpus))
-        path = artifact.resolve()
-        assert os.path.exists(path)
-        assert path == artifact.path
+    def test_builds_a_cache_at_the_reported_path(self, tmp_path, corpus):
+        source = build_untokenized_source(plaintext_args(tmp_path, corpus))
+        source.resolve()
+
+        assert os.path.exists(source.path)
 
     def test_writes_the_config_record_beside_the_cache(self, tmp_path, corpus):
-        artifact = UntokenizedDataset(plaintext_args(tmp_path, corpus))
-        artifact.resolve()
-        with open(artifact.config_path) as handle:
+        source = build_untokenized_source(plaintext_args(tmp_path, corpus))
+        source.resolve()
+
+        with open(source.config_path) as handle:
             saved = yaml.safe_load(handle)
-        assert saved['type'] == 'plaintext'
-        assert saved['path'] == corpus
-        assert saved['seed'] == 1
+        assert saved == {'type': 'plaintext', 'path': corpus}
 
-    def test_second_resolve_returns_the_same_path(self, tmp_path, corpus):
+    def test_second_resolve_serves_the_cache(self, tmp_path, corpus):
         args = plaintext_args(tmp_path, corpus)
-        first = UntokenizedDataset(args).resolve()
-        second = UntokenizedDataset(args).resolve()
-        assert first == second
+        first = build_untokenized_source(args)
+        first.resolve()
 
-    def test_cached_dataset_is_readable(self, tmp_path, corpus):
-        from datasets import load_from_disk
+        # a cache hit must not consult the corpus file
+        os.remove(corpus)
+        second = build_untokenized_source(args)
 
-        path = UntokenizedDataset(plaintext_args(tmp_path, corpus)).resolve()
-        dataset = load_from_disk(path)
-        assert len(dataset['train']) > 0
+        assert second.resolve()['train']['text'] == first.resolve()['train']['text']
+
+    def test_the_resolved_dataset_is_readable_from_the_path(self, tmp_path, corpus):
+        source = build_untokenized_source(plaintext_args(tmp_path, corpus))
+        source.resolve()
+
+        assert len(load_from_disk(source.path)['train']) == 3
 
 
 class TestConfigTracking:
     """A changed config must not silently reuse the old corpus."""
 
     def test_changed_source_raises(self, tmp_path, corpus):
-        UntokenizedDataset(plaintext_args(tmp_path, corpus)).resolve()
+        build_untokenized_source(plaintext_args(tmp_path, corpus)).resolve()
 
         other = tmp_path / "other.txt"
         other.write_text("entirely different text\n")
         # keep the same cache_dir so the two configs collide on one path
-        changed = UntokenizedDataset(plaintext_args(tmp_path, str(other)))
+        changed = build_untokenized_source(plaintext_args(tmp_path, str(other)))
 
-        with pytest.raises(ConfigMismatchError) as exc_info:
+        with pytest.raises(ConfigMismatchError):
             changed.resolve()
-        assert "Untokenized Dataset" in str(exc_info.value)
 
-    def test_changed_seed_raises(self, tmp_path, corpus):
-        UntokenizedDataset(plaintext_args(tmp_path, corpus)).resolve()
+    def test_changed_seed_does_not_invalidate_a_deterministic_source(self, tmp_path, corpus):
+        """Reading a file start to finish cannot depend on the seed.
+
+        The retired wrapper recorded `seed` for every dataset type, so bumping
+        it invalidated caches nothing random had produced. Sources now record
+        the seed only where it changes the result.
+        """
+        build_untokenized_source(plaintext_args(tmp_path, corpus)).resolve()
+
         args = plaintext_args(tmp_path, corpus)
         args.seed = 2
-        with pytest.raises(ConfigMismatchError):
-            UntokenizedDataset(args).resolve()
+
+        assert build_untokenized_source(args).validate() is True
 
     def test_fresh_rebuilds_over_a_mismatch(self, tmp_path, corpus):
-        UntokenizedDataset(plaintext_args(tmp_path, corpus)).resolve()
-        args = plaintext_args(tmp_path, corpus)
-        args.seed = 2
-        path = UntokenizedDataset(args).resolve(fresh=True)
-        assert os.path.exists(path)
-        with open(UntokenizedDataset(args).config_path) as handle:
-            assert yaml.safe_load(handle)['seed'] == 2
+        build_untokenized_source(plaintext_args(tmp_path, corpus)).resolve()
+
+        other = tmp_path / "other.txt"
+        other.write_text("entirely different text\n")
+        changed = build_untokenized_source(plaintext_args(tmp_path, str(other)))
+        changed.resolve(fresh=True)
+
+        with open(changed.config_path) as handle:
+            assert yaml.safe_load(handle)['path'] == str(other)
 
     def test_cache_without_a_record_is_refused(self, tmp_path, corpus):
-        # an unverifiable cache is refused rather than reused; the leaf source
-        # holds its own record, so removing this one leaves the wrapper blind
-        artifact = UntokenizedDataset(plaintext_args(tmp_path, corpus))
-        artifact.resolve()
-        os.remove(artifact.config_path)
+        source = build_untokenized_source(plaintext_args(tmp_path, corpus))
+        source.resolve()
+        os.remove(source.config_path)
 
         with pytest.raises(MissingConfigRecordError):
-            UntokenizedDataset(plaintext_args(tmp_path, corpus)).resolve()
+            build_untokenized_source(plaintext_args(tmp_path, corpus)).resolve()
 
 
 class TestPathResolution:
-    """The layout rules the old __main__ glue encoded by hand."""
+    """The cache-directory rules the old __main__ glue encoded by hand."""
 
     def test_plain_dataset_lives_directly_under_cache_dir(self, tmp_path, corpus):
-        args = plaintext_args(tmp_path, corpus)
-        artifact = UntokenizedDataset(args)
-        assert artifact.path == os.path.join(str(tmp_path / "cache"), "untokenized")
+        source = build_untokenized_source(plaintext_args(tmp_path, corpus))
 
-    def test_multinomial_routes_into_a_mix_subfolder(self, tmp_path, corpus):
-        args = OmegaConf.create({
+        assert source.path == os.path.join(str(tmp_path / "cache"), "untokenized")
+
+    def _mix_args(self, tmp_path, corpus, alpha):
+        return OmegaConf.create({
             'dataset': {
                 'type': 'multinomial',
                 'cache_dir': str(tmp_path / "cache"),
                 'total_samples': 100,
-                'alpha': 0.5,
+                'alpha': alpha,
                 'dev_size': 0.1,
                 'sources': [
                     {'type': 'plaintext', 'id': 'a', 'path': corpus, 'sampling_prob': 0.6},
@@ -132,71 +145,63 @@ class TestPathResolution:
             },
             'seed': 1,
         })
-        artifact = UntokenizedDataset(args)
+
+    def test_multinomial_routes_into_a_mix_subfolder(self, tmp_path, corpus):
+        source = build_untokenized_source(self._mix_args(tmp_path, corpus, 0.5))
         parent = str(tmp_path / "cache")
-        assert artifact.path != os.path.join(parent, "untokenized")
-        assert artifact.path.startswith(os.path.join(parent, "mix_"))
-        assert artifact.path.endswith("untokenized")
+
+        assert source.path.startswith(os.path.join(parent, "mix_"))
+        assert source.path.endswith("untokenized")
 
     def test_different_mixes_do_not_collide(self, tmp_path, corpus):
-        def mix_args(alpha):
-            return OmegaConf.create({
-                'dataset': {
-                    'type': 'multinomial',
-                    'cache_dir': str(tmp_path / "cache"),
-                    'total_samples': 100,
-                    'alpha': alpha,
-                    'dev_size': 0.1,
-                    'sources': [
-                        {'type': 'plaintext', 'id': 'a', 'path': corpus, 'sampling_prob': 0.6},
-                        {'type': 'plaintext', 'id': 'b', 'path': corpus, 'sampling_prob': 0.4},
-                    ],
-                },
-                'seed': 1,
-            })
+        first = build_untokenized_source(self._mix_args(tmp_path, corpus, 0.3))
+        second = build_untokenized_source(self._mix_args(tmp_path, corpus, 0.7))
 
-        assert UntokenizedDataset(mix_args(0.3)).path != UntokenizedDataset(mix_args(0.7)).path
+        assert first.path != second.path
+
+    def test_dev_size_reaches_a_mix_from_the_deprecated_location(self, tmp_path, corpus):
+        """`training.dev_size` still resolves, via the entry point's fallback."""
+        args = self._mix_args(tmp_path, corpus, 0.5)
+        del args.dataset.dev_size
+        args.training = {'dev_size': 0.1}
+
+        with pytest.warns(FutureWarning):
+            source = build_untokenized_source(args)
+
+        assert source.dev_size == 0.1
 
 
 class TestSubstitutions:
-    """Substitutions relocate the returned path to a sibling of the cache dir."""
+    """A `substitutions` field relocates the source to a sibling directory."""
 
-    def test_returned_path_is_the_substituted_sibling(self, tmp_path, corpus):
-        args = plaintext_args(
-            tmp_path,
-            corpus,
-            substitutions=[{'pattern': 'the', 'replacement': 'THE'}],
+    def _substituted_args(self, tmp_path, corpus):
+        return plaintext_args(
+            tmp_path, corpus, substitutions=[{'pattern': 'the', 'replacement': 'THE'}],
         )
-        artifact = UntokenizedDataset(args)
-        path = artifact.resolve()
 
-        assert path != artifact.path
-        assert path.startswith(f"{artifact.path}_sub_")
-        assert os.path.exists(path)
+    def test_path_is_a_sibling_of_the_base_cache(self, tmp_path, corpus):
+        source = build_untokenized_source(self._substituted_args(tmp_path, corpus))
+        base = os.path.join(str(tmp_path / "cache"), "untokenized")
+
+        assert source.path.startswith(f"{base}_sub_")
 
     def test_substitutions_are_actually_applied(self, tmp_path, corpus):
-        from datasets import load_from_disk
+        source = build_untokenized_source(self._substituted_args(tmp_path, corpus))
+        source.resolve()
 
-        args = plaintext_args(
-            tmp_path,
-            corpus,
-            substitutions=[{'pattern': 'the', 'replacement': 'THE'}],
-        )
-        dataset = load_from_disk(UntokenizedDataset(args).resolve())
-        assert all('the' not in row['text'] for row in dataset['train'])
+        dataset = load_from_disk(source.path)
+        assert all('the' not in text for text in dataset['train']['text'])
 
-    def test_config_record_still_describes_the_base_corpus(self, tmp_path, corpus):
-        # DatasetConfig deliberately does not track substitutions; the raw cache
-        # is what it describes, and the _sub_ copy carries its own tracking
-        args = plaintext_args(
-            tmp_path,
-            corpus,
-            substitutions=[{'pattern': 'the', 'replacement': 'THE'}],
-        )
-        artifact = UntokenizedDataset(args)
-        artifact.resolve()
-        with open(artifact.config_path) as handle:
+    def test_the_base_corpus_keeps_its_own_record(self, tmp_path, corpus):
+        """Both caches exist and each describes itself."""
+        source = build_untokenized_source(self._substituted_args(tmp_path, corpus))
+        source.resolve()
+
+        base = os.path.join(str(tmp_path / "cache"), "untokenized")
+        with open(os.path.join(base, 'config.yaml')) as handle:
             assert 'substitutions' not in yaml.safe_load(handle)
+        with open(source.config_path) as handle:
+            assert yaml.safe_load(handle)['type'] == 'substituted'
 
 
 class TestSeedPropagation:
@@ -221,7 +226,7 @@ class TestSeedPropagation:
 
         documents = Dataset.from_dict({'text': ["one two", "three four"]})
         with patch('lapt.sources.huggingface.load_dataset', return_value=documents):
-            artifact = UntokenizedDataset(args)
+            artifact = build_untokenized_source(args)
             artifact.resolve()
 
         with open(os.path.join(artifact.path, 'config.yaml')) as record:
