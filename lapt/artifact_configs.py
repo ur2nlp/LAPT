@@ -29,6 +29,7 @@ from lapt_core.artifacts import (
     dict_diff,
     format_number,
 )
+from lapt_core.mixing import mix_slug as multinomial_mix_slug
 
 
 def resolve_dev_size(args: DictConfig):
@@ -80,67 +81,6 @@ def get_model_shortname(hf_model: str) -> str:
     """
     model_name = hf_model.split('/')[-1]
     return model_name.lower().replace('-', '').replace('.', '')
-
-
-DEFAULT_SEED = 1
-
-
-def multinomial_mix_slug(dataset_config: dict) -> str:
-    """
-    Build a deterministic subdirectory name for a multinomial dataset mix.
-
-    The upsampled training split produced by multinomial sampling depends on
-    alpha, total_samples, dev_size, per-source sampling_prob /
-    upsampling_factor / dev_size overrides, and the seed, but NOT on the
-    underlying source datasets (which live in parent-level subdirectories and
-    can be shared across mixes). Caching mix-dependent artifacts inside {cache_dir}/{slug}/
-    instead of directly under {cache_dir}/ means sweeping alpha or sample
-    counts no longer clobbers the previous mix and source caches are
-    transparently shared.
-
-    Args:
-        dataset_config: Dict with at least 'total_samples' and 'sources'. Must
-            correspond to a multinomial dataset. 'alpha' is optional, since it is
-            omissible for mixes where it cannot affect the sampling probabilities.
-            'seed' is optional and defaults to DEFAULT_SEED.
-
-    Returns:
-        Slug like "mix_a0.5_s5m_ab12cd34", or "mix_s5m_ab12cd34" without alpha.
-    """
-    alpha = dataset_config.get('alpha')
-    total_samples = dataset_config['total_samples']
-
-    mix_keys = {
-        'alpha': alpha,
-        'total_samples': total_samples,
-        'dev_size': dataset_config.get('dev_size'),
-        'sources': [
-            {
-                'id': source.get('id') or source.get('language'),
-                'sampling_prob': source.get('sampling_prob'),
-                'upsampling_factor': source.get('upsampling_factor'),
-                'dev_size': source.get('dev_size'),
-                'substitutions': source.get('substitutions'),
-            }
-            for source in dataset_config.get('sources', [])
-        ],
-    }
-    # a non-default seed changes which examples are sampled and repeated, so
-    # mixes that differ only by seed must not share a directory. the key is
-    # omitted at the default so that slugs predating seed-keying are unchanged
-    # -- every mix built before this was built at DEFAULT_SEED, so the omission
-    # records a fact rather than papering over one. the seed is recorded in the
-    # config unconditionally either way, so validation is unaffected.
-    seed = dataset_config.get('seed', DEFAULT_SEED)
-    if seed != DEFAULT_SEED:
-        mix_keys['seed'] = seed
-
-    digest = config_digest(mix_keys)
-
-    # omit the alpha segment when the config has no alpha, rather than writing
-    # "aNone" into the directory name; slugs for configs that do set it are unchanged
-    alpha_part = f"a{alpha}_" if alpha is not None else ""
-    return f"mix_{alpha_part}s{format_number(total_samples)}_{digest}"
 
 
 @dataclass

@@ -10,29 +10,9 @@ from typing import Any
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
 from lapt.sources.substituted import SubstitutedDataset, parse_substitutions
+from lapt_core.mixing import field
 
 DEFAULT_DATASET_TYPE = 'oscar'
-
-
-def field(source_config: Any, name: str, default: Any = None) -> Any:
-    """Read one field from a source configuration.
-
-    Accepts both `DictConfig` and plain dicts, since sources arrive as either
-    depending on whether they came from Hydra or from a parent's `sources` list.
-
-    Args:
-        source_config: The configuration entry.
-        name: Field to read.
-        default: Value to return when the field is absent.
-
-    Returns:
-        The field's value, or `default`.
-    """
-    if isinstance(source_config, dict):
-        value = source_config.get(name, default)
-    else:
-        value = getattr(source_config, name, default)
-    return default if value is None and default is not None else value
 
 
 def source_type(source_config: Any) -> str:

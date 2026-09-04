@@ -7,31 +7,8 @@ from datasets import DatasetDict, concatenate_datasets
 from omegaconf import DictConfig, OmegaConf
 
 from lapt.sources.base import SOURCE_TYPES, SourceDataset
-from lapt.sources.factory import build_source, field
-
-
-def source_id(source_config, fallback: str | None = None) -> str:
-    """Return a source's cache identifier.
-
-    Checks `id`, then the deprecated `language`, then the fallback.
-
-    Args:
-        source_config: The configuration entry.
-        fallback: Identifier to use when the entry names none.
-
-    Returns:
-        The identifier.
-    """
-    identifier = field(source_config, 'id')
-    if not identifier:
-        identifier = field(source_config, 'language')
-        if identifier:
-            print(
-                f"Warning: 'language' field for source identification is deprecated, "
-                f"use 'id' instead (found language='{identifier}')",
-                file=sys.stderr,
-            )
-    return identifier or fallback
+from lapt.sources.factory import build_source
+from lapt_core.mixing import field, source_id
 
 
 class ConcatDataset(SourceDataset):
