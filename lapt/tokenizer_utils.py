@@ -12,6 +12,8 @@ import json
 import os
 import random
 import sys
+from collections.abc import Mapping
+from typing import Any
 
 import sentencepiece as spm
 import torch
@@ -20,108 +22,7 @@ from datasets import load_from_disk
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, PreTrainedTokenizerFast
 
 from lapt.artifact_configs import TokenizerConfig
-
-
-def extract_base_vocabulary_frequencies(
-    text_file_path: str,
-    base_tokenizer_name: str,
-    output_file: str,
-    filter_special_tokens: bool = True,
-    min_frequency: int = 1
-) -> dict[str, int]:
-    """
-    Tokenize corpus with base tokenizer and extract raw token frequencies.
-
-    Raw counts are cached to disk and can be normalized later by the caller.
-
-    Args:
-        text_file_path: Path to plain text training file (one sentence per line)
-        base_tokenizer_name: Name of base model tokenizer
-        output_file: Path where base vocabulary counts will be saved (for caching)
-        filter_special_tokens: Filter out <unk>, <s>, </s>, <pad>, and <madeupword*> tokens
-        min_frequency: Minimum raw frequency threshold to include a token (default: 1)
-
-    Returns:
-        Dictionary mapping token strings to raw counts
-    """
-    # Check cache
-    if os.path.exists(output_file):
-        print(f"Base vocabulary already exists at {output_file}, loading it", file=sys.stderr)
-        vocab = {}
-        with open(output_file, encoding='utf-8') as f:
-            for line in f:
-                parts = line.rstrip('\n').split('\t')
-                if len(parts) == 2:
-                    token, count_str = parts
-                    vocab[token] = int(count_str)
-        print(f"  Loaded {len(vocab)} tokens", file=sys.stderr)
-        return vocab
-
-    print(f"Extracting base vocabulary from {text_file_path}", file=sys.stderr)
-
-    # Load base tokenizer
-    base_tokenizer = AutoTokenizer.from_pretrained(base_tokenizer_name, use_fast=True)
-
-    # Count token frequencies
-    from collections import Counter
-    token_counts = Counter()
-
-    with open(text_file_path, encoding='utf-8') as f:
-        for line in f:
-            text = line.strip()
-            if not text:
-                continue
-
-            token_ids = base_tokenizer.encode(text, add_special_tokens=False)
-            for token_id in token_ids:
-                token_counts[token_id] += 1
-
-    print(f"  Found {len(token_counts)} unique tokens in corpus", file=sys.stderr)
-
-    # Convert token IDs to strings and filter
-    filtered_vocab = {}
-    filtered_reasons = Counter()
-
-    for token_id, count in token_counts.items():
-        if count < min_frequency:
-            filtered_reasons['below_min_frequency'] += 1
-            continue
-
-        token_str = base_tokenizer.convert_ids_to_tokens(token_id)
-
-        # Filter special tokens
-        if filter_special_tokens:
-            if token_str in ['<unk>', '<s>', '</s>', '<pad>', '<mask>']:
-                filtered_reasons['special_token'] += 1
-                continue
-            if token_str.startswith('<madeupword'):
-                filtered_reasons['madeupword_token'] += 1
-                continue
-            if token_str in base_tokenizer.all_special_tokens:
-                filtered_reasons['registered_special'] += 1
-                continue
-
-        filtered_vocab[token_str] = count
-
-    print(f"  After filtering: {len(filtered_vocab)} tokens", file=sys.stderr)
-    if filtered_reasons:
-        print("  Filtered out:", file=sys.stderr)
-        for reason, count in filtered_reasons.most_common():
-            print(f"    {reason}: {count}", file=sys.stderr)
-
-    total_count = sum(filtered_vocab.values())
-    print(f"  Total raw token count: {total_count:,}", file=sys.stderr)
-
-    # Write raw counts to cache file
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    with open(output_file, 'w', encoding='utf-8') as f:
-        # Sort by frequency (descending) for better readability
-        for token_str, count in sorted(filtered_vocab.items(), key=lambda x: x[1], reverse=True):
-            f.write(f"{token_str}\t{count}\n")
-
-    print(f"Base vocabulary saved to {output_file}", file=sys.stderr)
-
-    return filtered_vocab
+from lapt_core.artifacts import ArtifactConfig, CachedArtifact
 
 
 def prepare_focus_training_data(
@@ -216,439 +117,218 @@ def prepare_focus_training_data(
     return output_jsonl_path
 
 
-def extract_target_seed_vocab(
-    spm_model_path: str,
-    target_mass: int = 10_000_000,
-    filter_special_tokens: bool = True
-) -> dict[str, float]:
+class TokenizerArtifact(CachedArtifact):
+    """A FOCUS tokenizer trained by SentencePiece, cached on `TokenizerConfig`.
+
+    Not used for the `focus.tokenizer_path` bypass (a pre-built tokenizer, e.g.
+    PTEx): that case is handled entirely by the caller, which loads it directly
+    and never constructs this artifact. `tokenizer_config.tokenizer_path` is
+    therefore always falsy here.
+
+    `path` is `{root}/{language}/{tokenizer_id}` rather than the `root/name`
+    default, since the tokenizer id already encodes every parameter that
+    should distinguish one cache from another. This reproduces
+    `TokenizerConfig.cache_dir(language)` exactly at the default `root`
+    ("tokenizers"), which production callers rely on; the parameter exists so
+    tests can point a whole cache tree at `tmp_path` instead.
+
+    `config_filename` is `training_config.yaml`, matching the name this
+    artifact's caching logic already wrote before the port -- unlike the
+    source layer, no migration is needed for existing caches to be read.
+
+    `artifact_config()` is overridden to return `tokenizer_config` itself
+    rather than the default dict-wrapping: `TokenizerConfig.check_cached`
+    already strips embedding-only and retired seed-vocabulary fields before
+    diffing (see `lapt/artifact_configs.py`), and that tolerance would be
+    silently lost if validation went through the generic `_DictArtifactConfig`
+    path instead.
+
+    Behavior change from the pre-port code: a cache directory that exists but
+    carries no `training_config.yaml` at all now raises
+    `MissingConfigRecordError` instead of being silently accepted with a
+    warning. Same tightening already applied to the untokenized-source layer
+    (see architecture.md's "Landed" notes) -- there is nothing to distinguish
+    an untracked pre-existing cache from one interrupted mid-write, so both
+    must be refused.
     """
-    Extract vocabulary from trained SentencePiece model and normalize to target mass.
 
-    Converts log probabilities to normalized counts: count = exp(log_prob) * target_mass.
-    Returns exact floats — rounding is deferred to the merge step.
+    name = "tokenizer"
+    config_filename = "training_config.yaml"
 
-    Args:
-        spm_model_path: Path to .model file from SentencePiece training
-        target_mass: Target total count for normalization (should match base vocab total)
-        filter_special_tokens: Whether to filter out special tokens
+    def __init__(
+        self,
+        language: str,
+        tokenizer_config: TokenizerConfig,
+        jsonl_path: str | None = None,
+        root: str = "tokenizers",
+    ):
+        """Initialize the artifact.
 
-    Returns:
-        Dictionary mapping token strings to normalized counts (exact floats)
-    """
-    import math
+        Args:
+            language: Language code, used only for the cache path.
+            tokenizer_config: Parameters the tokenizer is trained and cached
+                with.
+            jsonl_path: Path to the FOCUS training-data JSONL, required only
+                when the cache turns out to be cold. Callers that can tell in
+                advance that the cache is warm (see `exists()`) may skip
+                preparing this and construct without it.
+            root: Directory the per-language tokenizer caches live under.
+                Defaults to the production convention; override in tests.
+        """
+        super().__init__(root=root)
+        self.language = language
+        self.tokenizer_config = tokenizer_config
+        self.jsonl_path = jsonl_path
 
-    sp_model = spm.SentencePieceProcessor()
-    sp_model.Load(spm_model_path)
+    @property
+    def path(self) -> str:
+        return os.path.join(self.root, self.language, self.tokenizer_config.tokenizer_id())
 
-    vocab = {}
-    vocab_size = sp_model.get_piece_size()
+    def config(self) -> dict:
+        return self.tokenizer_config.to_dict()
 
-    for i in range(vocab_size):
-        token = sp_model.id_to_piece(i)
-        log_prob = sp_model.get_score(i)
+    def artifact_config(self) -> ArtifactConfig:
+        return self.tokenizer_config
 
-        # Skip special tokens if requested
-        if filter_special_tokens:
-            if log_prob == 0:  # Special tokens have score 0
-                continue
-            if token in ['<unk>', '<s>', '</s>', '<pad>', '<mask>']:
-                continue
-            if token.startswith('<madeupword'):
-                continue
+    def build(self, deps: Mapping[str, Any]) -> PreTrainedTokenizerFast:
+        """Train a new tokenizer on `self.jsonl_path` using SentencePiece.
 
-        # Convert log prob to normalized count (exact float, no rounding)
-        # prob = exp(log_prob), count = prob * target_mass
-        count = math.exp(log_prob) * target_mass
+        The tokenizer will use the same algorithm (BPE, Unigram, etc.) as the
+        base tokenizer.
 
-        if count > 0:
-            vocab[token] = count
-
-    return vocab
-
-
-def apply_character_weighting(vocab: dict[str, int | float]) -> dict[str, float]:
-    """Weight token counts by character length.
-
-    Transforms raw token counts into character-coverage scores:
-    `score[t] = count[t] * len(t)`. This measures how many characters of text
-    each token handles, providing a more principled basis for comparing tokens
-    across vocabularies with different size/shape distributions.
-
-    Args:
-        vocab: Dictionary mapping token strings to counts.
-
-    Returns:
-        New dictionary with counts multiplied by token character length.
-    """
-    return {token: count * len(token) for token, count in vocab.items()}
-
-
-def normalize_vocab_mass(
-    vocab: dict[str, int | float],
-    target_mass: int,
-) -> dict[str, float]:
-    """Scale vocabulary counts so they sum to target_mass.
-
-    Args:
-        vocab: Dictionary mapping token strings to counts.
-        target_mass: Desired total mass after normalization.
-
-    Returns:
-        New dictionary with counts scaled to sum to target_mass.
-    """
-    current_mass = sum(vocab.values())
-    if current_mass == 0:
-        return {token: 0.0 for token in vocab}
-    scale = target_mass / current_mass
-    return {token: count * scale for token, count in vocab.items()}
-
-
-def merge_vocabularies(
-    base_vocab: dict[str, int | float],
-    target_vocab: dict[str, int | float],
-    lambda_weight: float = 0.5,
-    round_mode: str = "round"
-) -> dict[str, int]:
-    """
-    Merge base and target vocabularies with lambda interpolation.
-
-    Combined weight for each token:
-    - If only in base: base_count * lambda
-    - If only in target: target_count * (1 - lambda)
-    - If in both: base_count * lambda + target_count * (1 - lambda)
-
-    The lambda parameter interpolates between base and target vocabularies:
-    - lambda=0.0: Pure target vocabulary
-    - lambda=0.5: Equal interpolation (balanced)
-    - lambda=1.0: Pure base vocabulary
-
-    Args:
-        base_vocab: Raw counts from base tokenizer corpus analysis
-        target_vocab: Normalized counts from target-trained tokenizer
-        lambda_weight: Interpolation weight (0=target, 1=base, default: 0.5)
-        round_mode: Rounding method: "ceil", "floor", or "round"
-
-    Returns:
-        Merged vocabulary with combined weights
-    """
-    import math
-
-    if round_mode == "ceil":
-        round_func = math.ceil
-    elif round_mode == "floor":
-        round_func = math.floor
-    elif round_mode == "round":
-        round_func = round
-    else:
-        raise ValueError(f"Invalid round_mode: {round_mode}. Must be 'ceil', 'floor', or 'round'")
-
-    all_tokens = set(base_vocab.keys()) | set(target_vocab.keys())
-    merged = {}
-
-    for token in all_tokens:
-        base_count = base_vocab.get(token, 0)
-        target_count = target_vocab.get(token, 0)
-
-        combined_count = base_count * lambda_weight + target_count * (1 - lambda_weight)
-
-        combined_count = round_func(combined_count)
-
-        if combined_count > 0:
-            merged[token] = combined_count
-
-    return merged
-
-
-def train_new_tokenizer(
-    config: TokenizerConfig,
-    jsonl_path: str,
-    output_path: str,
-) -> PreTrainedTokenizerFast:
-    """
-    Train a new tokenizer on JSONL data using SentencePiece library.
-
-    The tokenizer will use the same algorithm (BPE, Unigram, etc.) as the base tokenizer.
-
-    Args:
-        config: TokenizerConfig containing all training parameters
-        jsonl_path: Path to JSONL file with training data
-        output_path: Directory where trained tokenizer will be saved
-
-    Returns:
-        Trained tokenizer
-
-    NOTE: When adding parameters that affect the tokenizer artifact, update
-    TokenizerConfig in artifact_configs.py to include them.
-    """
-    # Check if tokenizer already trained and cached
-    if os.path.exists(output_path) and os.path.exists(os.path.join(output_path, "tokenizer.json")):
-        print(f"Tokenizer already exists at {output_path}, loading it", file=sys.stderr)
-        tokenizer = AutoTokenizer.from_pretrained(output_path, use_fast=True)
-        _validate_tokenizer(tokenizer, config.vocab_size)
-        return tokenizer
-
-    print(f"Training new tokenizer with vocab size {config.vocab_size}", file=sys.stderr)
-
-    # Inspect base tokenizer to determine algorithm and special tokens to inherit
-    # Force Fast tokenizer since we need to access backend_tokenizer for algorithm detection
-    base_tokenizer = AutoTokenizer.from_pretrained(config.hf_model, use_fast=True)
-
-    detected_type = _detect_tokenizer_algorithm(base_tokenizer)
-    if config.tokenizer_algorithm is not None:
-        model_type = config.tokenizer_algorithm
-        if model_type == detected_type:
-            print(f"Tokenizer algorithm: {model_type} (explicitly set, matches base)", file=sys.stderr)
-        else:
-            print(
-                f"Tokenizer algorithm: {model_type} "
-                f"(explicitly set, overrides base's {detected_type})",
-                file=sys.stderr,
-            )
-    else:
-        model_type = detected_type
-        print(f"Tokenizer algorithm: {model_type} (inherited from base)", file=sys.stderr)
-
-    special_tokens_config = _extract_special_tokens(
-        base_tokenizer,
-        inherit_additional=config.inherit_additional_special_tokens,
-        vocab_size=config.vocab_size,
-    )
-
-    # Convert JSONL to plain text for SentencePiece training (cached alongside JSONL)
-    # We keep the JSONL for FOCUS which needs that format later
-    text_file_path = jsonl_path.replace('.jsonl', '_spm.txt')
-    if not os.path.exists(text_file_path):
-        print(f"Creating SentencePiece training file: {text_file_path}", file=sys.stderr)
-        with open(jsonl_path, encoding='utf-8') as jsonl_file:
-            with open(text_file_path, 'w', encoding='utf-8') as text_file:
-                for line in jsonl_file:
-                    data = json.loads(line)
-                    text_file.write(data['text'] + '\n')
-    else:
-        print(f"SentencePiece training file already exists: {text_file_path}", file=sys.stderr)
-
-    os.makedirs(output_path, exist_ok=True)
-
-    # Generate seed vocabulary if enabled (hybrid approach)
-    seed_file = None
-    if config.use_seed_vocabulary:
-        print(f"Generating hybrid seed vocabulary (lambda={config.seed_lambda})", file=sys.stderr)
-
-        # Step 1: Train seed tokenizer to extract target-specific vocabulary
-        # This is cached separately so it can be reused across different lambda values
-        seed_vocab_size = int(config.vocab_size * config.seed_vocab_multiplier)
-
-        if config.num_samples is not None:
-            # Construct seed tokenizer path - saved alongside final tokenizer, not nested inside it
-            # Example: tokenizers/old_germanic/xglm564m_focus-v16k-s200k_seed-5.0x/
-            parent_dir = os.path.dirname(output_path)
-            seed_output_path = os.path.join(parent_dir, config.seed_tokenizer_suffix())
-        else:
-            # Fallback: nest inside output_path (old behavior for backward compatibility)
-            seed_output_path = f"{output_path}_seed"
-
-        # Check if seed tokenizer already exists
-        seed_model_path = os.path.join(seed_output_path, 'spm.model')
-        if not os.path.exists(seed_model_path):
-            print(f"Training seed tokenizer (vocab_size={seed_vocab_size})", file=sys.stderr)
-            print(f"  Saving to: {seed_output_path}", file=sys.stderr)
-            os.makedirs(seed_output_path, exist_ok=True)
-
-            _train_sentencepiece_model(
-                text_file_path=text_file_path,
-                model_type=model_type,
-                vocab_size=seed_vocab_size,
-                special_tokens_config=special_tokens_config,
-                output_path=seed_output_path,
-                character_coverage=config.character_coverage,
-                seed_sentencepieces_file=None  # No seeding for seed tokenizer
-            )
-        else:
-            print(f"Seed tokenizer already exists at {seed_output_path}", file=sys.stderr)
-
-        # Step 2: Extract raw base vocabulary counts from corpus
-        # Cache in seed tokenizer dir (shared across lambda values)
-        print("Extracting base tokenizer vocabulary", file=sys.stderr)
-        base_vocab_file = os.path.join(seed_output_path, 'base_vocab_counts.txt')
-        base_vocab = extract_base_vocabulary_frequencies(
-            text_file_path=text_file_path,
-            base_tokenizer_name=config.hf_model,
-            output_file=base_vocab_file,
-            filter_special_tokens=True,
-            min_frequency=config.seed_min_frequency
-        )
-        total_base_tokens = sum(base_vocab.values())
-        target_mass = total_base_tokens
-        print(f"  Base vocab size: {len(base_vocab)} tokens", file=sys.stderr)
-        print(f"  Total base tokens: {total_base_tokens:,}", file=sys.stderr)
-
-        # Step 3: Extract target vocabulary from seed tokenizer, normalized to target mass scale
-        # Both vocabularies are scaled to the same target_mass so they're directly comparable
-        print("Extracting target vocabulary from seed tokenizer", file=sys.stderr)
-        target_vocab = extract_target_seed_vocab(
-            spm_model_path=seed_model_path,
-            target_mass=target_mass,
-            filter_special_tokens=True
-        )
-        print(f"  Target vocab size: {len(target_vocab)} tokens", file=sys.stderr)
-
-        # Optional: convert from token-count scoring to character-length scoring
-        if config.seed_score_mode == "charlength":
-            print("Applying character-length weighting to vocabularies", file=sys.stderr)
-            # Save original vocabs for count-based seed file output
-            base_vocab_counts = dict(base_vocab)
-            target_vocab_counts = dict(target_vocab)
-            base_vocab = apply_character_weighting(base_vocab)
-            target_vocab = apply_character_weighting(target_vocab)
-            # Re-normalize target to match base character mass
-            base_char_mass = int(sum(base_vocab.values()))
-            target_vocab = normalize_vocab_mass(target_vocab, base_char_mass)
-            print(f"  Base character mass: {base_char_mass:,}", file=sys.stderr)
-        elif config.seed_score_mode != "count":
+        Writes SentencePiece's own model files (`spm.model`, `spm.vocab`)
+        directly into `self.path` as a side effect of training -- HF's
+        SentencePiece-to-fast-tokenizer conversion needs `spm.model` to exist
+        on disk, so unlike a builder that returns a self-contained value, this
+        one cannot defer all filesystem writes to `write()`. `self.path` is
+        therefore created here rather than left to `resolve()`'s later
+        `os.makedirs`, which runs after `build()` returns.
+        """
+        if self.jsonl_path is None:
             raise ValueError(
-                f"Invalid seed_score_mode: {config.seed_score_mode}. "
-                "Must be 'count' or 'charlength'"
+                f"No cached tokenizer at {self.path}, but jsonl_path was not "
+                "provided to train one. Prepare the FOCUS training data first "
+                "and pass it to TokenizerArtifact."
             )
 
-        # Step 4: Merge vocabularies with lambda weighting
-        print(f"Merging vocabularies with lambda={config.seed_lambda}, round_mode={config.seed_round_mode}", file=sys.stderr)
-        merged_vocab = merge_vocabularies(
-            base_vocab=base_vocab,
-            target_vocab=target_vocab,
-            lambda_weight=config.seed_lambda,
-            round_mode=config.seed_round_mode
-        )
-        print(f"  Merged vocab size: {len(merged_vocab)} tokens", file=sys.stderr)
+        config = self.tokenizer_config
+        output_path = self.path
+        os.makedirs(output_path, exist_ok=True)
 
-        # For charlength mode: also merge original counts for seed file output.
-        # Character-weighted merge determines ranking (which tokens survive the
-        # top-k cutoff), but the seed file should contain token counts since
-        # SentencePiece uses them for initial lattice weights via ToLogProb.
-        if config.seed_score_mode == "charlength":
-            merged_vocab_counts = merge_vocabularies(
-                base_vocab=base_vocab_counts,
-                target_vocab=target_vocab_counts,
-                lambda_weight=config.seed_lambda,
-                round_mode=config.seed_round_mode,
-            )
+        print(f"Training new tokenizer with vocab size {config.vocab_size}", file=sys.stderr)
 
-        # Compute overlap statistics
-        base_only = set(base_vocab.keys()) - set(target_vocab.keys())
-        target_only = set(target_vocab.keys()) - set(base_vocab.keys())
-        both = set(base_vocab.keys()) & set(target_vocab.keys())
-        print(f"  Base-only tokens: {len(base_only)}", file=sys.stderr)
-        print(f"  Target-only tokens: {len(target_only)}", file=sys.stderr)
-        print(f"  Shared tokens: {len(both)}", file=sys.stderr)
+        # Inspect base tokenizer to determine algorithm and special tokens to inherit
+        # Force Fast tokenizer since we need to access backend_tokenizer for algorithm detection
+        base_tokenizer = AutoTokenizer.from_pretrained(config.hf_model, use_fast=True)
 
-        # Step 5: Write merged vocabulary as seed file
-        seed_file = os.path.join(output_path, 'seed_vocab.txt')
-        with open(seed_file, 'w', encoding='utf-8') as f:
-            if config.seed_score_mode == "charlength":
-                # Rank by character-weighted score, but write token counts.
-                # Pre-truncate to seed_vocab_size so SentencePiece keeps all
-                # tokens (no further truncation by count values needed).
-                ranked_tokens = sorted(
-                    merged_vocab.items(), key=lambda x: x[1], reverse=True,
-                )[:seed_vocab_size]
-                for token, _ in ranked_tokens:
-                    count = merged_vocab_counts.get(token, 0)
-                    if count > 0:
-                        f.write(f"{token}\t{count}\n")
+        detected_type = _detect_tokenizer_algorithm(base_tokenizer)
+        if config.tokenizer_algorithm is not None:
+            model_type = config.tokenizer_algorithm
+            if model_type == detected_type:
+                print(f"Tokenizer algorithm: {model_type} (explicitly set, matches base)", file=sys.stderr)
+            else:
                 print(
-                    f"  Pre-truncated to {len(ranked_tokens)} tokens "
-                    f"(ranked by char score, values are token counts)",
+                    f"Tokenizer algorithm: {model_type} "
+                    f"(explicitly set, overrides base's {detected_type})",
                     file=sys.stderr,
                 )
-            else:
-                # Sort by frequency (descending) for better readability
-                for token, count in sorted(
-                    merged_vocab.items(), key=lambda x: x[1], reverse=True,
-                ):
-                    f.write(f"{token}\t{count}\n")
-        print(f"Hybrid seed vocabulary saved to {seed_file}", file=sys.stderr)
+        else:
+            model_type = detected_type
+            print(f"Tokenizer algorithm: {model_type} (inherited from base)", file=sys.stderr)
 
-    # Train final SentencePiece model
-    # When using seed vocabulary, set seed_sentencepiece_size to the seed
-    # tokenizer's vocab size so that the merged vocabulary gets truncated to
-    # that size. This makes lambda interpolation meaningful: base tokens compete
-    # with corpus-derived tokens for spots in the top-k.
-    # Note: if truncation removes single characters required by character_coverage,
-    # SentencePiece re-adds them at finalization with penalty scores. Unlikely
-    # with reasonable multiplier values since the base tokenizer covers most
-    # characters already.
-    sp_model = _train_sentencepiece_model(
-        text_file_path=text_file_path,
-        model_type=model_type,
-        vocab_size=config.vocab_size,
-        special_tokens_config=special_tokens_config,
-        output_path=output_path,
-        character_coverage=config.character_coverage,
-        seed_sentencepieces_file=seed_file,
-        seed_sentencepiece_size=seed_vocab_size if config.use_seed_vocabulary else None
-    )
-
-    # Extract vocabulary with scores for HuggingFace tokenizer initialization
-    actual_vocab_size = sp_model.get_piece_size()
-    vocab_with_scores = [
-        (sp_model.id_to_piece(i), sp_model.get_score(i))
-        for i in range(actual_vocab_size)
-    ]
-
-    # Convert SentencePiece model to HuggingFace tokenizer backend. Both branches
-    # build the model manually and apply the same SentencePiece pipeline via
-    # _apply_spm_pipeline, so Unigram and BPE stay as comparable as possible.
-    if model_type == 'bpe':
-        model_file = os.path.join(output_path, 'spm.model')
-        backend_tokenizer = _create_bpe_tokenizer(
-            spm_model_path=model_file,
-            vocab_scores=vocab_with_scores,
-            unk_token=special_tokens_config['unk_piece'],
-        )
-    else:
-        backend_tokenizer = _create_unigram_tokenizer(
-            vocab_with_scores,
-            unk_id=special_tokens_config['unk_id'],
+        special_tokens_config = _extract_special_tokens(
+            base_tokenizer,
+            inherit_additional=config.inherit_additional_special_tokens,
+            vocab_size=config.vocab_size,
         )
 
-    _copy_base_post_processor(backend_tokenizer, base_tokenizer, special_tokens_config)
+        # Convert JSONL to plain text for SentencePiece training (cached alongside JSONL)
+        # We keep the JSONL for FOCUS which needs that format later
+        text_file_path = self.jsonl_path.replace('.jsonl', '_spm.txt')
+        if not os.path.exists(text_file_path):
+            print(f"Creating SentencePiece training file: {text_file_path}", file=sys.stderr)
+            with open(self.jsonl_path, encoding='utf-8') as jsonl_file:
+                with open(text_file_path, 'w', encoding='utf-8') as text_file:
+                    for line in jsonl_file:
+                        data = json.loads(line)
+                        text_file.write(data['text'] + '\n')
+        else:
+            print(f"SentencePiece training file already exists: {text_file_path}", file=sys.stderr)
 
-    # Wrap in PreTrainedTokenizerFast with special tokens resolved against the
-    # trained vocabulary rather than read straight off the base tokenizer, whose
-    # roles may have been renamed, aliased, or synthesized during training.
-    trained_vocab = {piece for piece, _score in vocab_with_scores}
-    hf_special_tokens = _resolve_hf_special_tokens(
-        base_tokenizer,
-        special_tokens_config,
-        trained_vocab,
-    )
-    print(f"Registering special tokens on the new tokenizer: {hf_special_tokens}", file=sys.stderr)
-    new_tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=backend_tokenizer,
-        bos_token=hf_special_tokens['bos_token'],
-        eos_token=hf_special_tokens['eos_token'],
-        unk_token=hf_special_tokens['unk_token'],
-        pad_token=hf_special_tokens['pad_token'],
-        clean_up_tokenization_spaces=True,
-    )
+        sp_model = _train_sentencepiece_model(
+            text_file_path=text_file_path,
+            model_type=model_type,
+            vocab_size=config.vocab_size,
+            special_tokens_config=special_tokens_config,
+            output_path=output_path,
+            character_coverage=config.character_coverage,
+        )
 
-    # Add additional special tokens ONLY if we inherited them
-    # (They're already in the SentencePiece vocab via user_defined_symbols,
-    #  but PreTrainedTokenizerFast needs to know about them explicitly.
-    #  This is REGISTRATION not ADDITION - we're just setting the
-    #  additional_special_tokens attribute, not increasing vocab size)
-    if config.inherit_additional_special_tokens:
-        if hasattr(base_tokenizer, 'additional_special_tokens') and base_tokenizer.additional_special_tokens:
-            new_tokenizer.add_special_tokens({
-                'additional_special_tokens': base_tokenizer.additional_special_tokens
-            })
+        # Extract vocabulary with scores for HuggingFace tokenizer initialization
+        actual_vocab_size = sp_model.get_piece_size()
+        vocab_with_scores = [
+            (sp_model.id_to_piece(i), sp_model.get_score(i))
+            for i in range(actual_vocab_size)
+        ]
 
-    new_tokenizer.save_pretrained(output_path)
-    print(f"Tokenizer saved to {output_path}", file=sys.stderr)
+        # Convert SentencePiece model to HuggingFace tokenizer backend. Both branches
+        # build the model manually and apply the same SentencePiece pipeline via
+        # _apply_spm_pipeline, so Unigram and BPE stay as comparable as possible.
+        if model_type == 'bpe':
+            model_file = os.path.join(output_path, 'spm.model')
+            backend_tokenizer = _create_bpe_tokenizer(
+                spm_model_path=model_file,
+                vocab_scores=vocab_with_scores,
+                unk_token=special_tokens_config['unk_piece'],
+            )
+        else:
+            backend_tokenizer = _create_unigram_tokenizer(
+                vocab_with_scores,
+                unk_id=special_tokens_config['unk_id'],
+            )
 
-    # Validate vocab size and token ID contiguity
-    _validate_tokenizer(new_tokenizer, config.vocab_size)
+        _copy_base_post_processor(backend_tokenizer, base_tokenizer, special_tokens_config)
 
-    return new_tokenizer
+        # Wrap in PreTrainedTokenizerFast with special tokens resolved against the
+        # trained vocabulary rather than read straight off the base tokenizer, whose
+        # roles may have been renamed, aliased, or synthesized during training.
+        trained_vocab = {piece for piece, _score in vocab_with_scores}
+        hf_special_tokens = _resolve_hf_special_tokens(
+            base_tokenizer,
+            special_tokens_config,
+            trained_vocab,
+        )
+        print(f"Registering special tokens on the new tokenizer: {hf_special_tokens}", file=sys.stderr)
+        new_tokenizer = PreTrainedTokenizerFast(
+            tokenizer_object=backend_tokenizer,
+            bos_token=hf_special_tokens['bos_token'],
+            eos_token=hf_special_tokens['eos_token'],
+            unk_token=hf_special_tokens['unk_token'],
+            pad_token=hf_special_tokens['pad_token'],
+            clean_up_tokenization_spaces=True,
+        )
+
+        # Add additional special tokens ONLY if we inherited them
+        # (They're already in the SentencePiece vocab via user_defined_symbols,
+        #  but PreTrainedTokenizerFast needs to know about them explicitly.
+        #  This is REGISTRATION not ADDITION - we're just setting the
+        #  additional_special_tokens attribute, not increasing vocab size)
+        if config.inherit_additional_special_tokens:
+            if hasattr(base_tokenizer, 'additional_special_tokens') and base_tokenizer.additional_special_tokens:
+                new_tokenizer.add_special_tokens({
+                    'additional_special_tokens': base_tokenizer.additional_special_tokens
+                })
+
+        _validate_tokenizer(new_tokenizer, config.vocab_size)
+        return new_tokenizer
+
+    def write(self, value: PreTrainedTokenizerFast, path: str) -> None:
+        value.save_pretrained(path)
+
+    def read(self, path: str) -> PreTrainedTokenizerFast:
+        tokenizer = AutoTokenizer.from_pretrained(path, use_fast=True)
+        _validate_tokenizer(tokenizer, self.tokenizer_config.vocab_size)
+        return tokenizer
 
 
 def _train_sentencepiece_model(
@@ -658,8 +338,6 @@ def _train_sentencepiece_model(
     special_tokens_config: dict,
     output_path: str,
     character_coverage: float = 1.0,
-    seed_sentencepieces_file: str | None = None,
-    seed_sentencepiece_size: int | None = None
 ) -> spm.SentencePieceProcessor:
     """
     Train a SentencePiece model and return the loaded processor.
@@ -671,10 +349,6 @@ def _train_sentencepiece_model(
         special_tokens_config: Dict of special token configs (from _extract_special_tokens)
         output_path: Directory where model files will be saved
         character_coverage: Fraction of character occurrences to cover (0-1)
-        seed_sentencepieces_file: Optional path to seed vocabulary file
-        seed_sentencepiece_size: Max seed pieces to keep (default: SentencePiece's 1M).
-            When set, the top-k seed pieces by count are kept, forcing lambda-weighted
-            counts to determine which tokens survive the cutoff.
 
     Returns:
         Loaded SentencePieceProcessor with the trained model
@@ -694,13 +368,6 @@ def _train_sentencepiece_model(
         'normalization_rule_name': 'identity',
         'hard_vocab_limit': True,
     }
-
-    # Add seed vocabulary file if provided
-    if seed_sentencepieces_file is not None:
-        train_args['seed_sentencepieces_file'] = seed_sentencepieces_file
-        if seed_sentencepiece_size is not None:
-            train_args['seed_sentencepiece_size'] = seed_sentencepiece_size
-
     train_args.update(special_tokens_config)
 
     # Pass args via the keyword API rather than a space-joined command-line
