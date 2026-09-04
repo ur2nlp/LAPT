@@ -1,14 +1,16 @@
 """Tests for tokenizer_utils module."""
 
+import os
+
 import pytest
 
 from lapt.artifact_configs import TokenizerConfig
 from lapt.tokenizer_utils import (
+    TokenizerArtifact,
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _resolve_hf_special_tokens,
     _validate_tokenizer,
-    train_new_tokenizer,
 )
 
 
@@ -57,7 +59,7 @@ def make_qwen_stub() -> StubTokenizer:
 
 def make_tokenizer_config(
     vocab_size: int,
-    num_samples: int = None,
+    num_samples: int = 10,
     inherit_additional_special_tokens: bool = True,
     character_coverage: float = 1.0,
     hf_model: str = "facebook/xglm-564M",
@@ -273,7 +275,7 @@ class TestTokenizerValidation:
     - Use pytest.raises to verify exceptions are raised correctly
 
     Design decision: We test _validate_tokenizer() separately rather than
-    only testing it as part of train_new_tokenizer() because:
+    only testing it as part of TokenizerArtifact.build() because:
     1. Faster: don't need to train a tokenizer to test validation
     2. Clearer: failures point directly to validation logic
     3. More thorough: easier to test edge cases
@@ -369,17 +371,16 @@ class TestTokenizerTraining:
         5. Tokenizer can actually tokenize text
         """
         vocab_size = 64
-        output_dir = tmp_path / "tokenizer_with_additional"
 
         config = make_tokenizer_config(
             vocab_size=vocab_size,
             inherit_additional_special_tokens=True
         )
-        tokenizer = train_new_tokenizer(
-            config=config,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir)
+        artifact = TokenizerArtifact(
+            "test_lang", config, jsonl_path=str(sample_jsonl_path), root=str(tmp_path)
         )
+        tokenizer = artifact.resolve()
+        output_dir = artifact.path
 
         # Verify tokenizer object
         assert tokenizer is not None
@@ -392,9 +393,9 @@ class TestTokenizerTraining:
         assert "<madeupword0>" in tokenizer.additional_special_tokens
 
         # Verify output files were created
-        assert (output_dir / "tokenizer.json").exists()
-        assert (output_dir / "spm.model").exists()
-        assert (output_dir / "spm.vocab").exists()
+        assert os.path.exists(os.path.join(output_dir, "tokenizer.json"))
+        assert os.path.exists(os.path.join(output_dir, "spm.model"))
+        assert os.path.exists(os.path.join(output_dir, "spm.vocab"))
 
         # Verify tokenizer actually works
         test_text = "This is a test sentence."
@@ -418,17 +419,15 @@ class TestTokenizerTraining:
         as the Unigram branch.
         """
         vocab_size = 64
-        output_dir = tmp_path / "tokenizer_bpe"
 
         config = make_tokenizer_config(
             vocab_size=vocab_size,
             tokenizer_algorithm="bpe",
         )
-        tokenizer = train_new_tokenizer(
-            config=config,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir),
+        artifact = TokenizerArtifact(
+            "test_lang", config, jsonl_path=str(sample_jsonl_path), root=str(tmp_path)
         )
+        tokenizer = artifact.resolve()
 
         assert len(tokenizer) == vocab_size
 
@@ -456,14 +455,12 @@ class TestTokenizerTraining:
         back to UNK.
         """
         vocab_size = 64
-        output_dir = tmp_path / "tokenizer_newline"
 
         config = make_tokenizer_config(vocab_size=vocab_size)
-        tokenizer = train_new_tokenizer(
-            config=config,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir),
+        artifact = TokenizerArtifact(
+            "test_lang", config, jsonl_path=str(sample_jsonl_path), root=str(tmp_path)
         )
+        tokenizer = artifact.resolve()
 
         # The newline must be a single dedicated piece, not the unknown token
         newline_ids = tokenizer.encode("\n", add_special_tokens=False)
@@ -484,17 +481,15 @@ class TestTokenizerTraining:
         This mode maximizes vocabulary space for the target language.
         """
         vocab_size = 64
-        output_dir = tmp_path / "tokenizer_without_additional"
 
         config = make_tokenizer_config(
             vocab_size=vocab_size,
             inherit_additional_special_tokens=False
         )
-        tokenizer = train_new_tokenizer(
-            config=config,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir)
+        artifact = TokenizerArtifact(
+            "test_lang", config, jsonl_path=str(sample_jsonl_path), root=str(tmp_path)
         )
+        tokenizer = artifact.resolve()
 
         assert len(tokenizer) == vocab_size
 
@@ -505,47 +500,44 @@ class TestTokenizerTraining:
 
     def test_tokenizer_caching(self, sample_jsonl_path, tmp_path):
         """
-        Test that train_new_tokenizer() reuses existing tokenizer instead of retraining.
+        Test that TokenizerArtifact.resolve() reuses an existing tokenizer
+        instead of retraining.
 
-        Strategy: Train once, then call again with same output_path.
-        Second call should be much faster and return the same tokenizer.
+        Strategy: Resolve once (trains), then resolve a second artifact
+        instance pointed at the same cache. Second call should be much faster
+        and return the same tokenizer -- and, since the cache is warm, must
+        not need jsonl_path at all.
 
         We verify caching by checking that output files have old timestamps.
         """
         vocab_size = 64
-        output_dir = tmp_path / "tokenizer_cached"
 
         config = make_tokenizer_config(
             vocab_size=vocab_size,
             inherit_additional_special_tokens=True
         )
 
-        # First call: actually trains
-        tokenizer1 = train_new_tokenizer(
-            config=config,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir)
+        # First resolve: actually trains
+        artifact1 = TokenizerArtifact(
+            "test_lang", config, jsonl_path=str(sample_jsonl_path), root=str(tmp_path)
         )
+        tokenizer1 = artifact1.resolve()
 
         # Get timestamp of created file
-        tokenizer_file = output_dir / "tokenizer.json"
-        mtime_before = tokenizer_file.stat().st_mtime
+        tokenizer_file = os.path.join(artifact1.path, "tokenizer.json")
+        mtime_before = os.path.getmtime(tokenizer_file)
 
-        # Second call: should load from cache
-        tokenizer2 = train_new_tokenizer(
-            config=config,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir)
-        )
+        # Second resolve, no jsonl_path: should load from cache without needing it
+        artifact2 = TokenizerArtifact("test_lang", config, root=str(tmp_path))
+        tokenizer2 = artifact2.resolve()
 
         # Verify file wasn't modified (indicates it was loaded, not retrained)
-        mtime_after = tokenizer_file.stat().st_mtime
+        mtime_after = os.path.getmtime(tokenizer_file)
         assert mtime_after == mtime_before
 
         # Both tokenizers should have same vocab size
         assert len(tokenizer1) == len(tokenizer2) == vocab_size
 
-import os
 from types import SimpleNamespace
 
 import torch

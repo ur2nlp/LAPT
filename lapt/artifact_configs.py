@@ -151,7 +151,7 @@ class TokenizerConfig(ArtifactConfig):
     Contains all parameters that affect the tokenizer artifact. Used for:
     - Generating cache paths
     - Validating cached tokenizers match current config
-    - Passing to train_new_tokenizer()
+    - Passing to TokenizerArtifact (lapt/tokenizer_utils.py)
     """
     artifact_name = "Tokenizer"
 

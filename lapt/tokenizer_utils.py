@@ -12,6 +12,8 @@ import json
 import os
 import random
 import sys
+from collections.abc import Mapping
+from typing import Any
 
 import sentencepiece as spm
 import torch
@@ -20,6 +22,7 @@ from datasets import load_from_disk
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, PreTrainedTokenizerFast
 
 from lapt.artifact_configs import TokenizerConfig
+from lapt_core.artifacts import ArtifactConfig, CachedArtifact
 
 
 def prepare_focus_training_data(
@@ -114,147 +117,218 @@ def prepare_focus_training_data(
     return output_jsonl_path
 
 
-def train_new_tokenizer(
-    config: TokenizerConfig,
-    jsonl_path: str,
-    output_path: str,
-) -> PreTrainedTokenizerFast:
+class TokenizerArtifact(CachedArtifact):
+    """A FOCUS tokenizer trained by SentencePiece, cached on `TokenizerConfig`.
+
+    Not used for the `focus.tokenizer_path` bypass (a pre-built tokenizer, e.g.
+    PTEx): that case is handled entirely by the caller, which loads it directly
+    and never constructs this artifact. `tokenizer_config.tokenizer_path` is
+    therefore always falsy here.
+
+    `path` is `{root}/{language}/{tokenizer_id}` rather than the `root/name`
+    default, since the tokenizer id already encodes every parameter that
+    should distinguish one cache from another. This reproduces
+    `TokenizerConfig.cache_dir(language)` exactly at the default `root`
+    ("tokenizers"), which production callers rely on; the parameter exists so
+    tests can point a whole cache tree at `tmp_path` instead.
+
+    `config_filename` is `training_config.yaml`, matching the name this
+    artifact's caching logic already wrote before the port -- unlike the
+    source layer, no migration is needed for existing caches to be read.
+
+    `artifact_config()` is overridden to return `tokenizer_config` itself
+    rather than the default dict-wrapping: `TokenizerConfig.check_cached`
+    already strips embedding-only and retired seed-vocabulary fields before
+    diffing (see `lapt/artifact_configs.py`), and that tolerance would be
+    silently lost if validation went through the generic `_DictArtifactConfig`
+    path instead.
+
+    Behavior change from the pre-port code: a cache directory that exists but
+    carries no `training_config.yaml` at all now raises
+    `MissingConfigRecordError` instead of being silently accepted with a
+    warning. Same tightening already applied to the untokenized-source layer
+    (see architecture.md's "Landed" notes) -- there is nothing to distinguish
+    an untracked pre-existing cache from one interrupted mid-write, so both
+    must be refused.
     """
-    Train a new tokenizer on JSONL data using SentencePiece library.
 
-    The tokenizer will use the same algorithm (BPE, Unigram, etc.) as the base tokenizer.
+    name = "tokenizer"
+    config_filename = "training_config.yaml"
 
-    Args:
-        config: TokenizerConfig containing all training parameters
-        jsonl_path: Path to JSONL file with training data
-        output_path: Directory where trained tokenizer will be saved
+    def __init__(
+        self,
+        language: str,
+        tokenizer_config: TokenizerConfig,
+        jsonl_path: str | None = None,
+        root: str = "tokenizers",
+    ):
+        """Initialize the artifact.
 
-    Returns:
-        Trained tokenizer
+        Args:
+            language: Language code, used only for the cache path.
+            tokenizer_config: Parameters the tokenizer is trained and cached
+                with.
+            jsonl_path: Path to the FOCUS training-data JSONL, required only
+                when the cache turns out to be cold. Callers that can tell in
+                advance that the cache is warm (see `exists()`) may skip
+                preparing this and construct without it.
+            root: Directory the per-language tokenizer caches live under.
+                Defaults to the production convention; override in tests.
+        """
+        super().__init__(root=root)
+        self.language = language
+        self.tokenizer_config = tokenizer_config
+        self.jsonl_path = jsonl_path
 
-    NOTE: When adding parameters that affect the tokenizer artifact, update
-    TokenizerConfig in artifact_configs.py to include them.
-    """
-    # Check if tokenizer already trained and cached
-    if os.path.exists(output_path) and os.path.exists(os.path.join(output_path, "tokenizer.json")):
-        print(f"Tokenizer already exists at {output_path}, loading it", file=sys.stderr)
-        tokenizer = AutoTokenizer.from_pretrained(output_path, use_fast=True)
-        _validate_tokenizer(tokenizer, config.vocab_size)
-        return tokenizer
+    @property
+    def path(self) -> str:
+        return os.path.join(self.root, self.language, self.tokenizer_config.tokenizer_id())
 
-    print(f"Training new tokenizer with vocab size {config.vocab_size}", file=sys.stderr)
+    def config(self) -> dict:
+        return self.tokenizer_config.to_dict()
 
-    # Inspect base tokenizer to determine algorithm and special tokens to inherit
-    # Force Fast tokenizer since we need to access backend_tokenizer for algorithm detection
-    base_tokenizer = AutoTokenizer.from_pretrained(config.hf_model, use_fast=True)
+    def artifact_config(self) -> ArtifactConfig:
+        return self.tokenizer_config
 
-    detected_type = _detect_tokenizer_algorithm(base_tokenizer)
-    if config.tokenizer_algorithm is not None:
-        model_type = config.tokenizer_algorithm
-        if model_type == detected_type:
-            print(f"Tokenizer algorithm: {model_type} (explicitly set, matches base)", file=sys.stderr)
-        else:
-            print(
-                f"Tokenizer algorithm: {model_type} "
-                f"(explicitly set, overrides base's {detected_type})",
-                file=sys.stderr,
+    def build(self, deps: Mapping[str, Any]) -> PreTrainedTokenizerFast:
+        """Train a new tokenizer on `self.jsonl_path` using SentencePiece.
+
+        The tokenizer will use the same algorithm (BPE, Unigram, etc.) as the
+        base tokenizer.
+
+        Writes SentencePiece's own model files (`spm.model`, `spm.vocab`)
+        directly into `self.path` as a side effect of training -- HF's
+        SentencePiece-to-fast-tokenizer conversion needs `spm.model` to exist
+        on disk, so unlike a builder that returns a self-contained value, this
+        one cannot defer all filesystem writes to `write()`. `self.path` is
+        therefore created here rather than left to `resolve()`'s later
+        `os.makedirs`, which runs after `build()` returns.
+        """
+        if self.jsonl_path is None:
+            raise ValueError(
+                f"No cached tokenizer at {self.path}, but jsonl_path was not "
+                "provided to train one. Prepare the FOCUS training data first "
+                "and pass it to TokenizerArtifact."
             )
-    else:
-        model_type = detected_type
-        print(f"Tokenizer algorithm: {model_type} (inherited from base)", file=sys.stderr)
 
-    special_tokens_config = _extract_special_tokens(
-        base_tokenizer,
-        inherit_additional=config.inherit_additional_special_tokens,
-        vocab_size=config.vocab_size,
-    )
+        config = self.tokenizer_config
+        output_path = self.path
+        os.makedirs(output_path, exist_ok=True)
 
-    # Convert JSONL to plain text for SentencePiece training (cached alongside JSONL)
-    # We keep the JSONL for FOCUS which needs that format later
-    text_file_path = jsonl_path.replace('.jsonl', '_spm.txt')
-    if not os.path.exists(text_file_path):
-        print(f"Creating SentencePiece training file: {text_file_path}", file=sys.stderr)
-        with open(jsonl_path, encoding='utf-8') as jsonl_file:
-            with open(text_file_path, 'w', encoding='utf-8') as text_file:
-                for line in jsonl_file:
-                    data = json.loads(line)
-                    text_file.write(data['text'] + '\n')
-    else:
-        print(f"SentencePiece training file already exists: {text_file_path}", file=sys.stderr)
+        print(f"Training new tokenizer with vocab size {config.vocab_size}", file=sys.stderr)
 
-    os.makedirs(output_path, exist_ok=True)
+        # Inspect base tokenizer to determine algorithm and special tokens to inherit
+        # Force Fast tokenizer since we need to access backend_tokenizer for algorithm detection
+        base_tokenizer = AutoTokenizer.from_pretrained(config.hf_model, use_fast=True)
 
-    sp_model = _train_sentencepiece_model(
-        text_file_path=text_file_path,
-        model_type=model_type,
-        vocab_size=config.vocab_size,
-        special_tokens_config=special_tokens_config,
-        output_path=output_path,
-        character_coverage=config.character_coverage,
-    )
+        detected_type = _detect_tokenizer_algorithm(base_tokenizer)
+        if config.tokenizer_algorithm is not None:
+            model_type = config.tokenizer_algorithm
+            if model_type == detected_type:
+                print(f"Tokenizer algorithm: {model_type} (explicitly set, matches base)", file=sys.stderr)
+            else:
+                print(
+                    f"Tokenizer algorithm: {model_type} "
+                    f"(explicitly set, overrides base's {detected_type})",
+                    file=sys.stderr,
+                )
+        else:
+            model_type = detected_type
+            print(f"Tokenizer algorithm: {model_type} (inherited from base)", file=sys.stderr)
 
-    # Extract vocabulary with scores for HuggingFace tokenizer initialization
-    actual_vocab_size = sp_model.get_piece_size()
-    vocab_with_scores = [
-        (sp_model.id_to_piece(i), sp_model.get_score(i))
-        for i in range(actual_vocab_size)
-    ]
-
-    # Convert SentencePiece model to HuggingFace tokenizer backend. Both branches
-    # build the model manually and apply the same SentencePiece pipeline via
-    # _apply_spm_pipeline, so Unigram and BPE stay as comparable as possible.
-    if model_type == 'bpe':
-        model_file = os.path.join(output_path, 'spm.model')
-        backend_tokenizer = _create_bpe_tokenizer(
-            spm_model_path=model_file,
-            vocab_scores=vocab_with_scores,
-            unk_token=special_tokens_config['unk_piece'],
-        )
-    else:
-        backend_tokenizer = _create_unigram_tokenizer(
-            vocab_with_scores,
-            unk_id=special_tokens_config['unk_id'],
+        special_tokens_config = _extract_special_tokens(
+            base_tokenizer,
+            inherit_additional=config.inherit_additional_special_tokens,
+            vocab_size=config.vocab_size,
         )
 
-    _copy_base_post_processor(backend_tokenizer, base_tokenizer, special_tokens_config)
+        # Convert JSONL to plain text for SentencePiece training (cached alongside JSONL)
+        # We keep the JSONL for FOCUS which needs that format later
+        text_file_path = self.jsonl_path.replace('.jsonl', '_spm.txt')
+        if not os.path.exists(text_file_path):
+            print(f"Creating SentencePiece training file: {text_file_path}", file=sys.stderr)
+            with open(self.jsonl_path, encoding='utf-8') as jsonl_file:
+                with open(text_file_path, 'w', encoding='utf-8') as text_file:
+                    for line in jsonl_file:
+                        data = json.loads(line)
+                        text_file.write(data['text'] + '\n')
+        else:
+            print(f"SentencePiece training file already exists: {text_file_path}", file=sys.stderr)
 
-    # Wrap in PreTrainedTokenizerFast with special tokens resolved against the
-    # trained vocabulary rather than read straight off the base tokenizer, whose
-    # roles may have been renamed, aliased, or synthesized during training.
-    trained_vocab = {piece for piece, _score in vocab_with_scores}
-    hf_special_tokens = _resolve_hf_special_tokens(
-        base_tokenizer,
-        special_tokens_config,
-        trained_vocab,
-    )
-    print(f"Registering special tokens on the new tokenizer: {hf_special_tokens}", file=sys.stderr)
-    new_tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=backend_tokenizer,
-        bos_token=hf_special_tokens['bos_token'],
-        eos_token=hf_special_tokens['eos_token'],
-        unk_token=hf_special_tokens['unk_token'],
-        pad_token=hf_special_tokens['pad_token'],
-        clean_up_tokenization_spaces=True,
-    )
+        sp_model = _train_sentencepiece_model(
+            text_file_path=text_file_path,
+            model_type=model_type,
+            vocab_size=config.vocab_size,
+            special_tokens_config=special_tokens_config,
+            output_path=output_path,
+            character_coverage=config.character_coverage,
+        )
 
-    # Add additional special tokens ONLY if we inherited them
-    # (They're already in the SentencePiece vocab via user_defined_symbols,
-    #  but PreTrainedTokenizerFast needs to know about them explicitly.
-    #  This is REGISTRATION not ADDITION - we're just setting the
-    #  additional_special_tokens attribute, not increasing vocab size)
-    if config.inherit_additional_special_tokens:
-        if hasattr(base_tokenizer, 'additional_special_tokens') and base_tokenizer.additional_special_tokens:
-            new_tokenizer.add_special_tokens({
-                'additional_special_tokens': base_tokenizer.additional_special_tokens
-            })
+        # Extract vocabulary with scores for HuggingFace tokenizer initialization
+        actual_vocab_size = sp_model.get_piece_size()
+        vocab_with_scores = [
+            (sp_model.id_to_piece(i), sp_model.get_score(i))
+            for i in range(actual_vocab_size)
+        ]
 
-    new_tokenizer.save_pretrained(output_path)
-    print(f"Tokenizer saved to {output_path}", file=sys.stderr)
+        # Convert SentencePiece model to HuggingFace tokenizer backend. Both branches
+        # build the model manually and apply the same SentencePiece pipeline via
+        # _apply_spm_pipeline, so Unigram and BPE stay as comparable as possible.
+        if model_type == 'bpe':
+            model_file = os.path.join(output_path, 'spm.model')
+            backend_tokenizer = _create_bpe_tokenizer(
+                spm_model_path=model_file,
+                vocab_scores=vocab_with_scores,
+                unk_token=special_tokens_config['unk_piece'],
+            )
+        else:
+            backend_tokenizer = _create_unigram_tokenizer(
+                vocab_with_scores,
+                unk_id=special_tokens_config['unk_id'],
+            )
 
-    # Validate vocab size and token ID contiguity
-    _validate_tokenizer(new_tokenizer, config.vocab_size)
+        _copy_base_post_processor(backend_tokenizer, base_tokenizer, special_tokens_config)
 
-    return new_tokenizer
+        # Wrap in PreTrainedTokenizerFast with special tokens resolved against the
+        # trained vocabulary rather than read straight off the base tokenizer, whose
+        # roles may have been renamed, aliased, or synthesized during training.
+        trained_vocab = {piece for piece, _score in vocab_with_scores}
+        hf_special_tokens = _resolve_hf_special_tokens(
+            base_tokenizer,
+            special_tokens_config,
+            trained_vocab,
+        )
+        print(f"Registering special tokens on the new tokenizer: {hf_special_tokens}", file=sys.stderr)
+        new_tokenizer = PreTrainedTokenizerFast(
+            tokenizer_object=backend_tokenizer,
+            bos_token=hf_special_tokens['bos_token'],
+            eos_token=hf_special_tokens['eos_token'],
+            unk_token=hf_special_tokens['unk_token'],
+            pad_token=hf_special_tokens['pad_token'],
+            clean_up_tokenization_spaces=True,
+        )
+
+        # Add additional special tokens ONLY if we inherited them
+        # (They're already in the SentencePiece vocab via user_defined_symbols,
+        #  but PreTrainedTokenizerFast needs to know about them explicitly.
+        #  This is REGISTRATION not ADDITION - we're just setting the
+        #  additional_special_tokens attribute, not increasing vocab size)
+        if config.inherit_additional_special_tokens:
+            if hasattr(base_tokenizer, 'additional_special_tokens') and base_tokenizer.additional_special_tokens:
+                new_tokenizer.add_special_tokens({
+                    'additional_special_tokens': base_tokenizer.additional_special_tokens
+                })
+
+        _validate_tokenizer(new_tokenizer, config.vocab_size)
+        return new_tokenizer
+
+    def write(self, value: PreTrainedTokenizerFast, path: str) -> None:
+        value.save_pretrained(path)
+
+    def read(self, path: str) -> PreTrainedTokenizerFast:
+        tokenizer = AutoTokenizer.from_pretrained(path, use_fast=True)
+        _validate_tokenizer(tokenizer, self.tokenizer_config.vocab_size)
+        return tokenizer
 
 
 def _train_sentencepiece_model(
