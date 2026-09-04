@@ -1794,6 +1794,37 @@ class TestLoadTokenizedMultinomialDataset:
         assert [d.strip() for d in first_decoded] == [d.strip() for d in second_decoded]
         assert first['src']['input_ids'] != second['src']['input_ids']
 
+    def test_pre_artifact_dev_cache_is_rebuilt_not_refused(self, tmp_path, base_tokenizer):
+        """
+        A dev cache written before this stage had config tracking carries no
+        record. Every one of the 26 on the cluster is in that shape, so
+        refusing them (CachedArtifact's default for an unverifiable cache)
+        would break every existing mix until they were deleted by hand. They
+        are a .select() over already-tokenized rows, so rebuilding is right.
+        """
+        cache_dir = tmp_path / "cache"
+        self._write_source(cache_dir, "src", [f"line {i}" for i in range(10)])
+        sources = [{'id': 'src', 'type': 'plaintext', 'path': 'unused'}]
+        kwargs = dict(
+            sources=sources, alpha=0.5, total_samples=10, dev_size=0.5,
+            base_cache_dir=str(cache_dir), tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m", max_length=64,
+        )
+
+        first = load_tokenized_multinomial_dataset(**kwargs)
+        dev_dir = next(
+            p for p in (cache_dir.glob("mix_*/dev_*")) if p.is_dir()
+        )
+
+        # Regress the cache to its pre-artifact shape: data present, no record.
+        (dev_dir / "config.yaml").unlink()
+        assert (dev_dir / "dataset_dict.json").exists()
+
+        second = load_tokenized_multinomial_dataset(**kwargs)
+
+        assert (dev_dir / "config.yaml").exists(), "record should be written on rebuild"
+        assert first['src']['input_ids'] == second['src']['input_ids']
+
 
 def _make_msgs(*pairs):
     """Build a messages list from (role, content) tuples."""

@@ -8,6 +8,7 @@ tokenizing with provided tokenizers, and caching results.
 import glob
 import json
 import os
+import shutil
 import sys
 
 import numpy as np
@@ -829,6 +830,20 @@ class DevSplitsArtifact(DatasetArtifact):
             'source_ids': list(self.source_ids),
         }
 
+    def exists(self) -> bool:
+        """Report a cache with no config record as absent, so it is rebuilt.
+
+        This stage had no config tracking at all before it became an artifact
+        -- the old code checked only whether the directory was there -- so
+        every dev cache written before this port carries no record.
+        `CachedArtifact` would refuse those outright, which is the right call
+        when an unverifiable cache might have trained a model. Here it is a
+        `.select()` over rows that are already tokenized: seconds to redo, and
+        rebuilding is self-healing where refusing would mean deleting 26
+        directories by hand.
+        """
+        return super().exists() and os.path.exists(self.config_path)
+
     def build(self, deps) -> DatasetDict:
         if self.dev_splits is None:
             raise ValueError(
@@ -841,6 +856,23 @@ class DevSplitsArtifact(DatasetArtifact):
                 file=sys.stderr,
             )
         return DatasetDict(self.dev_splits)
+
+    def write(self, value: DatasetDict, path: str) -> None:
+        """Write the splits, clearing any pre-port cache sitting in the way.
+
+        `exists()` reports a record-less directory as absent, so one can still
+        be on disk here. Removing it rather than saving over it keeps a stale
+        split directory from surviving beside the new ones -- `save_to_disk`
+        would rewrite `dataset_dict.json`, which then would not list it, but
+        the rows would stay on disk unreferenced.
+        """
+        if os.path.isdir(path) and os.listdir(path):
+            print(
+                f"Replacing pre-artifact dev cache at {path} (no config record)",
+                file=sys.stderr,
+            )
+            shutil.rmtree(path)
+        value.save_to_disk(path)
 
 
 class TokenizedMultinomialMix:
