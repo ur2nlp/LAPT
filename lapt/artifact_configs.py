@@ -162,14 +162,6 @@ class TokenizerConfig(ArtifactConfig):
     character_coverage: float
     inherit_additional_special_tokens: bool
 
-    # Seed vocabulary parameters
-    use_seed_vocabulary: bool
-    seed_vocab_multiplier: float
-    seed_lambda: float
-    seed_min_frequency: int
-    seed_round_mode: str
-    seed_score_mode: str
-
     # Embedding initialization
     fasttext_model_min_count: int
 
@@ -233,12 +225,6 @@ class TokenizerConfig(ArtifactConfig):
                 'inherit_additional_special_tokens', True
             ),
             tokenizer_algorithm=tokenizer_algorithm,
-            use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
-            seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
-            seed_lambda=args.focus.get('seed_lambda', 0.5),
-            seed_min_frequency=args.focus.get('seed_min_frequency', 1),
-            seed_round_mode=args.focus.get('seed_round_mode', 'round'),
-            seed_score_mode=args.focus.get('seed_score_mode', 'count'),
             fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4),
             seed=args.seed,
             init_model_id=init_model_id,
@@ -269,15 +255,6 @@ class TokenizerConfig(ArtifactConfig):
         if self.focus_dataset is not None:
             suffix += "_customdata"
 
-        if self.use_seed_vocabulary:
-            suffix += "_seeded"
-            suffix += f"-{self.seed_vocab_multiplier}x"
-            suffix += f"-lambda{self.seed_lambda}"
-            if self.seed_min_frequency > 1:
-                suffix += f"-min{self.seed_min_frequency}"
-            if self.seed_score_mode != 'count':
-                suffix += f"-{self.seed_score_mode}"
-
         return suffix
 
     def _model_shortname(self) -> str:
@@ -294,24 +271,9 @@ class TokenizerConfig(ArtifactConfig):
             language: Language code for the tokenizer
 
         Returns:
-            Path like "tokenizers/got/xglm564m_focus-v16k-s100k_seeded-5.0x-lambda0.5"
+            Path like "tokenizers/got/xglm564m_focus-v16k-s100k"
         """
         return f"tokenizers/{language}/{self.tokenizer_id()}"
-
-    def seed_tokenizer_suffix(self) -> str:
-        """
-        Generate directory name for the intermediate seed tokenizer.
-
-        The seed tokenizer is shared across lambda values since it only depends
-        on vocab_size, num_samples, and multiplier.
-
-        Returns:
-            String like "xglm564m_focus-v16k-s200k_seed-5.0x"
-        """
-        model_short = self._model_shortname()
-        vocab_str = format_number(self.vocab_size)
-        samples_str = format_number(self.num_samples)
-        return f"{model_short}_focus-v{vocab_str}-s{samples_str}_seed-{self.seed_vocab_multiplier}x"
 
     def tokenizer_id(self) -> str:
         """
@@ -325,7 +287,7 @@ class TokenizerConfig(ArtifactConfig):
         tokenizer training parameters that don't apply.
 
         Returns:
-            String like "xglm564m_focus-v16k-s100k_seeded-5.0x-lambda0.5"
+            String like "xglm564m_focus-v16k-s100k"
             or "xglm564m_ptex_test-s5m" for pre-built tokenizers
         """
         model_short = self._model_shortname()
@@ -352,13 +314,27 @@ class TokenizerConfig(ArtifactConfig):
         'fasttext_model_min_count',
     )
 
+    # Fields removed when the hybrid seed-vocabulary feature was retired
+    # (September 2026; see deep_dives/seed_vocabulary.md). Stripped from a
+    # cached config the same way as _embedding_only_fields, but for a
+    # different reason: these described a feature that no longer exists at
+    # all, not a provenance split within a feature that's still live.
+    _retired_fields = (
+        'use_seed_vocabulary',
+        'seed_vocab_multiplier',
+        'seed_lambda',
+        'seed_min_frequency',
+        'seed_round_mode',
+        'seed_score_mode',
+    )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for saving to YAML.
 
         When tokenizer_path is set (pre-built tokenizer), only fields that
         actually affect the downstream artifacts are included. Tokenizer
-        training params (vocab_size, character_coverage, seed vocab settings,
-        etc.) are excluded since they were bypassed.
+        training params (vocab_size, character_coverage, etc.) are excluded
+        since they were bypassed.
         """
         if self.tokenizer_path:
             return {
@@ -375,19 +351,20 @@ class TokenizerConfig(ArtifactConfig):
         return d
 
     def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
-        """Validate cached tokenizer config, tolerating legacy embedding-only fields.
+        """Validate cached tokenizer config, tolerating legacy and retired fields.
 
         Older tokenizer caches recorded fields like `train_dataset_cache`,
         `focus_dataset`, and `fasttext_model_min_count` that we now consider
-        embedding-level (not tokenizer-level) provenance. Strip them from the
-        cached config before diffing so previously valid caches keep working
-        and a mix change no longer forces a full tokenizer retrain.
+        embedding-level (not tokenizer-level) provenance, and caches from
+        before the seed-vocabulary retirement record fields that no longer
+        exist at all. Strip both from the cached config before diffing so
+        previously valid caches keep working.
         """
         if not os.path.exists(config_path):
             return True
         with open(config_path) as f:
             cached = yaml.safe_load(f) or {}
-        for k in self._embedding_only_fields:
+        for k in self._embedding_only_fields + self._retired_fields:
             cached.pop(k, None)
         # Backward compat: caches predating tokenizer_algorithm were all trained
         # with the inherited algorithm (None), so treat a missing key as such.
@@ -649,22 +626,16 @@ class ModelConfig(ArtifactConfig):
         config = OmegaConf.to_container(args, resolve=True)
 
         # When a pre-built tokenizer is plugged in, FOCUS bypasses SentencePiece
-        # training entirely — vocab_size, character_coverage, and the various
-        # seed-vocab / inherit-additional-special-tokens knobs are never
-        # consulted. Null them out in the saved config so they don't appear to
-        # document how the plugged-in tokenizer was trained (they don't).
+        # training entirely — vocab_size, character_coverage, and
+        # inherit_additional_special_tokens are never consulted. Null them out
+        # in the saved config so they don't appear to document how the
+        # plugged-in tokenizer was trained (they don't).
         focus_cfg = config.get('focus') if isinstance(config, dict) else None
         if focus_cfg and focus_cfg.get('tokenizer_path'):
             unused_focus_keys = [
                 'vocab_size',
                 'character_coverage',
                 'inherit_additional_special_tokens',
-                'use_seed_vocabulary',
-                'seed_vocab_multiplier',
-                'seed_lambda',
-                'seed_min_frequency',
-                'seed_round_mode',
-                'seed_score_mode',
             ]
             for key in unused_focus_keys:
                 if key in focus_cfg:

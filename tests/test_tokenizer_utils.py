@@ -59,10 +59,6 @@ def make_tokenizer_config(
     vocab_size: int,
     num_samples: int = None,
     inherit_additional_special_tokens: bool = True,
-    use_seed_vocabulary: bool = False,
-    seed_lambda: float = 0.5,
-    seed_vocab_multiplier: float = 5.0,
-    seed_score_mode: str = "count",
     character_coverage: float = 1.0,
     hf_model: str = "facebook/xglm-564M",
     tokenizer_algorithm: str = None,
@@ -75,12 +71,6 @@ def make_tokenizer_config(
         character_coverage=character_coverage,
         inherit_additional_special_tokens=inherit_additional_special_tokens,
         tokenizer_algorithm=tokenizer_algorithm,
-        use_seed_vocabulary=use_seed_vocabulary,
-        seed_vocab_multiplier=seed_vocab_multiplier,
-        seed_lambda=seed_lambda,
-        seed_min_frequency=1,
-        seed_round_mode="round",
-        seed_score_mode=seed_score_mode,
         fasttext_model_min_count=4,
         seed=42,
     )
@@ -554,82 +544,6 @@ class TestTokenizerTraining:
 
         # Both tokenizers should have same vocab size
         assert len(tokenizer1) == len(tokenizer2) == vocab_size
-
-    def test_seed_tokenizer_caching(self, sample_jsonl_path, tmp_path):
-        """
-        Test that seed tokenizer is cached separately and reused across lambda values.
-
-        Strategy:
-        1. Train tokenizer with seeded vocab and lambda=0.5
-        2. Train another with lambda=0.7 (same vocab_size, num_samples, multiplier)
-        3. Verify seed tokenizer is in separate directory
-        4. Verify seed tokenizer was NOT retrained for second lambda
-        """
-        # Use small vocab sizes that work with our 10-sentence test corpus
-        # Note: Test corpus has 38 unique characters + 11 special tokens = 49 minimum
-        vocab_size = 50
-        num_samples = 10
-        multiplier = 2.0  # Results in 100 tokens for seed tokenizer
-
-        # Create directory structure like production:
-        # tmp_path/tokenizers/test_lang/
-        tokenizers_dir = tmp_path / "tokenizers" / "test_lang"
-        tokenizers_dir.mkdir(parents=True)
-
-        # First tokenizer with lambda=0.5
-        config1 = make_tokenizer_config(
-            vocab_size=vocab_size,
-            num_samples=num_samples,
-            use_seed_vocabulary=True,
-            seed_lambda=0.5,
-            seed_vocab_multiplier=multiplier,
-            character_coverage=0.9995  # Reduce coverage to allow smaller vocab
-        )
-        output_dir_1 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.5"
-        tokenizer1 = train_new_tokenizer(
-            config=config1,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir_1)
-        )
-
-        # Verify seed tokenizer directory exists at sibling level
-        seed_dir = tokenizers_dir / "xglm564m_focus-v50-s10_seed-2.0x"
-        assert seed_dir.exists(), f"Seed tokenizer should exist at {seed_dir}"
-        assert (seed_dir / "spm.model").exists()
-
-        # Get timestamp of seed tokenizer
-        seed_model_file = seed_dir / "spm.model"
-        seed_mtime_before = seed_model_file.stat().st_mtime
-
-        # Second tokenizer with different lambda (should reuse seed tokenizer)
-        config2 = make_tokenizer_config(
-            vocab_size=vocab_size,
-            num_samples=num_samples,
-            use_seed_vocabulary=True,
-            seed_lambda=0.7,  # Different lambda
-            seed_vocab_multiplier=multiplier,
-            character_coverage=0.9995
-        )
-        output_dir_2 = tokenizers_dir / "xglm564m_focus-v50-s10_seeded-2.0x-lambda0.7"
-        tokenizer2 = train_new_tokenizer(
-            config=config2,
-            jsonl_path=str(sample_jsonl_path),
-            output_path=str(output_dir_2)
-        )
-
-        # Verify seed tokenizer was NOT retrained (timestamp unchanged)
-        seed_mtime_after = seed_model_file.stat().st_mtime
-        assert seed_mtime_after == seed_mtime_before, \
-            "Seed tokenizer should be reused, not retrained"
-
-        # Verify both final tokenizers were created in separate directories
-        assert (output_dir_1 / "tokenizer.json").exists()
-        assert (output_dir_2 / "tokenizer.json").exists()
-
-        # Verify both have correct vocab size
-        assert len(tokenizer1) == vocab_size
-        assert len(tokenizer2) == vocab_size
-
 
 import os
 from types import SimpleNamespace

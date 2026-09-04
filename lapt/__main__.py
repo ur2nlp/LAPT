@@ -285,17 +285,6 @@ def _handle_cache_cleanup(args: DictConfig):
             print(f"  Removing {tokenizer_path}", file=sys.stderr)
             shutil.rmtree(tokenizer_path)
 
-            # Also remove the seed tokenizer if using seed vocabulary
-            tokenizer_config = TokenizerConfig.from_args(args)
-            if tokenizer_config is not None and tokenizer_config.use_seed_vocabulary:
-                parent_dir = os.path.dirname(tokenizer_path)
-                seed_tokenizer_path = os.path.join(
-                    parent_dir, tokenizer_config.seed_tokenizer_suffix()
-                )
-                if os.path.exists(seed_tokenizer_path):
-                    print(f"  Removing {seed_tokenizer_path}", file=sys.stderr)
-                    shutil.rmtree(seed_tokenizer_path)
-
         if os.path.exists(tokenized_path):
             print(f"  Removing {tokenized_path}", file=sys.stderr)
             shutil.rmtree(tokenized_path)

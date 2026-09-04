@@ -234,7 +234,6 @@ def _focus_model_args(cache_dir_base: str, language: str = "hy"):
             'num_samples': 100_000,
             'inherit_additional_special_tokens': True,
             'character_coverage': 1.0,
-            'use_seed_vocabulary': False,
             'fasttext_model_min_count': 4,
             'reuse_embeddings': None,
         },
