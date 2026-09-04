@@ -61,7 +61,7 @@ def resolve_dev_size(args: DictConfig):
 
     # TODO: currently dev_size is required, but it would be reasonable to allow
     # skipping it when using only external eval sets. Would need dev_size=None
-    # support in load_tokenized_dataset.
+    # support in TokenizedDatasetArtifact.build().
     raise ValueError(
         "dev_size not found in dataset or training config. "
         "Please set dataset.dev_size in your config."
@@ -597,6 +597,34 @@ class TokenizedDatasetConfig(ArtifactConfig):
                 config['init_model_id'] = self.init_model_id
 
         return config
+
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Validate cached config, tolerating retired fields nested under 'tokenizer'.
+
+        A tokenized-dataset cache built before the seed-vocabulary retirement
+        (`f7d1942`) has those fields nested under its `tokenizer` key, since
+        `TokenizerConfig.to_dict()` used to include them. Strip them from the
+        cached side before diffing, the same way `TokenizerConfig.check_cached`
+        already does for a tokenizer cache directly -- without this, every
+        pre-retirement tokenized-dataset cache would mismatch on a field that
+        no longer exists anywhere in the current config.
+        """
+        if not os.path.exists(config_path):
+            return True
+        with open(config_path) as config_file:
+            cached = yaml.safe_load(config_file) or {}
+        tokenizer_block = cached.get('tokenizer')
+        if isinstance(tokenizer_block, dict):
+            for key in TokenizerConfig._embedding_only_fields + TokenizerConfig._retired_fields:
+                tokenizer_block.pop(key, None)
+        diffs = dict_diff(cached, self.to_dict())
+        if not diffs:
+            return True
+        error_msg = self._format_mismatch(config_path, diffs)
+        if error_on_mismatch:
+            raise ConfigMismatchError(error_msg)
+        print(error_msg, file=sys.stderr)
+        return False
 
 
 class ModelConfig(ArtifactConfig):
