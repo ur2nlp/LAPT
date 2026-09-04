@@ -843,32 +843,32 @@ class DevSplitsArtifact(DatasetArtifact):
         return DatasetDict(self.dev_splits)
 
 
-class TokenizedMultinomialMix(CachedArtifact):
+class TokenizedMultinomialMix:
     """The tokenized, upsampled view of a multinomial mix for one tokenizer.
 
-    Never materializes the upsampled 'train' split to disk: `write` is a
-    no-op, because everything persisted lives in the three sub-artifacts this
-    composes (`TokenizedSourceArtifact` per source, `TrainPlanArtifact`,
-    `DevSplitsArtifact`), each already responsible for its own cache. `build`
-    and `read` both assemble the same virtual view from those -- the same
-    shape the retired `UntokenizedDataset` wrapper used, since resolving
-    already-cached children is cheap on a warm hit.
+    Deliberately *not* a `CachedArtifact`. Everything this mix persists lives
+    in the three artifacts it composes -- `TokenizedSourceArtifact` per
+    source, `TrainPlanArtifact`, `DevSplitsArtifact` -- and the upsampled
+    train split itself is never written to disk, which is the whole reason
+    the index-based path exists. An artifact wrapped around that would have
+    nothing left to cache: `write` a no-op, `read` identical to `build`, and
+    a config record whose every field is already encoded in the path, so
+    `validate` could never fail. That is the shape of the retired
+    `UntokenizedDataset` wrapper, which architecture.md describes as stacking
+    a second caching system on one it does not control. This class is the
+    orchestration instead, and the caching lives where the data does.
 
-    Unlike `MultinomialDataset` (the untokenized-layer composite this
-    parallels), child sources are resolved directly here rather than through
-    `MultinomialDataset` itself: that composite's `write` materializes the
-    whole upsampled corpus, which is exactly what the index-based path exists
-    to avoid.
+    It still parallels `MultinomialDataset` (the untokenized-layer composite)
+    in resolving its children dynamically, off the `sources` list rather than
+    through a static `depends_on`. It does not route through
+    `MultinomialDataset` itself, whose `write` materializes the whole
+    upsampled corpus.
 
-    This closes a real gap: nothing wrapped `load_tokenized_multinomial_dataset`
-    in a config check before this port. Note `config()` (and therefore `path`)
-    resolves every source's untokenized cache to determine `add_labels` --
-    inherent to the problem (you cannot know whether any source is
-    instruction-formatted without looking), not a cost this port added. The
-    result is memoized per instance so a `resolve()` call does not repeat it.
+    Note that `mix_dir` and `resolve()` both need `add_labels`, which cannot
+    be known without resolving every source's untokenized cache to look for
+    instruction columns -- inherent to the problem, not a cost this design
+    adds. The result is memoized per instance.
     """
-
-    name = "tokenized"
 
     def __init__(
         self,
@@ -903,7 +903,6 @@ class TokenizedMultinomialMix(CachedArtifact):
             ValueError: On an empty source list, a non-positive `total_samples`
                 or `alpha`, or a missing `dev_size`.
         """
-        super().__init__(root=base_cache_dir)
         if not sources:
             raise ValueError("Cannot sample from datasets: sources list is empty")
         if total_samples <= 0:
@@ -913,6 +912,7 @@ class TokenizedMultinomialMix(CachedArtifact):
         if dev_size is None:
             raise ValueError("dev_size must be provided")
 
+        self.base_cache_dir = base_cache_dir
         self.sources = sources
         self.alpha = alpha
         self.total_samples = total_samples
@@ -940,18 +940,7 @@ class TokenizedMultinomialMix(CachedArtifact):
         Tokenized dev splits, the training plan, and the per-source tokenized
         caches' parent all live under here.
         """
-        return os.path.join(self.root, multinomial_mix_slug(self._mix_config()))
-
-    @property
-    def path(self) -> str:
-        # Must be tokenizer-keyed, same as DevSplitsArtifact and for the same
-        # reason: mix_dir itself is tokenizer-agnostic (shared across
-        # tokenizers), so two tokenizers resolving the same mix would
-        # otherwise collide on one directory and mismatch on tokenizer_id.
-        _, _, add_labels = self._sources_info()
-        label_suffix = "labels" if add_labels else "nolabels"
-        dirname = f"{self.name}_{self.tokenizer_id}_ml{self.max_length}_{label_suffix}"
-        return os.path.join(self.mix_dir, dirname)
+        return os.path.join(self.base_cache_dir, multinomial_mix_slug(self._mix_config()))
 
     def _sources_info(self) -> tuple[list[str], list[str], bool]:
         """Resolve every source's untokenized cache; memoized on first call.
@@ -969,7 +958,7 @@ class TokenizedMultinomialMix(CachedArtifact):
         for idx, source_config in enumerate(self.sources):
             source_dict = DictConfig(source_config)
             child_id = source_id(source_dict, fallback=f"source_{idx}")
-            source_cache = os.path.join(self.root, child_id)
+            source_cache = os.path.join(self.base_cache_dir, child_id)
             path = load_untokenized_dataset(dataset_config=source_dict, cache_dir=source_cache)
             source_ids.append(child_id)
             untokenized_paths.append(path)
@@ -984,24 +973,14 @@ class TokenizedMultinomialMix(CachedArtifact):
         self._sources_info_cache = (source_ids, untokenized_paths, add_labels)
         return self._sources_info_cache
 
-    def config(self) -> dict:
-        _, _, add_labels = self._sources_info()
-        return {
-            'tokenizer_id': self.tokenizer_id,
-            'max_length': self.max_length,
-            'add_labels': add_labels,
-        }
+    def resolve(self) -> DatasetDict:
+        """Resolve the three sub-artifacts and assemble the mix.
 
-    def write(self, value: DatasetDict, path: str) -> None:
-        pass  # the sub-artifacts already persisted themselves in _assemble()
-
-    def build(self, deps) -> DatasetDict:
-        return self._assemble()
-
-    def read(self, path: str) -> DatasetDict:
-        return self._assemble()
-
-    def _assemble(self) -> DatasetDict:
+        Returns:
+            A `DatasetDict` with an indices-mapped `train` view over the
+            concatenated per-source tokenized caches, plus one entry per
+            source that has a dev split.
+        """
         print(
             f"Multinomial sampling from {len(self.sources)} sources with alpha={self.alpha}",
             file=sys.stderr,
