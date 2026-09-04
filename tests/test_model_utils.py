@@ -286,10 +286,24 @@ class TestInitializeFocusModelJsonlGating:
             model_utils_mod, 'prepare_focus_training_data',
             lambda **kw: (jsonl_calls.append(kw) or '/tmp/fake.jsonl'),
         )
-        monkeypatch.setattr(
-            model_utils_mod, 'train_new_tokenizer',
-            lambda **kw: _FakeTokenizer(),
-        )
+
+        class _FakeTokenizerArtifact:
+            """Stands in for TokenizerArtifact: same exists()/path/resolve()
+            surface _initialize_focus_model relies on, but exists() checks for
+            tokenizer.json specifically (matching what these tests set up)
+            rather than just the cache directory, and resolve() never trains."""
+
+            def __init__(self, language, tokenizer_config, jsonl_path=None, root="tokenizers"):
+                self.path = tokenizer_config.cache_dir(language)
+                self.jsonl_path = jsonl_path
+
+            def exists(self):
+                return os.path.exists(os.path.join(self.path, "tokenizer.json"))
+
+            def resolve(self):
+                return _FakeTokenizer()
+
+        monkeypatch.setattr(model_utils_mod, 'TokenizerArtifact', _FakeTokenizerArtifact)
         def _apply(**kw):
             focus_calls.append(kw)
             n = len(kw['target_tokenizer'])
