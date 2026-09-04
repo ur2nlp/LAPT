@@ -23,10 +23,10 @@ from lapt.artifact_configs import (
 from lapt.custom_trainer import FlooredPerExampleLossTrainer
 from lapt.dataset_utils import (
     DataCollatorForInstructionTuning,
+    TokenizedDatasetArtifact,
+    TokenizedMultinomialMix,
     build_untokenized_source,
     is_instruction_dataset,
-    load_tokenized_dataset,
-    load_tokenized_multinomial_dataset,
     prepare_eval_datasets,
 )
 from lapt.eval_utils import (
@@ -338,48 +338,30 @@ def lapt(args: DictConfig):
     # tokenized datasets. Other dataset types use the legacy single-artifact path.
     if args.dataset.type == 'multinomial':
         tokenizer_id = os.path.basename(tokenized_path).replace("tokenized_", "", 1)
-        dataset = load_tokenized_multinomial_dataset(
+        mix = TokenizedMultinomialMix(
+            base_cache_dir=args.dataset.cache_dir,
             sources=OmegaConf.to_container(args.dataset.sources, resolve=True),
             alpha=args.dataset.get('alpha'),
             total_samples=args.dataset.total_samples,
             dev_size=dev_size,
-            base_cache_dir=args.dataset.cache_dir,
             tokenizer=tokenizer,
             tokenizer_id=tokenizer_id,
             max_length=args.training.max_length,
         )
+        dataset = mix.resolve()
     else:
-        # Build tokenized dataset config for tracking
-        tokenized_dataset_config = TokenizedDatasetConfig.from_args(args)
-        tokenized_config_path = os.path.join(tokenized_path, "config.yaml")
-
-        # Check if tokenized dataset cache exists
-        tokenized_cache_exists = os.path.exists(tokenized_path)
-
-        # Verify config matches if cache exists
-        if tokenized_cache_exists:
-            if os.path.exists(tokenized_config_path):
-                tokenized_dataset_config.check_cached(tokenized_config_path)
-            else:
-                print(
-                    f"Note: Using cached tokenized dataset at {tokenized_path}"
-                    f" without config tracking\n"
-                    f"      (artifact was created before config tracking was implemented)",
-                    file=sys.stderr
-                )
-
-        # Tokenize dataset with appropriate tokenizer
-        dataset = load_tokenized_dataset(
+        # resolve() validates a cached config (tolerating fields retired from
+        # a nested TokenizerConfig) and either loads the cached tokenized
+        # dataset or builds and saves a new one.
+        tokenized_dataset = TokenizedDatasetArtifact(
+            cache_dir=os.path.dirname(tokenized_path),
+            tokenized_dataset_config=TokenizedDatasetConfig.from_args(args),
             untokenized_path=untokenized_path,
-            tokenized_path=tokenized_path,
             tokenizer=tokenizer,
             max_length=args.training.max_length,
-            dev_size=dev_size
+            dev_size=dev_size,
         )
-
-        # Save config if we just created the tokenized dataset
-        if not tokenized_cache_exists:
-            tokenized_dataset_config.save(tokenized_config_path)
+        dataset = tokenized_dataset.resolve()
 
     # Prepare eval datasets (handles per-language dev splits and external eval sets)
     # Check both direct override and config group for external eval sets

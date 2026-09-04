@@ -43,6 +43,8 @@ from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
 from lapt.dataset_utils import (
+    TokenizedDatasetArtifact,
+    TokenizedMultinomialMix,
     _load_concat_dataset,
     _load_huggingface_dataset,
     _load_instruction_hf_dataset,
@@ -50,9 +52,9 @@ from lapt.dataset_utils import (
     _load_plaintext_dir_dataset,
     _partition_source_indices,
     load_external_eval_set,
-    load_tokenized_multinomial_dataset,
     load_untokenized_dataset,
 )
+from lapt.artifact_configs import DatasetConfig, TokenizedDatasetConfig
 from lapt.sources.sampling import compute_sampling_probs
 
 
@@ -1056,6 +1058,28 @@ class TestDataCollatorForInstructionTuning:
         assert isinstance(batch['labels'], torch.Tensor)
 
 
+def load_tokenized_dataset(untokenized_path, tokenized_path, tokenizer, max_length, dev_size):
+    """Test-local shim over TokenizedDatasetArtifact, matching the retired
+    function's signature. `tokenized_path`'s parent becomes the artifact's
+    cache_dir; the artifact computes its own path from a minimal
+    TokenizedDatasetConfig, which these tests don't otherwise need."""
+    import os
+    config = TokenizedDatasetConfig(
+        max_length=max_length,
+        dev_size=dev_size,
+        dataset_config=DatasetConfig({'type': 'test'}),
+        tokenizer_id=os.path.basename(tokenized_path),
+    )
+    return TokenizedDatasetArtifact(
+        cache_dir=os.path.dirname(tokenized_path),
+        tokenized_dataset_config=config,
+        untokenized_path=untokenized_path,
+        tokenizer=tokenizer,
+        max_length=max_length,
+        dev_size=dev_size,
+    ).resolve()
+
+
 class TestMixedInstructionPlaintextDatasets:
     """
     Tests for mixing instruction (prompt/response) and plaintext (text) datasets.
@@ -1163,8 +1187,6 @@ class TestMixedInstructionPlaintextDatasets:
         """
         from datasets import Dataset, DatasetDict
 
-        from lapt.dataset_utils import load_tokenized_dataset
-
         plaintext_data = Dataset.from_dict({
             'text': ['Line 1', 'Line 2', 'Line 3']
         })
@@ -1192,8 +1214,6 @@ class TestMixedInstructionPlaintextDatasets:
         Test that pure instruction datasets are correctly detected and get labels.
         """
         from datasets import Dataset, DatasetDict
-
-        from lapt.dataset_utils import load_tokenized_dataset
 
         instruction_data = Dataset.from_dict({
             'prompt': [
@@ -1232,8 +1252,6 @@ class TestMixedInstructionPlaintextDatasets:
         Instruction examples should get label masking, plaintext should not.
         """
         from datasets import Dataset, DatasetDict, concatenate_datasets
-
-        from lapt.dataset_utils import load_tokenized_dataset
 
         # Create instruction data (multiple examples to ensure some end up in train)
         instruction_data = Dataset.from_dict({
@@ -1539,9 +1557,30 @@ class TestPartitionSourceIndices:
         assert a_dev.tolist() == b_dev.tolist()
 
 
+def load_tokenized_multinomial_dataset(
+    sources, alpha, total_samples, dev_size, base_cache_dir,
+    tokenizer, tokenizer_id, max_length, shuffle_seed=1,
+):
+    """Test-local shim over TokenizedMultinomialMix, matching the retired
+    function's signature so the tests below stay close to what they're
+    actually exercising."""
+    return TokenizedMultinomialMix(
+        base_cache_dir=base_cache_dir,
+        sources=sources,
+        alpha=alpha,
+        total_samples=total_samples,
+        dev_size=dev_size,
+        tokenizer=tokenizer,
+        tokenizer_id=tokenizer_id,
+        max_length=max_length,
+        shuffle_seed=shuffle_seed,
+    ).resolve()
+
+
 class TestLoadTokenizedMultinomialDataset:
     """
-    End-to-end tests for load_tokenized_multinomial_dataset.
+    End-to-end tests for TokenizedMultinomialMix (formerly the standalone
+    function load_tokenized_multinomial_dataset).
 
     Verifies that:
     - Each source is tokenized exactly once (no per-mix re-tokenization).
@@ -1604,13 +1643,15 @@ class TestLoadTokenizedMultinomialDataset:
         assert (cache_dir / "big" / "tokenized_xglm564m_ml64_nolabels").exists()
         assert (cache_dir / "small" / "tokenized_xglm564m_ml64_nolabels").exists()
 
-        # Plan file lives under the mix directory.
+        # Plan artifact lives under the mix directory (its own subdirectory,
+        # holding plan.npz plus the CachedArtifact config record).
         mix_dirs = [
             p for p in cache_dir.iterdir()
             if p.is_dir() and p.name.startswith("mix_")
         ]
         assert len(mix_dirs) == 1
-        assert (mix_dirs[0] / "train_plan.npz").exists()
+        assert (mix_dirs[0] / "train_plan" / "plan.npz").exists()
+        assert (mix_dirs[0] / "train_plan" / "config.yaml").exists()
 
     def test_alpha_change_reuses_tokenized_sources(self, tmp_path, base_tokenizer):
         """Sweeping alpha must NOT re-tokenize per-source data."""
@@ -1752,6 +1793,37 @@ class TestLoadTokenizedMultinomialDataset:
         )
         assert [d.strip() for d in first_decoded] == [d.strip() for d in second_decoded]
         assert first['src']['input_ids'] != second['src']['input_ids']
+
+    def test_pre_artifact_dev_cache_is_rebuilt_not_refused(self, tmp_path, base_tokenizer):
+        """
+        A dev cache written before this stage had config tracking carries no
+        record. Every one of the 26 on the cluster is in that shape, so
+        refusing them (CachedArtifact's default for an unverifiable cache)
+        would break every existing mix until they were deleted by hand. They
+        are a .select() over already-tokenized rows, so rebuilding is right.
+        """
+        cache_dir = tmp_path / "cache"
+        self._write_source(cache_dir, "src", [f"line {i}" for i in range(10)])
+        sources = [{'id': 'src', 'type': 'plaintext', 'path': 'unused'}]
+        kwargs = dict(
+            sources=sources, alpha=0.5, total_samples=10, dev_size=0.5,
+            base_cache_dir=str(cache_dir), tokenizer=base_tokenizer,
+            tokenizer_id="xglm564m", max_length=64,
+        )
+
+        first = load_tokenized_multinomial_dataset(**kwargs)
+        dev_dir = next(
+            p for p in (cache_dir.glob("mix_*/dev_*")) if p.is_dir()
+        )
+
+        # Regress the cache to its pre-artifact shape: data present, no record.
+        (dev_dir / "config.yaml").unlink()
+        assert (dev_dir / "dataset_dict.json").exists()
+
+        second = load_tokenized_multinomial_dataset(**kwargs)
+
+        assert (dev_dir / "config.yaml").exists(), "record should be written on rebuild"
+        assert first['src']['input_ids'] == second['src']['input_ids']
 
 
 def _make_msgs(*pairs):
