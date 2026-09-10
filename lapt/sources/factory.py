@@ -12,12 +12,34 @@ one new file instead of a branch in a shared function.
 
 from typing import Any
 
+from omegaconf import DictConfig, OmegaConf
+
 from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.substituted import SubstitutedDataset, parse_substitutions
 from lapt_core.dataset_artifacts import DatasetArtifact
 from lapt_core.mixing import field
 
 DEFAULT_DATASET_TYPE = 'oscar'
+
+
+def normalize_sources(sources) -> list[dict]:
+    """Unwrap a composite's `sources` list into plain dicts.
+
+    The single omegaconf boundary for composites. `lapt_core.composites` takes
+    plain dicts so it need not depend on Hydra; converting here means it happens
+    once, at construction, rather than every time a `config()` record is built.
+
+    Args:
+        sources: Entries from a configuration, as `DictConfig`, `ListConfig`,
+            or plain dicts.
+
+    Returns:
+        The same entries as plain dicts, with interpolations resolved.
+    """
+    return [
+        OmegaConf.to_container(DictConfig(source), resolve=True)
+        for source in (sources or [])
+    ]
 
 
 def source_type(source_config: Any) -> str:

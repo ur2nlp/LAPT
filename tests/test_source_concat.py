@@ -1,10 +1,12 @@
 """Tests for `ConcatDataset` and the source factory it dispatches through."""
 
+import json
 import os
 
 import pytest
 import yaml
 from datasets import load_from_disk
+from omegaconf import OmegaConf
 
 from lapt.sources import SOURCE_TYPES, ConcatDataset
 from lapt.sources.factory import make_source, source_type
@@ -112,3 +114,26 @@ class TestCaching:
         child = PlaintextDataset(os.path.join(root, "first"), corpora[0]['path'])
         assert child.exists()
         assert load_from_disk(child.path)['train']['text'] == ["alpha", "beta"]
+
+
+class TestConfigNormalization:
+    """The core composite records `dict(source)` -- a shallow copy."""
+
+    def test_dictconfig_sources_are_normalized_for_the_record(self, tmp_path):
+        """Direct construction with DictConfig entries must still hash cleanly.
+
+        `lapt_core.composites` takes plain dicts, so a nested ListConfig left
+        by a shallow copy would not raise -- `config_digest` serializes with
+        `default=str` -- it would quietly produce a different digest, and so a
+        different cache path, than the same config routed through `from_config`.
+        """
+        raw = OmegaConf.create([
+            {'id': 'a', 'type': 'plaintext', 'path': 'p',
+             'substitutions': [{'pattern': 'x', 'replacement': 'y'}]},
+        ])
+        record = ConcatDataset(str(tmp_path), list(raw)).config()
+
+        json.dumps(record)  # raises TypeError if anything omegaconf survived
+        assert record['sources'][0]['substitutions'] == [
+            {'pattern': 'x', 'replacement': 'y'}
+        ]
