@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 from lapt.artifact_configs import multinomial_mix_slug
 from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.concat import source_id
-from lapt.sources.factory import build_source, field
+from lapt.sources.factory import make_source, field
 from lapt.sources.sampling import compute_sampling_probs, exhaust_first_sample
 from lapt_core.dataset_artifacts import DatasetArtifact
 
@@ -184,7 +184,7 @@ class MultinomialDataset(DatasetArtifact):
                 other than -1.
         """
         child_id = source_id(source_config, fallback=f"source_{index}")
-        child = build_source(os.path.join(self.root, child_id), source_config, self.seed)
+        child = make_source(os.path.join(self.root, child_id), source_config, self.seed)
         full_data = child.resolve()['train']
 
         source_dev_size = field(source_config, 'dev_size', self.dev_size)

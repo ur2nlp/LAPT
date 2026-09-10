@@ -31,7 +31,7 @@ from lapt.sources import (
     PlaintextDataset,
 )
 from lapt.sources.concat import source_id
-from lapt.sources.factory import build_source
+from lapt.sources.factory import make_source
 from lapt.sources.sampling import compute_sampling_probs
 from lapt.sources.text_processing import (
     read_instruction_jsonl,
@@ -49,10 +49,10 @@ def load_untokenized_dataset(
     """
     Load untokenized dataset based on configuration.
 
-    Thin path-returning wrapper over `build_source`, which maps the config's
+    Thin path-returning wrapper over `make_source`, which maps the config's
     ``type`` to a source class through the registry and applies any
     ``substitutions`` the entry carries. Kept so callers that exchange paths
-    keep working; new code should use `build_source` and hold the artifact.
+    keep working; new code should use `make_source` and hold the artifact.
 
     Args:
         dataset_config: Dataset configuration object with type and source info
@@ -69,7 +69,7 @@ def load_untokenized_dataset(
     cache-validation record. Adding a dataset type means adding a class there
     and registering it; there is no separate list to keep in step.
     """
-    source = build_source(cache_dir, dataset_config, seed, dev_size)
+    source = make_source(cache_dir, dataset_config, seed, dev_size)
     source.resolve()
     return source.path
 
@@ -90,7 +90,7 @@ def build_untokenized_source(args: DictConfig) -> DatasetArtifact:
         parent level; with substitutions configured it is the `_sub_{digest}`
         sibling of whatever the underlying type produced.
     """
-    return build_source(
+    return make_source(
         args.dataset.cache_dir,
         args.dataset,
         args.seed,

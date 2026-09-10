@@ -7,7 +7,7 @@ import yaml
 from datasets import load_from_disk
 
 from lapt.sources import SOURCE_TYPES, ConcatDataset
-from lapt.sources.factory import build_source, source_type
+from lapt.sources.factory import make_source, source_type
 from lapt.sources.plaintext import PlaintextDataset
 from lapt_core.artifacts import ConfigMismatchError
 
@@ -27,7 +27,7 @@ def corpora(tmp_path):
 
 class TestFactory:
     def test_builds_the_registered_class(self, tmp_path, corpora):
-        source = build_source(str(tmp_path / "c"), corpora[0])
+        source = make_source(str(tmp_path / "c"), corpora[0])
         assert isinstance(source, PlaintextDataset)
 
     def test_type_defaults_to_oscar_for_configs_predating_the_field(self):
@@ -35,7 +35,7 @@ class TestFactory:
 
     def test_unregistered_type_is_reported_with_the_known_ones(self, tmp_path):
         with pytest.raises(ValueError, match="Known types:"):
-            build_source(str(tmp_path / "c"), {'type': 'nonesuch'})
+            make_source(str(tmp_path / "c"), {'type': 'nonesuch'})
 
     def test_every_registered_type_can_be_looked_up(self):
         for type_name in SOURCE_TYPES.known_types():

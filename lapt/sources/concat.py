@@ -7,7 +7,7 @@ from datasets import DatasetDict, concatenate_datasets
 from omegaconf import DictConfig, OmegaConf
 
 from lapt.sources.base import SOURCE_TYPES
-from lapt.sources.factory import build_source
+from lapt.sources.factory import make_source
 from lapt_core.dataset_artifacts import DatasetArtifact
 from lapt_core.mixing import field, source_id
 
@@ -99,7 +99,7 @@ class ConcatDataset(DatasetArtifact):
         for index, source_config in enumerate(self.sources):
             default_id = f"{self.parent_id}_{index}" if self.parent_id else f"source_{index}"
             child_id = source_id(source_config, fallback=default_id)
-            child = build_source(
+            child = make_source(
                 os.path.join(self.root, child_id), source_config, self.seed
             )
             built.append((child_id, child))

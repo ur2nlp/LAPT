@@ -1,5 +1,9 @@
 """Construction of source artifacts from dataset configuration entries.
 
+Named `make_source` rather than `build_source` because `build()` on an artifact
+means something else entirely: this returns an unresolved *object*, while
+`build()` produces the *dataset contents*. Nothing here touches disk.
+
 This replaces the `if/elif` chain that dispatched on a config's `type` field.
 Each source class knows how to read its own parameters, via `from_config`, and
 the registry maps the type name to the class — so adding a source type touches
@@ -29,7 +33,7 @@ def source_type(source_config: Any) -> str:
     return field(source_config, 'type', DEFAULT_DATASET_TYPE)
 
 
-def build_source(
+def make_source(
     cache_dir: str,
     source_config: Any,
     seed: int = 1,
