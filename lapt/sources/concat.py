@@ -6,12 +6,13 @@ import sys
 from datasets import DatasetDict, concatenate_datasets
 from omegaconf import DictConfig, OmegaConf
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.factory import build_source
+from lapt_core.dataset_artifacts import DatasetArtifact
 from lapt_core.mixing import field, source_id
 
 
-class ConcatDataset(SourceDataset):
+class ConcatDataset(DatasetArtifact):
     """Several sources concatenated into one training split.
 
     Children are resolved through the same registry as any other source, so a
@@ -88,7 +89,7 @@ class ConcatDataset(SourceDataset):
             ],
         }
 
-    def children(self) -> list[tuple[str, SourceDataset]]:
+    def children(self) -> list[tuple[str, DatasetArtifact]]:
         """Build the child sources, unresolved, paired with their ids.
 
         Returns:

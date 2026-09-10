@@ -8,8 +8,9 @@ one new file instead of a branch in a shared function.
 
 from typing import Any
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.substituted import SubstitutedDataset, parse_substitutions
+from lapt_core.dataset_artifacts import DatasetArtifact
 from lapt_core.mixing import field
 
 DEFAULT_DATASET_TYPE = 'oscar'
@@ -33,7 +34,7 @@ def build_source(
     source_config: Any,
     seed: int = 1,
     dev_size: float | None = None,
-) -> SourceDataset:
+) -> DatasetArtifact:
     """Construct the source artifact a configuration entry describes.
 
     A `substitutions` field wraps the result in a `SubstitutedDataset`, so the

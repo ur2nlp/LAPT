@@ -7,7 +7,7 @@ than a side effect of subclassing, so a name collision is reported where it
 happens and test subclasses do not pollute the table.
 """
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.concat import ConcatDataset
 from lapt.sources.factory import build_source
 from lapt.sources.huggingface import HuggingFaceDataset
@@ -27,7 +27,6 @@ __all__ = [
     'MultinomialDataset',
     'OscarDataset',
     'PlaintextDataset',
-    'SourceDataset',
     'SubstitutedDataset',
     'build_source',
     'parse_substitutions',

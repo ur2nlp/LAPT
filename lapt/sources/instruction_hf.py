@@ -5,11 +5,12 @@ import sys
 
 from datasets import Dataset, DatasetDict, load_dataset
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.factory import field
+from lapt_core.dataset_artifacts import DatasetArtifact
 
 
-class InstructionHFDataset(SourceDataset):
+class InstructionHFDataset(DatasetArtifact):
     """An instruction corpus drawn from a chat-formatted HuggingFace dataset.
 
     Expects a column of message lists in the OpenAI Chat Completions

@@ -30,7 +30,6 @@ from lapt.sources import (
     OscarDataset,
     PlaintextDataset,
 )
-from lapt.sources.base import SourceDataset
 from lapt.sources.concat import source_id
 from lapt.sources.factory import build_source
 from lapt.sources.sampling import compute_sampling_probs
@@ -75,7 +74,7 @@ def load_untokenized_dataset(
     return source.path
 
 
-def build_untokenized_source(args: DictConfig) -> SourceDataset:
+def build_untokenized_source(args: DictConfig) -> DatasetArtifact:
     """Construct the untokenized corpus source a full Hydra config describes.
 
     The single entry point from the training pipeline into `lapt.sources`. The
@@ -543,7 +542,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
     something this class infers.
 
     Constructed from the *exact* untokenized path a source artifact returned
-    (`SourceDataset.resolve()` / `.path`) -- never re-derived as
+    (`DatasetArtifact.resolve()` / `.path`) -- never re-derived as
     `{source_cache_dir}/untokenized`. A source declaring `substitutions`
     returns an `untokenized_sub_<hash>` variant; tokenizing a re-derived path
     instead would silently tokenize the raw, unsubstituted text. This was a

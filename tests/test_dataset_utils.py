@@ -42,6 +42,7 @@ from datasets import Dataset, DatasetDict, load_from_disk
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
+from lapt.artifact_configs import DatasetConfig, TokenizedDatasetConfig
 from lapt.dataset_utils import (
     TokenizedDatasetArtifact,
     TokenizedMultinomialMix,
@@ -54,7 +55,6 @@ from lapt.dataset_utils import (
     load_external_eval_set,
     load_untokenized_dataset,
 )
-from lapt.artifact_configs import DatasetConfig, TokenizedDatasetConfig
 from lapt.sources.sampling import compute_sampling_probs
 
 

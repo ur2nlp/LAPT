@@ -5,12 +5,13 @@ import sys
 
 from datasets import Dataset, DatasetDict, load_dataset
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.factory import field
 from lapt.sources.text_processing import collect_from_stream, docs_to_filtered_lines
+from lapt_core.dataset_artifacts import DatasetArtifact
 
 
-class HuggingFaceDataset(SourceDataset):
+class HuggingFaceDataset(DatasetArtifact):
     """A corpus drawn from any HuggingFace dataset.
 
     Two shapes, chosen by `max_samples`. Without it, the whole split is
