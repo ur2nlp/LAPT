@@ -911,7 +911,7 @@ class TokenizedMultinomialMix:
         tokenizer: PreTrainedTokenizer,
         tokenizer_id: str,
         max_length: int,
-        shuffle_seed: int = 1,
+        seed: int = 1,
     ):
         """Initialize the mix.
 
@@ -928,7 +928,8 @@ class TokenizedMultinomialMix:
             tokenizer_id: Stable identifier for the tokenizer (drives cache
                 directory naming).
             max_length: Truncation length.
-            shuffle_seed: Seed for shuffling the global training plan.
+            seed: Global random seed. Selects each source's train/dev
+                partition and the shuffle of the training plan.
 
         Raises:
             ValueError: On an empty source list, a non-positive `total_samples`
@@ -951,14 +952,19 @@ class TokenizedMultinomialMix:
         self.tokenizer = tokenizer
         self.tokenizer_id = tokenizer_id
         self.max_length = max_length
-        self.shuffle_seed = shuffle_seed
+        self.seed = seed
         self._sources_info_cache: tuple[list[str], list[str], bool] | None = None
 
     def _mix_config(self) -> dict:
+        # `seed` belongs here because it selects the train/dev partition and
+        # the plan shuffle, so two seeds are two different mixes. `mix_slug`
+        # omits it from the digest at the default, which is what keeps every
+        # existing directory addressed -- all of them were built at seed 1.
         return {
             'alpha': self.alpha,
             'total_samples': self.total_samples,
             'dev_size': self.dev_size,
+            'seed': self.seed,
             'sources': [
                 OmegaConf.to_container(DictConfig(s), resolve=True) for s in self.sources
             ],
@@ -1050,7 +1056,7 @@ class TokenizedMultinomialMix:
         train_pools = []
         dev_indices_per_source = []
         for size, src_dev in zip(source_sizes, source_dev_sizes):
-            train_idx, dev_idx = _partition_source_indices(size, src_dev, seed=1)
+            train_idx, dev_idx = _partition_source_indices(size, src_dev, seed=self.seed)
             train_pools.append(train_idx)
             dev_indices_per_source.append(dev_idx)
 
@@ -1078,7 +1084,7 @@ class TokenizedMultinomialMix:
             source_ids=source_ids,
             source_sizes=source_sizes,
             samples_per_source=samples_per_source,
-            shuffle_seed=self.shuffle_seed,
+            shuffle_seed=self.seed,
             train_pools=train_pools,
         )
         global_indices = plan_artifact.resolve()

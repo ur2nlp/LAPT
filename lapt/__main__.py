@@ -347,6 +347,7 @@ def lapt(args: DictConfig):
             tokenizer=tokenizer,
             tokenizer_id=tokenizer_id,
             max_length=args.training.max_length,
+            seed=args.seed,
         )
         dataset = mix.resolve()
     else:

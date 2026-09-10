@@ -202,7 +202,7 @@ class MultinomialDataset(DatasetArtifact):
         if source_dev_size == SKIP_DEV_SPLIT:
             train_data, dev_data = full_data, None
         else:
-            split = full_data.train_test_split(test_size=source_dev_size, seed=1)
+            split = full_data.train_test_split(test_size=source_dev_size, seed=self.seed)
             train_data, dev_data = split['train'], split['test']
 
         has_override = field(source_config, 'dev_size') is not None
@@ -296,7 +296,7 @@ class MultinomialDataset(DatasetArtifact):
             for dataset, count in zip(train_datasets, self._samples_per_source(train_sizes))
         ]
 
-        train = concatenate_datasets(selected).shuffle(seed=1)
+        train = concatenate_datasets(selected).shuffle(seed=self.seed)
 
         print(f"  Train: {len(train)} examples (upsampled)", file=sys.stderr)
         if dev_splits:

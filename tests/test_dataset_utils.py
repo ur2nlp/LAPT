@@ -1559,7 +1559,7 @@ class TestPartitionSourceIndices:
 
 def load_tokenized_multinomial_dataset(
     sources, alpha, total_samples, dev_size, base_cache_dir,
-    tokenizer, tokenizer_id, max_length, shuffle_seed=1,
+    tokenizer, tokenizer_id, max_length, seed=1,
 ):
     """Test-local shim over TokenizedMultinomialMix, matching the retired
     function's signature so the tests below stay close to what they're
@@ -1573,7 +1573,7 @@ def load_tokenized_multinomial_dataset(
         tokenizer=tokenizer,
         tokenizer_id=tokenizer_id,
         max_length=max_length,
-        shuffle_seed=shuffle_seed,
+        seed=seed,
     ).resolve()
 
 
