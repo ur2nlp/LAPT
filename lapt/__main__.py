@@ -332,6 +332,12 @@ def lapt(args: DictConfig):
     # Determine output directory for checkpoints
     output_dir = _get_output_dir(args)
 
+    # Refuse to train into a directory recording a different run. Not a
+    # cache check -- a trained model is never loaded in place of training --
+    # but a collision check; see ModelConfig.check_cached.
+    model_config = ModelConfig.from_args(args)
+    model_config.check_cached(os.path.join(output_dir, "training_config.yaml"))
+
     # Multinomial training mixes go through a plan-based path that tokenizes
     # each source's unique rows exactly once and represents the upsampled training
     # split as a shuffled index array into the concatenation of per-source
@@ -507,7 +513,7 @@ def lapt(args: DictConfig):
 
     # Save the full training configuration for reproducibility
     model_config_path = os.path.join(output_dir, "training_config.yaml")
-    ModelConfig.from_args(args).save(model_config_path)
+    model_config.save(model_config_path)
 
     # start training (resume from checkpoint if specified)
     resume_checkpoint = args.get('resume_from_checkpoint', None)

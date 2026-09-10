@@ -13,12 +13,14 @@ from omegaconf import OmegaConf
 
 from lapt.artifact_configs import (
     DatasetConfig,
+    ModelConfig,
     TokenizedDatasetConfig,
     TokenizerConfig,
     dict_diff,
     focus_embedding_hash,
     multinomial_mix_slug,
 )
+from lapt_core.artifacts import ConfigMismatchError
 
 
 class TestDictDiff:
@@ -817,3 +819,59 @@ class TestMixSlugSeedKeying:
         """Only the digest moves, so a mix stays recognizable in a listing."""
         with_seed = multinomial_mix_slug({**self.BASE, 'seed': 7})
         assert with_seed.startswith("mix_a0.5_s5m_")
+
+
+class TestModelConfigCollisionCheck:
+    """Model outputs are not a cache; this is a collision check.
+
+    `output_dir` is effectively one directory per `experiment_id`, so a record
+    describing different parameters means either a preempted run is being
+    resumed with something changed, or an experiment label is being reused.
+    """
+
+    def _args(self, **overrides):
+        base = {
+            'hf_model': 'facebook/xglm-564M',
+            'output_dir': 'models',
+            'model_name': None,
+            'experiment_id': 'v01',
+            'seed': 1,
+            'preempt_resume': False,
+            'resume_from_checkpoint': None,
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy', 'dev_size': 0.1},
+            'training': {'name': 'basic', 'max_length': 512, 'learning_rate': 4e-5},
+            'focus': {'enabled': False},
+        }
+        base.update(overrides)
+        return OmegaConf.create(base)
+
+    def _record(self, tmp_path, args):
+        path = str(tmp_path / 'training_config.yaml')
+        ModelConfig.from_args(args).save(path)
+        return path
+
+    def test_identical_config_is_accepted(self, tmp_path):
+        args = self._args()
+        assert ModelConfig.from_args(args).check_cached(self._record(tmp_path, args))
+
+    def test_changed_hyperparameter_is_refused(self, tmp_path):
+        path = self._record(tmp_path, self._args())
+        changed = self._args(training={'name': 'basic', 'max_length': 512, 'learning_rate': 1e-4})
+
+        with pytest.raises(ConfigMismatchError, match="different parameters"):
+            ModelConfig.from_args(changed).check_cached(path)
+
+    def test_flipping_preempt_resume_is_not_a_mismatch(self, tmp_path):
+        """The workflow the check exists to protect must not trip it.
+
+        The record is the whole resolved config, so a naive comparison would
+        fire exactly when a preempted run is re-launched to resume.
+        """
+        path = self._record(tmp_path, self._args())
+        resuming = self._args(preempt_resume=True, resume_from_checkpoint='ckpt-500')
+
+        assert ModelConfig.from_args(resuming).check_cached(path)
+
+    def test_no_record_yet_is_accepted(self, tmp_path):
+        args = self._args()
+        assert ModelConfig.from_args(args).check_cached(str(tmp_path / 'absent.yaml'))

@@ -380,6 +380,82 @@ class DatasetConfig(ArtifactConfig):
         """Return config dictionary for saving to YAML."""
         return dict(self._config)
 
+    # How a run was launched, rather than what it trains. Stripped before
+    # comparison but kept in the saved record: the archived config is
+    # provenance, and `tools/registry.py` reads its fields to describe runs.
+    # Without this the check would fire the moment `preempt_resume` flipped
+    # false -> true, which is exactly the workflow it exists to protect.
+    _operational_fields = (
+        'preempt_resume',
+        'resume_from_checkpoint',
+        'fresh_dataset',
+        'fresh_tokenizer',
+        'fresh_model',
+        'output_dir',
+        'model_name',
+    )
+
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Refuse to train into a directory whose record describes another run.
+
+        Model outputs are not a cache -- nothing here is ever loaded instead of
+        being trained -- so this is not a cache-or-build decision. It is a
+        collision check. `output_dir` is effectively one directory per
+        `experiment_id`, so a mismatch means one of two things, and both are
+        worth stopping:
+
+        - a preempted run is being resumed with a parameter changed, which
+          would make the resulting weights a chimera of two configurations;
+        - the same `experiment_id` is being re-run with different parameters,
+          so its registry entry would describe something other than what
+          ends up on disk.
+
+        Args:
+            config_path: Full path to the cached `training_config.yaml`.
+            error_on_mismatch: Raise on mismatch when True.
+
+        Returns:
+            True when the configs match or no record exists yet.
+
+        Raises:
+            ConfigMismatchError: If the records differ and `error_on_mismatch`.
+        """
+        if not os.path.exists(config_path):
+            return True
+        with open(config_path) as config_file:
+            cached = yaml.safe_load(config_file) or {}
+        current = self.to_dict()
+        for key in self._operational_fields:
+            cached.pop(key, None)
+            current.pop(key, None)
+
+        diffs = dict_diff(cached, current)
+        if not diffs:
+            return True
+
+        divider = '=' * 70
+        error_msg = (
+            f"\n{divider}\n"
+            f"CONFIG MISMATCH: {self.artifact_name}\n"
+            f"{divider}\n"
+            f"{config_path} records a run trained with different parameters:\n\n"
+            + "\n".join(f"  {diff}" for diff in diffs)
+            + f"\n\n"
+            f"Resuming here would blend two configurations into one set of\n"
+            f"weights; starting over would leave this experiment's recorded\n"
+            f"parameters describing something other than what is on disk.\n\n"
+            f"To proceed, either:\n\n"
+            f"  1. Retrain from scratch with fresh_model=true, which clears\n"
+            f"     the directory and this record with it\n"
+            f"  2. Give this run its own experiment_id\n"
+            f"  3. Change the config back to match the recorded run\n"
+            f"{divider}\n"
+        )
+        if error_on_mismatch:
+            raise ConfigMismatchError(error_msg)
+        print(error_msg, file=sys.stderr)
+        return False
+
     def effective_cache_dir(self, base_cache_dir: str) -> str:
         """
         Resolve the cache directory for mix-dependent artifacts.
@@ -614,3 +690,79 @@ class ModelConfig(ArtifactConfig):
     def to_dict(self) -> dict:
         """Return config dictionary for saving to YAML."""
         return dict(self._config)
+
+    # How a run was launched, rather than what it trains. Stripped before
+    # comparison but kept in the saved record: the archived config is
+    # provenance, and `tools/registry.py` reads its fields to describe runs.
+    # Without this the check would fire the moment `preempt_resume` flipped
+    # false -> true, which is exactly the workflow it exists to protect.
+    _operational_fields = (
+        'preempt_resume',
+        'resume_from_checkpoint',
+        'fresh_dataset',
+        'fresh_tokenizer',
+        'fresh_model',
+        'output_dir',
+        'model_name',
+    )
+
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Refuse to train into a directory whose record describes another run.
+
+        Model outputs are not a cache -- nothing here is ever loaded instead of
+        being trained -- so this is not a cache-or-build decision. It is a
+        collision check. `output_dir` is effectively one directory per
+        `experiment_id`, so a mismatch means one of two things, and both are
+        worth stopping:
+
+        - a preempted run is being resumed with a parameter changed, which
+          would make the resulting weights a chimera of two configurations;
+        - the same `experiment_id` is being re-run with different parameters,
+          so its registry entry would describe something other than what
+          ends up on disk.
+
+        Args:
+            config_path: Full path to the cached `training_config.yaml`.
+            error_on_mismatch: Raise on mismatch when True.
+
+        Returns:
+            True when the configs match or no record exists yet.
+
+        Raises:
+            ConfigMismatchError: If the records differ and `error_on_mismatch`.
+        """
+        if not os.path.exists(config_path):
+            return True
+        with open(config_path) as config_file:
+            cached = yaml.safe_load(config_file) or {}
+        current = self.to_dict()
+        for key in self._operational_fields:
+            cached.pop(key, None)
+            current.pop(key, None)
+
+        diffs = dict_diff(cached, current)
+        if not diffs:
+            return True
+
+        divider = '=' * 70
+        error_msg = (
+            f"\n{divider}\n"
+            f"CONFIG MISMATCH: {self.artifact_name}\n"
+            f"{divider}\n"
+            f"{config_path} records a run trained with different parameters:\n\n"
+            + "\n".join(f"  {diff}" for diff in diffs)
+            + f"\n\n"
+            f"Resuming here would blend two configurations into one set of\n"
+            f"weights; starting over would leave this experiment's recorded\n"
+            f"parameters describing something other than what is on disk.\n\n"
+            f"To proceed, either:\n\n"
+            f"  1. Retrain from scratch with fresh_model=true, which clears\n"
+            f"     the directory and this record with it\n"
+            f"  2. Give this run its own experiment_id\n"
+            f"  3. Change the config back to match the recorded run\n"
+            f"{divider}\n"
+        )
+        if error_on_mismatch:
+            raise ConfigMismatchError(error_msg)
+        print(error_msg, file=sys.stderr)
+        return False
