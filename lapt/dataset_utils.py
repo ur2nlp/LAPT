@@ -27,6 +27,13 @@ from lapt.sources.sampling import compute_sampling_probs
 from lapt.sources.text_processing import (
     read_instruction_jsonl,
 )
+from lapt.tokenization import (
+    dev_splits_dirname,
+    source_has_instruction_columns,
+    tokenize_instruction_examples,
+    tokenize_plaintext_with_labels,
+    tokenized_source_dirname,
+)
 from lapt_core.artifacts import ArtifactConfig, CachedArtifact
 from lapt_core.dataset_artifacts import DatasetArtifact
 
@@ -87,193 +94,6 @@ def build_untokenized_source(args: DictConfig) -> DatasetArtifact:
         args.seed,
         resolve_dev_size(args),
     )
-
-
-def _tokenize_plaintext_with_labels(
-    examples: dict,
-    tokenizer: PreTrainedTokenizer,
-    max_length: int
-) -> dict:
-    """
-    Tokenize plaintext examples and add labels for causal LM loss.
-
-    Used for plaintext splits in mixed instruction/plaintext datasets, where the
-    DataCollatorForInstructionTuning expects all examples to have 'labels'.
-    For plaintext, labels = input_ids (loss on all tokens).
-
-    Args:
-        examples: Batch with 'text' field
-        tokenizer: Tokenizer to use
-        max_length: Maximum sequence length
-
-    Returns:
-        Dict with 'input_ids', 'attention_mask', and 'labels' fields
-    """
-    tokenized = tokenizer(
-        examples['text'], max_length=max_length, truncation=True
-    )
-    # For plaintext, labels = input_ids (standard causal LM loss on all tokens)
-    tokenized['labels'] = [ids.copy() for ids in tokenized['input_ids']]
-    return tokenized
-
-
-def _tokenize_instruction_examples(
-    examples: dict,
-    tokenizer: PreTrainedTokenizer,
-    max_length: int
-) -> dict:
-    """
-    Tokenize instruction examples with label masking.
-
-    For each example, tokenizes prompt and response separately, then concatenates.
-    Creates labels where prompt tokens are masked (-100) and only response tokens
-    contribute to the loss.
-
-    Also handles mixed datasets where some examples have prompt/response (instruction)
-    and others have only text (plaintext). Plaintext examples get labels = input_ids
-    (standard causal LM loss on all tokens).
-
-    Args:
-        examples: Batch with 'prompt' and 'response' fields, optionally 'text'
-        tokenizer: Tokenizer to use
-        max_length: Maximum sequence length (prompt + response combined)
-
-    Returns:
-        Dict with 'input_ids', 'attention_mask', and 'labels' fields
-    """
-    all_input_ids = []
-    all_attention_masks = []
-    all_labels = []
-
-    # Get text column if it exists (for mixed datasets)
-    texts = examples.get('text', [None] * len(examples['prompt']))
-
-    for prompt, response, text in zip(examples['prompt'], examples['response'], texts):
-        # Check if this is an instruction example or plaintext
-        is_instruction = prompt is not None and response is not None
-
-        if is_instruction:
-            # Instruction example: tokenize prompt and response separately
-            prompt_tokens = tokenizer(
-                prompt,
-                add_special_tokens=True,
-                truncation=False
-            )
-
-            response_tokens = tokenizer(
-                response,
-                add_special_tokens=False,
-                truncation=False
-            )
-
-            # Append EOS so the model learns to terminate responses
-            response_ids = response_tokens['input_ids'] + [tokenizer.eos_token_id]
-            response_mask = response_tokens['attention_mask'] + [1]
-
-            # Concatenate
-            # TODO: fix linting issue here
-            input_ids = prompt_tokens['input_ids'] + response_ids
-            attention_mask = prompt_tokens['attention_mask'] + response_mask
-
-            # Create labels: -100 for prompt (masked), actual tokens for response
-            prompt_length = len(prompt_tokens['input_ids'])
-            labels = [-100] * prompt_length + response_ids
-        else:
-            # Plaintext example: standard tokenization, labels = input_ids
-            if text is None:
-                raise ValueError(
-                    "Example has neither valid prompt/response nor text. "
-                    "Mixed datasets must have 'text' for plaintext examples."
-                )
-
-            tokens = tokenizer(
-                text,
-                add_special_tokens=True,
-                truncation=False
-            )
-
-            input_ids = tokens['input_ids']
-            attention_mask = tokens['attention_mask']
-            # Standard causal LM: predict all tokens
-            labels = list(input_ids)
-
-        # Truncate if needed
-        if len(input_ids) > max_length:
-            input_ids = input_ids[:max_length]
-            attention_mask = attention_mask[:max_length]
-            labels = labels[:max_length]
-
-        all_input_ids.append(input_ids)
-        all_attention_masks.append(attention_mask)
-        all_labels.append(labels)
-
-    return {
-        'input_ids': all_input_ids,
-        'attention_mask': all_attention_masks,
-        'labels': all_labels
-    }
-
-
-# Plan / per-source tokenization for multinomial mixes.
-# The training-time multinomial pipeline upsamples by repeating row indices
-# rather than duplicating tokenized rows. The pieces below implement that:
-#
-#   <cache_dir>/<source_id>/untokenized/                      (text, mix-agnostic)
-#   <cache_dir>/<source_id>/tokenized_<tok>_ml<L>_{labels,nolabels}/  (mix-agnostic)
-#   <mix_dir>/train_plan.npz                                  (shuffled global indices)
-#   <mix_dir>/dev/                                            (per-source tokenized dev)
-#
-# The training Dataset is built as
-# `concatenate_datasets(per_source_tokenized).select(global_indices)`,
-# which produces an Arrow indices-mapped view; no rows are duplicated.
-
-def _tokenized_source_dirname(
-    tokenizer_id: str,
-    max_length: int,
-    add_labels: bool,
-    variant_suffix: str = "",
-) -> str:
-    """
-    Build the per-source tokenized cache directory name.
-
-    The optional ``variant_suffix`` carries the untokenized variant (e.g.
-    ``_sub_<hash>`` for a substituted source) so a substituted source tokenizes
-    into a distinct cache rather than colliding with the raw one. An empty
-    suffix reproduces the original ``tokenized_<id>_ml<L>_<labels>`` name, so
-    pre-existing raw caches stay valid.
-    """
-    label_suffix = "labels" if add_labels else "nolabels"
-    return f"tokenized{variant_suffix}_{tokenizer_id}_ml{max_length}_{label_suffix}"
-
-
-def _dev_splits_dirname(
-    tokenizer_id: str,
-    max_length: int,
-    add_labels: bool,
-) -> str:
-    """
-    Build the mix-level tokenized dev-splits cache directory name.
-
-    The dev splits hold token ids, so the cache must be keyed by the same
-    parameters as the per-source tokenized caches. The mix slug that names the
-    parent directory deliberately excludes the tokenizer (sources and plans are
-    shared across tokenizers), so without this suffix a dev cache written by one
-    model's tokenizer would be silently reused by a model with a different
-    tokenizer.
-    """
-    label_suffix = "labels" if add_labels else "nolabels"
-    return f"dev_{tokenizer_id}_ml{max_length}_{label_suffix}"
-
-
-def _source_has_instruction_columns(untokenized_path: str) -> bool:
-    """Return True if the source's untokenized 'train' split has prompt/response columns."""
-    data = load_from_disk(untokenized_path)
-    if isinstance(data, DatasetDict):
-        split = data['train'] if 'train' in data else data[list(data.keys())[0]]
-    else:
-        split = data
-    cols = split.column_names
-    return 'prompt' in cols and 'response' in cols
 
 
 class TokenizedSourceArtifact(DatasetArtifact):
@@ -339,7 +159,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
         # tokenizes into its own cache rather than colliding with the raw one.
         untokenized_name = os.path.basename(self.untokenized_path)
         variant_suffix = untokenized_name[len("untokenized"):]
-        dirname = _tokenized_source_dirname(
+        dirname = tokenized_source_dirname(
             self.tokenizer_id, self.max_length, self.add_labels, variant_suffix
         )
         return os.path.join(self.root, dirname)
@@ -383,7 +203,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
         if has_instruction:
             cols_to_remove = ['prompt', 'response'] + (['text'] if has_text else [])
             tokenized = data.map(
-                lambda examples: _tokenize_instruction_examples(
+                lambda examples: tokenize_instruction_examples(
                     examples, self.tokenizer, self.max_length
                 ),
                 batched=True,
@@ -392,7 +212,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
         elif has_text:
             if self.add_labels:
                 tokenized = data.map(
-                    lambda examples: _tokenize_plaintext_with_labels(
+                    lambda examples: tokenize_plaintext_with_labels(
                         examples, self.tokenizer, self.max_length
                     ),
                     batched=True,
@@ -561,7 +381,7 @@ class DevSplitsArtifact(DatasetArtifact):
     def path(self) -> str:
         return os.path.join(
             self.root,
-            _dev_splits_dirname(self.tokenizer_id, self.max_length, self.add_labels),
+            dev_splits_dirname(self.tokenizer_id, self.max_length, self.add_labels),
         )
 
     def config(self) -> dict:
@@ -745,7 +565,7 @@ class TokenizedMultinomialMix:
             source_ids.append(child_id)
             untokenized_paths.append(path)
 
-        add_labels = any(_source_has_instruction_columns(p) for p in untokenized_paths)
+        add_labels = any(source_has_instruction_columns(p) for p in untokenized_paths)
         if add_labels:
             print(
                 "Mix contains instruction data; tokenizing all sources with labels.",
@@ -983,7 +803,7 @@ class TokenizedDatasetArtifact(DatasetArtifact):
                 if split_has_text:
                     columns_to_remove.append('text')
                 tokenized_splits[split_name] = split_data.map(
-                    lambda examples: _tokenize_instruction_examples(
+                    lambda examples: tokenize_instruction_examples(
                         examples, self.tokenizer, self.max_length
                     ),
                     batched=True,
@@ -992,7 +812,7 @@ class TokenizedDatasetArtifact(DatasetArtifact):
             elif split_has_text:
                 if has_instruction_data:
                     tokenized_splits[split_name] = split_data.map(
-                        lambda examples: _tokenize_plaintext_with_labels(
+                        lambda examples: tokenize_plaintext_with_labels(
                             examples, self.tokenizer, self.max_length
                         ),
                         batched=True,
@@ -1141,7 +961,7 @@ def load_external_eval_set(
     if is_instruction:
         # Instruction format: use label masking (loss only on response)
         dataset = dataset.map(
-            lambda examples: _tokenize_instruction_examples(examples, tokenizer, max_length),
+            lambda examples: tokenize_instruction_examples(examples, tokenizer, max_length),
             batched=True,
             remove_columns=['prompt', 'response'],
             desc=f"Tokenizing external eval set '{name}'"
@@ -1149,7 +969,7 @@ def load_external_eval_set(
     else:
         # Plain text format: standard tokenization
         if add_labels:
-            tokenize_fn = lambda examples: _tokenize_plaintext_with_labels(
+            tokenize_fn = lambda examples: tokenize_plaintext_with_labels(
                 examples, tokenizer, max_length
             )
         else:

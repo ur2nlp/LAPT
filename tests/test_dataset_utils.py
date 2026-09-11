@@ -271,7 +271,7 @@ class TestExternalEvalSetLoader:
 
 class TestTokenizeInstructionExamples:
     """
-    Tests for _tokenize_instruction_examples function.
+    Tests for tokenize_instruction_examples function.
 
     This function tokenizes instruction-tuning data with label masking:
     - Prompt tokens get label=-100 (ignored in loss)
@@ -294,14 +294,14 @@ class TestTokenizeInstructionExamples:
         3. Response tokens have actual token IDs in labels
         4. input_ids and labels have same length
         """
-        from lapt.dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import tokenize_instruction_examples
 
         examples = {
             'prompt': ['Translate to Gothic: hello\nResponse:'],
             'response': [' world']
         }
 
-        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+        result = tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
 
         # Check output structure
         assert 'input_ids' in result
@@ -333,7 +333,7 @@ class TestTokenizeInstructionExamples:
 
         Strategy: Tokenize prompt alone, count tokens, verify that many are masked.
         """
-        from lapt.dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import tokenize_instruction_examples
 
         prompt = "This is a test prompt with several words\nResponse:"
         response = " Yes"
@@ -343,7 +343,7 @@ class TestTokenizeInstructionExamples:
             'response': [response]
         }
 
-        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+        result = tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
         labels = result['labels'][0]
 
         # Tokenize prompt separately to count its tokens
@@ -360,7 +360,7 @@ class TestTokenizeInstructionExamples:
 
         Verifies each example is tokenized independently.
         """
-        from lapt.dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import tokenize_instruction_examples
 
         examples = {
             'prompt': [
@@ -373,7 +373,7 @@ class TestTokenizeInstructionExamples:
             ]
         }
 
-        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+        result = tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
 
         # Should have 2 examples
         assert len(result['input_ids']) == 2
@@ -392,7 +392,7 @@ class TestTokenizeInstructionExamples:
 
         Strategy: Use very short max_length, verify output is truncated.
         """
-        from lapt.dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import tokenize_instruction_examples
 
         # Long prompt and response
         examples = {
@@ -401,7 +401,7 @@ class TestTokenizeInstructionExamples:
         }
 
         max_length = 50
-        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=max_length)
+        result = tokenize_instruction_examples(examples, base_tokenizer, max_length=max_length)
 
         # Should be truncated to max_length
         assert len(result['input_ids'][0]) <= max_length
@@ -417,14 +417,14 @@ class TestTokenizeInstructionExamples:
         immediately rather than continuing the prompt. So every label is -100
         except a final EOS.
         """
-        from lapt.dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import tokenize_instruction_examples
 
         examples = {
             'prompt': ['Prompt text\nResponse:'],
             'response': ['']
         }
 
-        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+        result = tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
 
         labels = result['labels'][0]
 
@@ -440,14 +440,14 @@ class TestTokenizeInstructionExamples:
         Our JSONL format uses ' response' (with leading space) to ensure
         proper tokenization as a continuation.
         """
-        from lapt.dataset_utils import _tokenize_instruction_examples
+        from lapt.dataset_utils import tokenize_instruction_examples
 
         examples = {
             'prompt': ['Test\nResponse:'],
             'response': [' answer']  # Note leading space
         }
 
-        result = _tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
+        result = tokenize_instruction_examples(examples, base_tokenizer, max_length=512)
 
         # Should tokenize without errors
         assert len(result['input_ids'][0]) > 0
