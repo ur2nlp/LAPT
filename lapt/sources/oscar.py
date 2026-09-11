@@ -4,12 +4,13 @@ import sys
 
 from datasets import DatasetDict, load_dataset
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.factory import field
 from lapt.sources.text_processing import docs_to_lines
+from lapt_core.dataset_artifacts import DatasetArtifact
 
 
-class OscarDataset(SourceDataset):
+class OscarDataset(DatasetArtifact):
     """A corpus drawn from one language of `oscar-corpus/OSCAR-2201`.
 
     Requires a HuggingFace token, since OSCAR is a gated dataset.

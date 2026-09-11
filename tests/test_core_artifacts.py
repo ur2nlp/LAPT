@@ -192,10 +192,18 @@ class TestCachedArtifactResolve:
         assert rebuilt.resolve(fresh=True) == "v1"
         assert os.path.exists(rebuilt.config_path)
 
-    def test_missing_dependency_is_reported(self, tmp_path):
+    def test_depends_on_does_not_require_deps_to_be_passed(self, tmp_path):
+        """`depends_on` declares topology, not required arguments.
+
+        Every stage in practice takes its inputs through its constructor -- a
+        tokenizer object or a resolved path is not itself an artifact -- and
+        declares `depends_on` only so `ArtifactGraph` can derive what a change
+        invalidates. Demanding deps in order to resolve would make the two
+        meanings mutually exclusive, and the topological one is the one with
+        users.
+        """
         derived = DerivedArtifact(str(tmp_path))
-        with pytest.raises(KeyError, match="recording"):
-            derived.resolve()
+        assert derived.resolve() is not None
 
     def test_clear_removes_the_cache_directory(self, tmp_path):
         artifact = RecordingArtifact(str(tmp_path))

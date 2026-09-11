@@ -28,6 +28,7 @@ from lapt.tokenizer_utils import (
     prepare_focus_training_data,
     resolve_cached_embedding_paths,
 )
+from lapt_core.artifacts import CachedArtifact
 
 
 def is_local_model_path(hf_model: str) -> bool:
@@ -355,3 +356,51 @@ def _initialize_standard_model(args: DictConfig):
     tokenized_path = get_tokenized_path(args)
 
     return model, tokenizer, tokenized_path
+
+
+class ModelOutput(CachedArtifact):
+    """The training output directory, as a graph node for invalidation only.
+
+    Deliberately not a real artifact. Nothing here is ever loaded instead of
+    being trained, so there is no cache-or-build decision to make, and
+    `resolve()`'s binary hit/miss has no room for training's third state --
+    resuming mid-run from a checkpoint. `build`, `read` and `write` therefore
+    refuse rather than pretend; the collision check that *does* guard this
+    directory is `ModelConfig.check_cached`, which is a different mechanism.
+
+    What this class is for is `ArtifactGraph`: invalidation needs only `name`,
+    `depends_on` and `clear()`, so registering the model lets the fresh_*
+    cascade derive "and everything downstream of it" instead of restating it
+    in every branch.
+    """
+
+    name = "model"
+    depends_on = ("tokenized",)
+
+    def __init__(self, output_dir: str):
+        """Initialize the node.
+
+        Args:
+            output_dir: The run's checkpoint directory, which `clear()` removes.
+        """
+        super().__init__(os.path.dirname(output_dir) or ".")
+        self._output_dir = output_dir
+
+    @property
+    def path(self) -> str:
+        return self._output_dir
+
+    def config(self) -> dict:
+        raise NotImplementedError(
+            "Model outputs are tracked by ModelConfig.check_cached, not by "
+            "CachedArtifact. This node exists only for graph invalidation."
+        )
+
+    def build(self, deps):
+        raise NotImplementedError("Training is driven by Trainer, not by resolve().")
+
+    def write(self, value, path: str) -> None:
+        raise NotImplementedError("Trainer writes its own checkpoints.")
+
+    def read(self, path: str):
+        raise NotImplementedError("A trained model is never loaded in place of training.")

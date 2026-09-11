@@ -1,4 +1,4 @@
-"""Tests for `PlaintextDataset` and the pre-refactor cache guard on `SourceDataset`."""
+"""Tests for `PlaintextDataset`."""
 
 import os
 
@@ -6,7 +6,6 @@ import pytest
 import yaml
 from datasets import load_from_disk
 
-from lapt.sources.base import LEGACY_CONFIG_FILENAME
 from lapt.sources.plaintext import PlaintextDataset
 from lapt_core.artifacts import ConfigMismatchError
 
@@ -77,31 +76,3 @@ class TestCaching:
 
         with open(source.config_path) as record:
             assert yaml.safe_load(record) == {'type': 'plaintext', 'path': corpus}
-
-
-class TestPreRefactorCacheGuard:
-    def test_legacy_record_is_refused_rather_than_accepted(self, tmp_path, corpus):
-        cache_dir = str(tmp_path / "cache")
-        source = PlaintextDataset(cache_dir, corpus)
-        source.resolve()
-
-        # simulate a cache written before sources became artifacts
-        os.rename(
-            source.config_path,
-            os.path.join(source.path, LEGACY_CONFIG_FILENAME),
-        )
-
-        with pytest.raises(ConfigMismatchError, match="PRE-REFACTOR SOURCE CACHE"):
-            PlaintextDataset(cache_dir, corpus).resolve()
-
-    def test_legacy_record_alongside_a_current_one_is_ignored(self, tmp_path, corpus):
-        """A leftover legacy file must not shadow a valid current record."""
-        cache_dir = str(tmp_path / "cache")
-        source = PlaintextDataset(cache_dir, corpus)
-        source.resolve()
-
-        legacy = os.path.join(source.path, LEGACY_CONFIG_FILENAME)
-        with open(legacy, 'w') as handle:
-            yaml.dump({'type': 'plaintext', 'path': '/stale'}, handle)
-
-        assert PlaintextDataset(cache_dir, corpus).validate() is True

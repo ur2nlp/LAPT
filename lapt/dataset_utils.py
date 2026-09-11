@@ -21,21 +21,18 @@ from lapt.artifact_configs import (
     multinomial_mix_slug,
     resolve_dev_size,
 )
-from lapt.sources import (
-    ConcatDataset,
-    HuggingFaceDataset,
-    InstructionHFDataset,
-    InstructionJsonlDataset,
-    MultinomialDataset,
-    OscarDataset,
-    PlaintextDataset,
-)
-from lapt.sources.base import SourceDataset
 from lapt.sources.concat import source_id
-from lapt.sources.factory import build_source
+from lapt.sources.factory import make_source
 from lapt.sources.sampling import compute_sampling_probs
 from lapt.sources.text_processing import (
     read_instruction_jsonl,
+)
+from lapt.tokenization import (
+    dev_splits_dirname,
+    source_has_instruction_columns,
+    tokenize_instruction_examples,
+    tokenize_plaintext_with_labels,
+    tokenized_source_dirname,
 )
 from lapt_core.artifacts import ArtifactConfig, CachedArtifact
 from lapt_core.dataset_artifacts import DatasetArtifact
@@ -50,10 +47,10 @@ def load_untokenized_dataset(
     """
     Load untokenized dataset based on configuration.
 
-    Thin path-returning wrapper over `build_source`, which maps the config's
+    Thin path-returning wrapper over `make_source`, which maps the config's
     ``type`` to a source class through the registry and applies any
     ``substitutions`` the entry carries. Kept so callers that exchange paths
-    keep working; new code should use `build_source` and hold the artifact.
+    keep working; new code should use `make_source` and hold the artifact.
 
     Args:
         dataset_config: Dataset configuration object with type and source info
@@ -70,12 +67,12 @@ def load_untokenized_dataset(
     cache-validation record. Adding a dataset type means adding a class there
     and registering it; there is no separate list to keep in step.
     """
-    source = build_source(cache_dir, dataset_config, seed, dev_size)
+    source = make_source(cache_dir, dataset_config, seed, dev_size)
     source.resolve()
     return source.path
 
 
-def build_untokenized_source(args: DictConfig) -> SourceDataset:
+def build_untokenized_source(args: DictConfig) -> DatasetArtifact:
     """Construct the untokenized corpus source a full Hydra config describes.
 
     The single entry point from the training pipeline into `lapt.sources`. The
@@ -91,447 +88,12 @@ def build_untokenized_source(args: DictConfig) -> SourceDataset:
         parent level; with substitutions configured it is the `_sub_{digest}`
         sibling of whatever the underlying type produced.
     """
-    return build_source(
+    return make_source(
         args.dataset.cache_dir,
         args.dataset,
         args.seed,
         resolve_dev_size(args),
     )
-
-
-def _load_oscar_dataset(cache_dir: str, language_code: str) -> str:
-    """
-    Load or download OSCAR dataset for a specific language.
-
-    Thin path-returning wrapper over `OscarDataset`; see `_load_plaintext_dataset`.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        language_code: Two-letter language code for OSCAR corpus
-
-    Returns:
-        Path to the untokenized dataset
-    """
-    source = OscarDataset(cache_dir, language_code)
-    source.resolve()
-    return source.path
-
-
-def _load_huggingface_dataset(
-    cache_dir: str,
-    name: str,
-    config: str = None,
-    split: str = 'train',
-    text_column: str = 'text',
-    max_samples: int = None,
-    min_words_per_line: int = None,
-    oversampling_factor: int = 3,
-    split_into_lines: bool = True,
-    seed: int = 1,
-) -> str:
-    """
-    Load a generic HuggingFace dataset.
-
-    Thin path-returning wrapper over `HuggingFaceDataset`; see
-    `_load_plaintext_dataset`.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        name: HuggingFace dataset name (e.g., 'wikitext', 'c4')
-        config: Dataset configuration/subset (e.g., 'wikitext-103-v1'), optional
-        split: Which split to load (default: 'train')
-        text_column: Name of the column containing text (default: 'text')
-        max_samples: Maximum number of examples to load, uses streaming if specified
-        min_words_per_line: Minimum number of space-separated words per example
-        oversampling_factor: Download this many times more documents than estimated
-            needed, to maintain document diversity (default: 3)
-        split_into_lines: Split each document into one example per line (default: True)
-        seed: Seed for the subsample taken when max_samples is set
-
-    Returns:
-        Path to the untokenized dataset
-    """
-    source = HuggingFaceDataset(
-        cache_dir,
-        name,
-        config=config,
-        split=split,
-        text_column=text_column,
-        max_samples=max_samples,
-        min_words_per_line=min_words_per_line,
-        oversampling_factor=oversampling_factor,
-        split_into_lines=split_into_lines,
-        seed=seed,
-    )
-    source.resolve()
-    return source.path
-
-
-def _load_plaintext_dataset(cache_dir: str, file_path: str) -> str:
-    """
-    Load plaintext file(s) and convert to dataset format.
-
-    Thin path-returning wrapper over `PlaintextDataset`, which owns the cache
-    path, the config record, and the validate-or-build decision. Kept so the
-    dispatcher and the composite loaders can keep exchanging paths while the
-    remaining source types are converted.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        file_path: Path to plaintext file (one line per training example)
-
-    Returns:
-        Path to the untokenized dataset
-    """
-    source = PlaintextDataset(cache_dir, file_path)
-    source.resolve()
-    return source.path
-
-
-def _load_plaintext_dir_dataset(
-    cache_dir: str,
-    directory: str,
-    pattern: str = '*.txt',
-    seed: int = 1,
-) -> str:
-    """
-    Load all plaintext files from a directory and concatenate them.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        directory: Directory containing text files
-        pattern: Glob pattern for matching files (e.g., "*.txt", "*.on.txt")
-
-    Returns:
-        Path to the untokenized concatenated dataset
-    """
-    if not os.path.exists(directory):
-        raise FileNotFoundError(f"Directory not found: {directory}")
-    if not os.path.isdir(directory):
-        raise ValueError(f"Path is not a directory: {directory}")
-
-    # Find all matching files
-    file_paths = sorted(glob.glob(os.path.join(directory, pattern)))
-
-    if not file_paths:
-        raise ValueError(f"No files found matching pattern '{pattern}' in {directory}")
-
-    print(f"Found {len(file_paths)} files matching '{pattern}' in {directory}", file=sys.stderr)
-
-    # Create sources list for concat (reuse plaintext loader for each file)
-    sources = [
-        {'type': 'plaintext', 'path': path}
-        for path in file_paths
-    ]
-
-    # Reuse concat implementation
-    return _load_concat_dataset(cache_dir, sources, seed=seed)
-
-
-def _load_instruction_jsonl_dataset(cache_dir: str, file_path: str) -> str:
-    """
-    Load instruction-tuning data from JSONL file(s).
-
-    Thin path-returning wrapper over `InstructionJsonlDataset`; see
-    `_load_plaintext_dataset`.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        file_path: Path to JSONL file
-
-    Returns:
-        Path to the untokenized dataset (with 'prompt' and 'response' columns)
-    """
-    source = InstructionJsonlDataset(cache_dir, file_path)
-    source.resolve()
-    return source.path
-
-
-def _load_instruction_hf_dataset(
-    cache_dir: str,
-    name: str,
-    config: str | None = None,
-    split: str = 'train',
-    messages_column: str = 'messages',
-    prompt_template: str = '{user} Response:',
-    response_template: str = ' {assistant}',
-    max_samples: int | None = None,
-    seed: int = 1,
-) -> str:
-    """
-    Load an instruction-tuning dataset from HuggingFace.
-
-    Thin path-returning wrapper over `InstructionHFDataset`; see
-    `_load_plaintext_dataset`.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        name: HuggingFace dataset name (e.g., 'HuggingFaceH4/no_robots')
-        config: Dataset configuration/subset, optional
-        split: Which split to load (default: 'train')
-        messages_column: Column name holding the list of {role, content} dicts
-        prompt_template: Format string with a {user} placeholder
-        response_template: Format string with an {assistant} placeholder
-        max_samples: Optional cap on number of examples (random subsample)
-        seed: Seed for that subsample
-
-    Returns:
-        Path to the untokenized dataset (with 'prompt' and 'response' columns)
-    """
-    source = InstructionHFDataset(
-        cache_dir,
-        name,
-        config=config,
-        split=split,
-        messages_column=messages_column,
-        prompt_template=prompt_template,
-        response_template=response_template,
-        max_samples=max_samples,
-        seed=seed,
-    )
-    source.resolve()
-    return source.path
-
-
-def _load_concat_dataset(
-    cache_dir: str,
-    sources: list,
-    parent_id: str = None,
-    seed: int = 1,
-) -> str:
-    """
-    Concatenate multiple dataset sources into a single dataset.
-
-    Thin path-returning wrapper over `ConcatDataset`; see `_load_plaintext_dataset`.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations (may include 'id' field for naming)
-        parent_id: Optional id from parent concat config (used for fallback naming)
-        seed: Global random seed, passed to children that subsample
-
-    Returns:
-        Path to the untokenized concatenated dataset
-    """
-    source = ConcatDataset(cache_dir, sources, parent_id=parent_id, seed=seed)
-    source.resolve()
-    return source.path
-
-
-def _load_multinomial_dataset(
-    cache_dir: str,
-    sources: list,
-    alpha: float,
-    total_samples: int,
-    dev_size: float = None,
-    seed: int = 1,
-) -> str:
-    """
-    Sample from multiple dataset sources using temperature-scaled multinomial sampling.
-
-    Thin path-returning wrapper over `MultinomialDataset`; see `_load_plaintext_dataset`.
-
-    Args:
-        cache_dir: Base directory for caching dataset artifacts
-        sources: List of dataset source configurations
-        alpha: Temperature parameter for reweighting (< 1 upsamples smaller datasets)
-        total_samples: Total number of training examples to sample
-        dev_size: Global default fraction of each source to use for dev set, or -1 to skip
-        seed: Global random seed, which selects the sampled examples
-
-    Returns:
-        Path to the untokenized sampled dataset (DatasetDict with train and per-source dev splits)
-    """
-    source = MultinomialDataset(cache_dir, sources, alpha, total_samples, dev_size, seed=seed)
-    source.resolve()
-    return source.path
-
-
-def _tokenize_plaintext_with_labels(
-    examples: dict,
-    tokenizer: PreTrainedTokenizer,
-    max_length: int
-) -> dict:
-    """
-    Tokenize plaintext examples and add labels for causal LM loss.
-
-    Used for plaintext splits in mixed instruction/plaintext datasets, where the
-    DataCollatorForInstructionTuning expects all examples to have 'labels'.
-    For plaintext, labels = input_ids (loss on all tokens).
-
-    Args:
-        examples: Batch with 'text' field
-        tokenizer: Tokenizer to use
-        max_length: Maximum sequence length
-
-    Returns:
-        Dict with 'input_ids', 'attention_mask', and 'labels' fields
-    """
-    tokenized = tokenizer(
-        examples['text'], max_length=max_length, truncation=True
-    )
-    # For plaintext, labels = input_ids (standard causal LM loss on all tokens)
-    tokenized['labels'] = [ids.copy() for ids in tokenized['input_ids']]
-    return tokenized
-
-
-def _tokenize_instruction_examples(
-    examples: dict,
-    tokenizer: PreTrainedTokenizer,
-    max_length: int
-) -> dict:
-    """
-    Tokenize instruction examples with label masking.
-
-    For each example, tokenizes prompt and response separately, then concatenates.
-    Creates labels where prompt tokens are masked (-100) and only response tokens
-    contribute to the loss.
-
-    Also handles mixed datasets where some examples have prompt/response (instruction)
-    and others have only text (plaintext). Plaintext examples get labels = input_ids
-    (standard causal LM loss on all tokens).
-
-    Args:
-        examples: Batch with 'prompt' and 'response' fields, optionally 'text'
-        tokenizer: Tokenizer to use
-        max_length: Maximum sequence length (prompt + response combined)
-
-    Returns:
-        Dict with 'input_ids', 'attention_mask', and 'labels' fields
-    """
-    all_input_ids = []
-    all_attention_masks = []
-    all_labels = []
-
-    # Get text column if it exists (for mixed datasets)
-    texts = examples.get('text', [None] * len(examples['prompt']))
-
-    for prompt, response, text in zip(examples['prompt'], examples['response'], texts):
-        # Check if this is an instruction example or plaintext
-        is_instruction = prompt is not None and response is not None
-
-        if is_instruction:
-            # Instruction example: tokenize prompt and response separately
-            prompt_tokens = tokenizer(
-                prompt,
-                add_special_tokens=True,
-                truncation=False
-            )
-
-            response_tokens = tokenizer(
-                response,
-                add_special_tokens=False,
-                truncation=False
-            )
-
-            # Append EOS so the model learns to terminate responses
-            response_ids = response_tokens['input_ids'] + [tokenizer.eos_token_id]
-            response_mask = response_tokens['attention_mask'] + [1]
-
-            # Concatenate
-            # TODO: fix linting issue here
-            input_ids = prompt_tokens['input_ids'] + response_ids
-            attention_mask = prompt_tokens['attention_mask'] + response_mask
-
-            # Create labels: -100 for prompt (masked), actual tokens for response
-            prompt_length = len(prompt_tokens['input_ids'])
-            labels = [-100] * prompt_length + response_ids
-        else:
-            # Plaintext example: standard tokenization, labels = input_ids
-            if text is None:
-                raise ValueError(
-                    "Example has neither valid prompt/response nor text. "
-                    "Mixed datasets must have 'text' for plaintext examples."
-                )
-
-            tokens = tokenizer(
-                text,
-                add_special_tokens=True,
-                truncation=False
-            )
-
-            input_ids = tokens['input_ids']
-            attention_mask = tokens['attention_mask']
-            # Standard causal LM: predict all tokens
-            labels = list(input_ids)
-
-        # Truncate if needed
-        if len(input_ids) > max_length:
-            input_ids = input_ids[:max_length]
-            attention_mask = attention_mask[:max_length]
-            labels = labels[:max_length]
-
-        all_input_ids.append(input_ids)
-        all_attention_masks.append(attention_mask)
-        all_labels.append(labels)
-
-    return {
-        'input_ids': all_input_ids,
-        'attention_mask': all_attention_masks,
-        'labels': all_labels
-    }
-
-
-# Plan / per-source tokenization for multinomial mixes.
-# The training-time multinomial pipeline upsamples by repeating row indices
-# rather than duplicating tokenized rows. The pieces below implement that:
-#
-#   <cache_dir>/<source_id>/untokenized/                      (text, mix-agnostic)
-#   <cache_dir>/<source_id>/tokenized_<tok>_ml<L>_{labels,nolabels}/  (mix-agnostic)
-#   <mix_dir>/train_plan.npz                                  (shuffled global indices)
-#   <mix_dir>/dev/                                            (per-source tokenized dev)
-#
-# The training Dataset is built as
-# `concatenate_datasets(per_source_tokenized).select(global_indices)`,
-# which produces an Arrow indices-mapped view; no rows are duplicated.
-
-def _tokenized_source_dirname(
-    tokenizer_id: str,
-    max_length: int,
-    add_labels: bool,
-    variant_suffix: str = "",
-) -> str:
-    """
-    Build the per-source tokenized cache directory name.
-
-    The optional ``variant_suffix`` carries the untokenized variant (e.g.
-    ``_sub_<hash>`` for a substituted source) so a substituted source tokenizes
-    into a distinct cache rather than colliding with the raw one. An empty
-    suffix reproduces the original ``tokenized_<id>_ml<L>_<labels>`` name, so
-    pre-existing raw caches stay valid.
-    """
-    label_suffix = "labels" if add_labels else "nolabels"
-    return f"tokenized{variant_suffix}_{tokenizer_id}_ml{max_length}_{label_suffix}"
-
-
-def _dev_splits_dirname(
-    tokenizer_id: str,
-    max_length: int,
-    add_labels: bool,
-) -> str:
-    """
-    Build the mix-level tokenized dev-splits cache directory name.
-
-    The dev splits hold token ids, so the cache must be keyed by the same
-    parameters as the per-source tokenized caches. The mix slug that names the
-    parent directory deliberately excludes the tokenizer (sources and plans are
-    shared across tokenizers), so without this suffix a dev cache written by one
-    model's tokenizer would be silently reused by a model with a different
-    tokenizer.
-    """
-    label_suffix = "labels" if add_labels else "nolabels"
-    return f"dev_{tokenizer_id}_ml{max_length}_{label_suffix}"
-
-
-def _source_has_instruction_columns(untokenized_path: str) -> bool:
-    """Return True if the source's untokenized 'train' split has prompt/response columns."""
-    data = load_from_disk(untokenized_path)
-    if isinstance(data, DatasetDict):
-        split = data['train'] if 'train' in data else data[list(data.keys())[0]]
-    else:
-        split = data
-    cols = split.column_names
-    return 'prompt' in cols and 'response' in cols
 
 
 class TokenizedSourceArtifact(DatasetArtifact):
@@ -543,7 +105,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
     something this class infers.
 
     Constructed from the *exact* untokenized path a source artifact returned
-    (`SourceDataset.resolve()` / `.path`) -- never re-derived as
+    (`DatasetArtifact.resolve()` / `.path`) -- never re-derived as
     `{source_cache_dir}/untokenized`. A source declaring `substitutions`
     returns an `untokenized_sub_<hash>` variant; tokenizing a re-derived path
     instead would silently tokenize the raw, unsubstituted text. This was a
@@ -597,7 +159,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
         # tokenizes into its own cache rather than colliding with the raw one.
         untokenized_name = os.path.basename(self.untokenized_path)
         variant_suffix = untokenized_name[len("untokenized"):]
-        dirname = _tokenized_source_dirname(
+        dirname = tokenized_source_dirname(
             self.tokenizer_id, self.max_length, self.add_labels, variant_suffix
         )
         return os.path.join(self.root, dirname)
@@ -641,7 +203,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
         if has_instruction:
             cols_to_remove = ['prompt', 'response'] + (['text'] if has_text else [])
             tokenized = data.map(
-                lambda examples: _tokenize_instruction_examples(
+                lambda examples: tokenize_instruction_examples(
                     examples, self.tokenizer, self.max_length
                 ),
                 batched=True,
@@ -650,7 +212,7 @@ class TokenizedSourceArtifact(DatasetArtifact):
         elif has_text:
             if self.add_labels:
                 tokenized = data.map(
-                    lambda examples: _tokenize_plaintext_with_labels(
+                    lambda examples: tokenize_plaintext_with_labels(
                         examples, self.tokenizer, self.max_length
                     ),
                     batched=True,
@@ -819,7 +381,7 @@ class DevSplitsArtifact(DatasetArtifact):
     def path(self) -> str:
         return os.path.join(
             self.root,
-            _dev_splits_dirname(self.tokenizer_id, self.max_length, self.add_labels),
+            dev_splits_dirname(self.tokenizer_id, self.max_length, self.add_labels),
         )
 
     def config(self) -> dict:
@@ -912,7 +474,7 @@ class TokenizedMultinomialMix:
         tokenizer: PreTrainedTokenizer,
         tokenizer_id: str,
         max_length: int,
-        shuffle_seed: int = 1,
+        seed: int = 1,
     ):
         """Initialize the mix.
 
@@ -929,7 +491,8 @@ class TokenizedMultinomialMix:
             tokenizer_id: Stable identifier for the tokenizer (drives cache
                 directory naming).
             max_length: Truncation length.
-            shuffle_seed: Seed for shuffling the global training plan.
+            seed: Global random seed. Selects each source's train/dev
+                partition and the shuffle of the training plan.
 
         Raises:
             ValueError: On an empty source list, a non-positive `total_samples`
@@ -952,14 +515,21 @@ class TokenizedMultinomialMix:
         self.tokenizer = tokenizer
         self.tokenizer_id = tokenizer_id
         self.max_length = max_length
-        self.shuffle_seed = shuffle_seed
+        self.seed = seed
+        self.name = 'tokenized'
+        self.depends_on = ('untokenized', 'tokenizer')
         self._sources_info_cache: tuple[list[str], list[str], bool] | None = None
 
     def _mix_config(self) -> dict:
+        # `seed` belongs here because it selects the train/dev partition and
+        # the plan shuffle, so two seeds are two different mixes. `mix_slug`
+        # omits it from the digest at the default, which is what keeps every
+        # existing directory addressed -- all of them were built at seed 1.
         return {
             'alpha': self.alpha,
             'total_samples': self.total_samples,
             'dev_size': self.dev_size,
+            'seed': self.seed,
             'sources': [
                 OmegaConf.to_container(DictConfig(s), resolve=True) for s in self.sources
             ],
@@ -995,7 +565,7 @@ class TokenizedMultinomialMix:
             source_ids.append(child_id)
             untokenized_paths.append(path)
 
-        add_labels = any(_source_has_instruction_columns(p) for p in untokenized_paths)
+        add_labels = any(source_has_instruction_columns(p) for p in untokenized_paths)
         if add_labels:
             print(
                 "Mix contains instruction data; tokenizing all sources with labels.",
@@ -1004,6 +574,38 @@ class TokenizedMultinomialMix:
 
         self._sources_info_cache = (source_ids, untokenized_paths, add_labels)
         return self._sources_info_cache
+
+    def clear(self) -> None:
+        """Remove every cache this mix owns.
+
+        Not an inherited `CachedArtifact.clear()`: the mix writes through three
+        artifacts in two different places. The train plan and dev splits sit
+        under the mix directory, but the per-source tokenized caches sit beside
+        each *source*, outside it -- which is what lets them be shared across
+        mixes, and is why the pre-artifact cleanup, deleting one path under the
+        mix directory, never touched them.
+
+        Deliberately computes its targets by glob rather than by resolving the
+        sources. `_sources_info()` would resolve -- and therefore *build* --
+        every untokenized source just to learn which directory names to
+        delete, so a cleanup running against a cleared cache would re-download
+        the corpus in order to remove derived files. Source ids come from the
+        configuration alone, so globbing needs no I/O and additionally catches
+        variants left by other tokenizers, which is the right reading of a
+        `fresh_*` flag.
+        """
+        targets = [os.path.join(self.mix_dir, "train_plan")]
+        targets += sorted(glob.glob(os.path.join(self.mix_dir, "dev_*")))
+        for index, source_config in enumerate(self.sources):
+            child_id = source_id(source_config, fallback=f"source_{index}")
+            targets += sorted(
+                glob.glob(os.path.join(self.base_cache_dir, child_id, "tokenized_*"))
+            )
+
+        for target in targets:
+            if os.path.exists(target):
+                print(f"Clearing cached tokenized mix data at {target}", file=sys.stderr)
+                shutil.rmtree(target)
 
     def resolve(self) -> DatasetDict:
         """Resolve the three sub-artifacts and assemble the mix.
@@ -1051,7 +653,7 @@ class TokenizedMultinomialMix:
         train_pools = []
         dev_indices_per_source = []
         for size, src_dev in zip(source_sizes, source_dev_sizes):
-            train_idx, dev_idx = _partition_source_indices(size, src_dev, seed=1)
+            train_idx, dev_idx = _partition_source_indices(size, src_dev, seed=self.seed)
             train_pools.append(train_idx)
             dev_indices_per_source.append(dev_idx)
 
@@ -1079,7 +681,7 @@ class TokenizedMultinomialMix:
             source_ids=source_ids,
             source_sizes=source_sizes,
             samples_per_source=samples_per_source,
-            shuffle_seed=self.shuffle_seed,
+            shuffle_seed=self.seed,
             train_pools=train_pools,
         )
         global_indices = plan_artifact.resolve()
@@ -1120,6 +722,9 @@ class TokenizedDatasetArtifact(DatasetArtifact):
     `load_untokenized_dataset` directly on a `type: multinomial` config, but
     not the production path for it; see `TokenizedMultinomialMix`).
     """
+
+    name = "tokenized"
+    depends_on = ("untokenized", "tokenizer")
 
     def __init__(
         self,
@@ -1198,7 +803,7 @@ class TokenizedDatasetArtifact(DatasetArtifact):
                 if split_has_text:
                     columns_to_remove.append('text')
                 tokenized_splits[split_name] = split_data.map(
-                    lambda examples: _tokenize_instruction_examples(
+                    lambda examples: tokenize_instruction_examples(
                         examples, self.tokenizer, self.max_length
                     ),
                     batched=True,
@@ -1207,7 +812,7 @@ class TokenizedDatasetArtifact(DatasetArtifact):
             elif split_has_text:
                 if has_instruction_data:
                     tokenized_splits[split_name] = split_data.map(
-                        lambda examples: _tokenize_plaintext_with_labels(
+                        lambda examples: tokenize_plaintext_with_labels(
                             examples, self.tokenizer, self.max_length
                         ),
                         batched=True,
@@ -1356,7 +961,7 @@ def load_external_eval_set(
     if is_instruction:
         # Instruction format: use label masking (loss only on response)
         dataset = dataset.map(
-            lambda examples: _tokenize_instruction_examples(examples, tokenizer, max_length),
+            lambda examples: tokenize_instruction_examples(examples, tokenizer, max_length),
             batched=True,
             remove_columns=['prompt', 'response'],
             desc=f"Tokenizing external eval set '{name}'"
@@ -1364,7 +969,7 @@ def load_external_eval_set(
     else:
         # Plain text format: standard tokenization
         if add_labels:
-            tokenize_fn = lambda examples: _tokenize_plaintext_with_labels(
+            tokenize_fn = lambda examples: tokenize_plaintext_with_labels(
                 examples, tokenizer, max_length
             )
         else:
@@ -1530,22 +1135,3 @@ class DataCollatorForInstructionTuning:
         batch['labels'] = torch.tensor(padded_labels, dtype=torch.long)
 
         return batch
-
-
-def is_instruction_dataset(dataset) -> bool:
-    """
-    Check if a dataset is an instruction-tuning dataset (has pre-computed labels).
-
-    Args:
-        dataset: A Dataset or DatasetDict
-
-    Returns:
-        True if the dataset has 'labels' column, indicating instruction format
-    """
-    if hasattr(dataset, 'keys'):
-        # DatasetDict - check the first split
-        sample_split = list(dataset.keys())[0]
-        return 'labels' in dataset[sample_split].column_names
-    else:
-        # Single Dataset
-        return 'labels' in dataset.column_names
