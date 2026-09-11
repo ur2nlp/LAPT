@@ -9,10 +9,11 @@ A modular framework for continued pre-training of multilingual language models w
 
 ## Features
 
-- **Flexible dataset loading**: OSCAR corpus, local plaintext files, directory-based loading, concatenation, and temperature-scaled multinomial sampling
+- **Flexible dataset loading**: OSCAR corpus, local plaintext files, directory-based loading, concatenation, temperature-scaled multinomial sampling, and instruction-tuning data with prompt-token loss masking
 - **FOCUS integration**: Optional vocabulary specialization with new tokenizer training using SentencePiece
 - **Hydra configuration**: Composable YAML configs for easy experimentation
 - **Per-language evaluation**: Automatic per-language dev set tracking for multilingual training
+- **Tracked, resumable caches**: Every pipeline stage records the configuration that produced it and refuses to reuse a cache that does not match — see [Caching](#caching)
 
 ## Installation
 
@@ -72,15 +73,58 @@ Train on your own plaintext files:
 python -m lapt dataset.type=plaintext dataset.path=/path/to/data.txt
 ```
 
+## Caching
+
+Each expensive stage — the untokenized corpus, the tokenizer, the tokenized
+dataset — is an *artifact*: it owns its cache directory, records the
+configuration that produced it in a YAML file beside the data, and decides for
+itself whether to load or rebuild.
+
+Two consequences worth knowing before you run anything twice:
+
+- **Most config changes need no flags.** Cache paths encode the parameters that
+  distinguish one result from another, so changing the vocabulary size (say)
+  builds a new tokenizer in its own directory and leaves the old one and the
+  corpus untouched. Configurations coexist rather than overwrite.
+- **A changed parameter that *isn't* in the path is an error, not a silent
+  reuse.** You will be told what differs and pointed at the flag that rebuilds
+  that stage.
+
+Selective rebuilds, each clearing everything downstream of it:
+
+| flag | clears |
+|---|---|
+| `fresh_dataset=true` | the dataset cache tree outright, sources included — use when you do not trust what is on disk |
+| `fresh_mix=true` | a multinomial or concat mix, *keeping* the per-source caches it draws on |
+| `fresh_tokenizer=true` | the tokenizer, the tokenized data, and the model |
+| `fresh_model=true` | model checkpoints only |
+
 ## Project Structure
 
-- `lapt/` - Main source code (installable package)
+- `lapt/` - Framework source (installable package)
   - `__main__.py` - Training orchestration
-  - `dataset_utils.py` - Dataset loading and processing
+  - `sources/` - One module per dataset type, registered by its `type` field
+  - `dataset_utils.py` - Tokenized-dataset stages, eval sets, data collation
+  - `tokenization.py` - Stateless text-to-token helpers
+  - `artifact_configs.py` - Per-stage configuration records and cache paths
   - `model_utils.py` - Model and tokenizer initialization
   - `tokenizer_utils.py` - Tokenizer training and FOCUS operations
+  - `eval_utils.py` - Metrics, generation, and evaluation callbacks
+- `lapt_core/` - Domain-neutral caching layer, kept free of ML dependencies so
+  sibling projects can depend on it without inheriting this one's pins
+  - `artifacts.py` - `CachedArtifact`, config validation, `ArtifactGraph`
+  - `mixing.py` - Source sampling arithmetic and mix cache naming
+  - `composites.py` - Concatenation and multinomial mixing
 - `configs/` - Hydra configuration files
+- `tools/` - Analysis and plotting scripts
 - `tests/` - Unit tests
+
+### Adding a dataset type
+
+One new module in `lapt/sources/`: subclass `DatasetArtifact`, set `type_name`,
+implement `config()` (the parameters the cache is keyed on), `build()`, and
+`from_config()`, then call `SOURCE_TYPES.register(...)` and import it in
+`lapt/sources/__init__.py`. There is no dispatcher to edit.
 
 ## Citation
 
