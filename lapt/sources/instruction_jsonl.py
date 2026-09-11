@@ -4,12 +4,13 @@ import sys
 
 from datasets import Dataset, DatasetDict
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.factory import field
 from lapt.sources.text_processing import read_instruction_jsonl
+from lapt_core.dataset_artifacts import DatasetArtifact
 
 
-class InstructionJsonlDataset(SourceDataset):
+class InstructionJsonlDataset(DatasetArtifact):
     """An instruction corpus read from a JSONL file.
 
     Unlike the plaintext sources, which produce a single `text` column, this

@@ -153,6 +153,7 @@ class TokenizerArtifact(CachedArtifact):
     """
 
     name = "tokenizer"
+    depends_on = ("untokenized",)
     config_filename = "training_config.yaml"
 
     def __init__(

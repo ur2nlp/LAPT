@@ -31,7 +31,12 @@ import yaml
 # Put the repository root on sys.path so `lapt` imports without an
 # editable install, for running this script straight from a checkout.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from lapt.sources.base import LEGACY_CONFIG_FILENAME, SOURCE_TYPES
+from lapt.sources.base import SOURCE_TYPES
+
+# The record name sources used before they became artifacts. Defined here
+# rather than imported: this tool is the only remaining reader of it, since
+# the class that refused such caches has been removed.
+LEGACY_CONFIG_FILENAME = "source_config.yaml"
 from lapt_core.artifacts import CONFIG_FILENAME
 
 

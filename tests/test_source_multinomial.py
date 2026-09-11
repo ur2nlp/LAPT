@@ -55,6 +55,24 @@ class TestPathAddressing:
         root = str(tmp_path / "c")
         assert mix(root, corpora).mix_dir != mix(root, corpora, seed=2).mix_dir
 
+    def test_a_different_seed_gets_different_data_not_just_a_directory(
+        self, tmp_path, corpora
+    ):
+        """The companion the directory test needed.
+
+        `build` used to hardcode seed=1 for both the dev split and the train
+        shuffle while the slug and the config record carried the real seed. So
+        a non-default seed produced a byte-identical mix in a fresh directory,
+        with the record claiming otherwise -- and the directory test above
+        passed throughout, because it only ever checked the addressing half.
+        """
+        root = str(tmp_path / "c")
+        first = mix(root, corpora).resolve()
+        second = mix(root, corpora, seed=2).resolve()
+
+        assert first['train']['text'] != second['train']['text']
+        assert first['big']['text'] != second['big']['text']
+
     def test_two_mixes_share_their_source_caches(self, tmp_path, corpora):
         root = str(tmp_path / "c")
         first = mix(root, corpora)

@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 
 import hydra
@@ -23,10 +24,9 @@ from lapt.artifact_configs import (
 from lapt.custom_trainer import FlooredPerExampleLossTrainer
 from lapt.dataset_utils import (
     DataCollatorForInstructionTuning,
+    TokenizedDatasetArtifact,
+    TokenizedMultinomialMix,
     build_untokenized_source,
-    is_instruction_dataset,
-    load_tokenized_dataset,
-    load_tokenized_multinomial_dataset,
     prepare_eval_datasets,
 )
 from lapt.eval_utils import (
@@ -37,12 +37,16 @@ from lapt.eval_utils import (
     preprocess_logits_for_metrics,
 )
 from lapt.model_utils import (
+    ModelOutput,
     get_init_model_identifier,
     get_tokenized_path,
     initialize_model_and_tokenizer,
     is_local_model_path,
     set_random_seeds,
 )
+from lapt.tokenization import is_instruction_dataset
+from lapt.tokenizer_utils import TokenizerArtifact
+from lapt_core.artifacts import ArtifactGraph
 
 OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))
 
@@ -233,78 +237,154 @@ def _get_output_dir(args: DictConfig) -> str:
         return base_path
 
 
+def _build_pipeline_graph(args: DictConfig) -> ArtifactGraph:
+    """Register the four pipeline stages so invalidation can be derived.
+
+    Only `invalidate()` is used. `ArtifactGraph.get()` would resolve a stage's
+    topological parents on the way to it, which is not how this pipeline runs
+    -- each stage is resolved directly, with its inputs supplied as
+    constructor arguments.
+
+    The tokenized node is constructed without a tokenizer. It is only ever
+    asked to `clear()`, which derives its targets from ids and paths, never
+    from a loaded tokenizer.
+    """
+    nodes = [build_untokenized_source(args)]
+
+    tokenizer_config = TokenizerConfig.from_args(args)
+    if tokenizer_config is not None and not args.focus.tokenizer_path:
+        nodes.append(TokenizerArtifact(args.dataset.language, tokenizer_config))
+
+    tokenized_path = get_tokenized_path(args)
+    tokenizer_id = os.path.basename(tokenized_path).replace("tokenized_", "", 1)
+    if args.dataset.type == 'multinomial':
+        nodes.append(TokenizedMultinomialMix(
+            base_cache_dir=args.dataset.cache_dir,
+            sources=OmegaConf.to_container(args.dataset.sources, resolve=True),
+            alpha=args.dataset.get('alpha'),
+            total_samples=args.dataset.total_samples,
+            dev_size=resolve_dev_size(args),
+            tokenizer=None,
+            tokenizer_id=tokenizer_id,
+            max_length=args.training.max_length,
+            seed=args.seed,
+        ))
+    else:
+        nodes.append(TokenizedDatasetArtifact(
+            cache_dir=os.path.dirname(tokenized_path),
+            tokenized_dataset_config=TokenizedDatasetConfig.from_args(args),
+            untokenized_path='',
+            tokenizer=None,
+            max_length=args.training.max_length,
+            dev_size=resolve_dev_size(args),
+        ))
+
+    nodes.append(ModelOutput(_get_output_dir(args)))
+    return ArtifactGraph(*nodes)
+
+
 def _handle_cache_cleanup(args: DictConfig):
+    """Clear caches the `fresh_*` flags ask to rebuild.
+
+    What must go *with* each stage is derived from `depends_on` rather than
+    restated per branch, so adding a stage or changing the topology is one
+    edit rather than four.
+
+    Two flags, because two different intentions:
+
+    - `fresh_dataset` distrusts what is on disk. It removes the dataset cache
+      tree outright, including every acquired source, and is the only way to
+      recover from a corrupt download. Blunt on purpose.
+    - `fresh_mix` distrusts only what was *derived* from those sources. It
+      invalidates the top dataset node, so a mix is resampled while the
+      corpora it draws on survive -- the difference between re-running a
+      sample and re-streaming C4.
     """
-    Handle selective cache cleanup based on fresh_* flags.
-
-    Supports three levels of cleanup:
-    - fresh_model: Clear only model checkpoints
-    - fresh_tokenizer: Clear tokenizer, tokenized dataset, and model
-    - fresh_dataset: Clear everything (dataset, tokenizer, model)
-
-    Args:
-        args: Hydra configuration object
-    """
-    import shutil
-
     fresh_dataset = getattr(args, 'fresh_dataset', False)
+    fresh_mix = getattr(args, 'fresh_mix', False)
     fresh_tokenizer = getattr(args, 'fresh_tokenizer', False)
     fresh_model = getattr(args, 'fresh_model', False)
 
-    if not any([fresh_dataset, fresh_tokenizer, fresh_model]):
+    if not any([fresh_dataset, fresh_mix, fresh_tokenizer, fresh_model]):
         return
 
     print("=" * 60, file=sys.stderr)
     print("CACHE CLEANUP", file=sys.stderr)
     print("=" * 60, file=sys.stderr)
 
-    # Compute paths that might need cleaning
-    tokenizer_path = _get_tokenizer_path(args)
-    tokenized_path = get_tokenized_path(args)
-    output_dir = _get_output_dir(args)
+    graph = _build_pipeline_graph(args)
 
     if fresh_dataset:
-        # Clear everything
-        print("fresh_dataset=true: Clearing dataset cache, tokenizer, and model", file=sys.stderr)
+        # Invalidate before removing the tree, not after: clearing a
+        # downstream stage reads source ids and paths, and a nuked cache
+        # would otherwise be rebuilt just to work out what to delete.
+        print("fresh_dataset=true: clearing every derived stage, then the dataset cache",
+              file=sys.stderr)
+        print(f"  Invalidated: {', '.join(graph.invalidate('untokenized'))}", file=sys.stderr)
         if os.path.exists(args.dataset.cache_dir):
             print(f"  Removing {args.dataset.cache_dir}", file=sys.stderr)
             shutil.rmtree(args.dataset.cache_dir)
-        if tokenizer_path and os.path.exists(tokenizer_path):
-            # Remove entire tokenizer language directory (includes seed tokenizers and all variants)
-            tokenizer_lang_dir = os.path.dirname(tokenizer_path)
-            print(f"  Removing {tokenizer_lang_dir}", file=sys.stderr)
-            shutil.rmtree(tokenizer_lang_dir)
-        if os.path.exists(output_dir):
-            print(f"  Removing {output_dir}", file=sys.stderr)
-            shutil.rmtree(output_dir)
+
+    elif fresh_mix:
+        _require_composite_dataset(args)
+        print("fresh_mix=true: resampling the mix, leaving its sources in place",
+              file=sys.stderr)
+        print(f"  Invalidated: {', '.join(graph.invalidate('untokenized'))}", file=sys.stderr)
 
     elif fresh_tokenizer:
-        # Clear tokenizer and downstream artifacts
-        print("fresh_tokenizer=true: Clearing tokenizer, tokenized dataset, and model", file=sys.stderr)
-        if tokenizer_path and os.path.exists(tokenizer_path):
-            print(f"  Removing {tokenizer_path}", file=sys.stderr)
-            shutil.rmtree(tokenizer_path)
-
-        if os.path.exists(tokenized_path):
-            print(f"  Removing {tokenized_path}", file=sys.stderr)
-            shutil.rmtree(tokenized_path)
-        if os.path.exists(output_dir):
-            print(f"  Removing {output_dir}", file=sys.stderr)
-            shutil.rmtree(output_dir)
-
-        # Note: the FOCUS training_subset_*.jsonl file is now shared across
-        # FOCUS runs on the same dataset mix, so fresh_tokenizer does NOT
-        # delete it. Rebuilding the tokenizer from the same subset is fine;
-        # use fresh_dataset to regenerate the subset itself.
+        if 'tokenizer' not in graph:
+            raise ValueError(
+                "fresh_tokenizer=true, but this run trains no tokenizer: FOCUS is "
+                "disabled or focus.tokenizer_path points at a pre-built one. Use "
+                "fresh_model=true to retrain, or fresh_dataset=true to rebuild data."
+            )
+        print("fresh_tokenizer=true: clearing the tokenizer and everything downstream",
+              file=sys.stderr)
+        print(f"  Invalidated: {', '.join(graph.invalidate('tokenizer'))}", file=sys.stderr)
 
     elif fresh_model:
-        # Clear only model outputs
-        print("fresh_model=true: Clearing model checkpoints only", file=sys.stderr)
-        if os.path.exists(output_dir):
-            print(f"  Removing {output_dir}", file=sys.stderr)
-            shutil.rmtree(output_dir)
+        print("fresh_model=true: clearing model checkpoints only", file=sys.stderr)
+        print(f"  Invalidated: {', '.join(graph.invalidate('model'))}", file=sys.stderr)
 
     print("=" * 60, file=sys.stderr)
+
+
+def _require_composite_dataset(args: DictConfig):
+    """Refuse `fresh_mix` on a dataset that has no mix in it.
+
+    On a composite the top node is *derived* from cached children, so
+    invalidating it is cheap and leaves the acquisitions alone. On a leaf the
+    top node *is* the acquisition, so the same operation would silently
+    re-download everything -- the opposite of what the flag promises.
+
+    Raises:
+        ValueError: If the dataset type is not a composite.
+    """
+    dataset_type = getattr(args.dataset, 'type', None)
+    if dataset_type in ('multinomial', 'concat'):
+        return
+
+    raise ValueError(
+        f"\n{'=' * 70}\n"
+        f"fresh_mix DOES NOT APPLY TO dataset.type={dataset_type!r}\n"
+        f"{'=' * 70}\n"
+        f"The two flags differ in what they treat as expendable:\n\n"
+        f"  fresh_mix     Rebuilds what was DERIVED from your sources, and\n"
+        f"                keeps the sources themselves. For a mix, that means\n"
+        f"                resampling from per-source caches that stay on disk --\n"
+        f"                no re-downloading. Only meaningful for a composite\n"
+        f"                dataset ('multinomial' or 'concat'), because only\n"
+        f"                there is the top artifact derived from other caches.\n\n"
+        f"  fresh_dataset Removes the dataset cache tree ENTIRELY, including\n"
+        f"                every downloaded or read source. Use it when you do\n"
+        f"                not trust what is on disk. Expect a full re-acquire.\n\n"
+        f"dataset.type={dataset_type!r} has no mix: its top artifact IS the\n"
+        f"acquired corpus, so fresh_mix would delete exactly the data it is\n"
+        f"supposed to protect. Refusing rather than doing that silently.\n\n"
+        f"  - to rebuild derived stages only, pass fresh_tokenizer=true\n"
+        f"  - to re-acquire the corpus, pass fresh_dataset=true\n"
+        f"{'=' * 70}\n"
+    )
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="main")
@@ -332,54 +412,43 @@ def lapt(args: DictConfig):
     # Determine output directory for checkpoints
     output_dir = _get_output_dir(args)
 
+    # Refuse to train into a directory recording a different run. Not a
+    # cache check -- a trained model is never loaded in place of training --
+    # but a collision check; see ModelConfig.check_cached.
+    model_config = ModelConfig.from_args(args)
+    model_config.check_cached(os.path.join(output_dir, "training_config.yaml"))
+
     # Multinomial training mixes go through a plan-based path that tokenizes
     # each source's unique rows exactly once and represents the upsampled training
     # split as a shuffled index array into the concatenation of per-source
     # tokenized datasets. Other dataset types use the legacy single-artifact path.
     if args.dataset.type == 'multinomial':
         tokenizer_id = os.path.basename(tokenized_path).replace("tokenized_", "", 1)
-        dataset = load_tokenized_multinomial_dataset(
+        mix = TokenizedMultinomialMix(
+            base_cache_dir=args.dataset.cache_dir,
             sources=OmegaConf.to_container(args.dataset.sources, resolve=True),
             alpha=args.dataset.get('alpha'),
             total_samples=args.dataset.total_samples,
             dev_size=dev_size,
-            base_cache_dir=args.dataset.cache_dir,
             tokenizer=tokenizer,
             tokenizer_id=tokenizer_id,
             max_length=args.training.max_length,
+            seed=args.seed,
         )
+        dataset = mix.resolve()
     else:
-        # Build tokenized dataset config for tracking
-        tokenized_dataset_config = TokenizedDatasetConfig.from_args(args)
-        tokenized_config_path = os.path.join(tokenized_path, "config.yaml")
-
-        # Check if tokenized dataset cache exists
-        tokenized_cache_exists = os.path.exists(tokenized_path)
-
-        # Verify config matches if cache exists
-        if tokenized_cache_exists:
-            if os.path.exists(tokenized_config_path):
-                tokenized_dataset_config.check_cached(tokenized_config_path)
-            else:
-                print(
-                    f"Note: Using cached tokenized dataset at {tokenized_path}"
-                    f" without config tracking\n"
-                    f"      (artifact was created before config tracking was implemented)",
-                    file=sys.stderr
-                )
-
-        # Tokenize dataset with appropriate tokenizer
-        dataset = load_tokenized_dataset(
+        # resolve() validates a cached config (tolerating fields retired from
+        # a nested TokenizerConfig) and either loads the cached tokenized
+        # dataset or builds and saves a new one.
+        tokenized_dataset = TokenizedDatasetArtifact(
+            cache_dir=os.path.dirname(tokenized_path),
+            tokenized_dataset_config=TokenizedDatasetConfig.from_args(args),
             untokenized_path=untokenized_path,
-            tokenized_path=tokenized_path,
             tokenizer=tokenizer,
             max_length=args.training.max_length,
-            dev_size=dev_size
+            dev_size=dev_size,
         )
-
-        # Save config if we just created the tokenized dataset
-        if not tokenized_cache_exists:
-            tokenized_dataset_config.save(tokenized_config_path)
+        dataset = tokenized_dataset.resolve()
 
     # Prepare eval datasets (handles per-language dev splits and external eval sets)
     # Check both direct override and config group for external eval sets
@@ -524,7 +593,7 @@ def lapt(args: DictConfig):
 
     # Save the full training configuration for reproducibility
     model_config_path = os.path.join(output_dir, "training_config.yaml")
-    ModelConfig.from_args(args).save(model_config_path)
+    model_config.save(model_config_path)
 
     # start training (resume from checkpoint if specified)
     resume_checkpoint = args.get('resume_from_checkpoint', None)
