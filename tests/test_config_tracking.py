@@ -11,6 +11,7 @@ import tempfile
 import pytest
 from omegaconf import OmegaConf
 
+from lapt.__main__ import _build_pipeline_graph, _require_composite_dataset
 from lapt.artifact_configs import (
     DatasetConfig,
     ModelConfig,
@@ -875,3 +876,52 @@ class TestModelConfigCollisionCheck:
     def test_no_record_yet_is_accepted(self, tmp_path):
         args = self._args()
         assert ModelConfig.from_args(args).check_cached(str(tmp_path / 'absent.yaml'))
+
+
+class TestCacheCleanupCascade:
+    """The fresh_* flags derive their downstream sets from the graph."""
+
+    def _args(self, dataset_type='multinomial', **overrides):
+        sources = [{'id': 'got', 'type': 'plaintext', 'path': 'a'},
+                   {'id': 'eng', 'type': 'plaintext', 'path': 'b'}]
+        dataset = {'type': dataset_type, 'cache_dir': 'data/mix', 'language': 'got',
+                   'dev_size': 0.01}
+        if dataset_type == 'multinomial':
+            dataset.update({'alpha': 0.5, 'total_samples': 100, 'sources': sources})
+        elif dataset_type == 'concat':
+            dataset['sources'] = sources
+        else:
+            dataset['path'] = 'corpus.txt'
+        args = {'hf_model': 'facebook/xglm-564M', 'init_model_id': 'v74L', 'seed': 1,
+                'output_dir': 'models', 'model_name': None, 'experiment_id': 'v01',
+                'dataset': dataset, 'training': {'name': 'basic', 'max_length': 512},
+                'focus': {'enabled': False, 'tokenizer_path': None}}
+        args.update(overrides)
+        return OmegaConf.create(args)
+
+    def test_invalidating_the_corpus_reaches_the_model(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        graph = _build_pipeline_graph(self._args())
+
+        cascade = ['untokenized'] + graph.dependents('untokenized')
+        assert cascade == ['untokenized', 'tokenized', 'model']
+
+    def test_invalidating_the_model_reaches_nothing_else(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        graph = _build_pipeline_graph(self._args())
+
+        assert graph.dependents('model') == []
+
+    def test_fresh_mix_is_refused_on_a_leaf_dataset(self, tmp_path, monkeypatch):
+        """The top node of a leaf IS the acquisition, so invalidating it would
+        delete exactly the corpus the flag promises to keep."""
+        monkeypatch.chdir(tmp_path)
+        args = self._args(dataset_type='plaintext')
+
+        with pytest.raises(ValueError, match="fresh_mix DOES NOT APPLY"):
+            _require_composite_dataset(args)
+
+    def test_fresh_mix_is_allowed_on_composites(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        for dataset_type in ('multinomial', 'concat'):
+            assert _require_composite_dataset(self._args(dataset_type=dataset_type)) is None

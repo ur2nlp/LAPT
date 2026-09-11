@@ -954,6 +954,7 @@ class TokenizedMultinomialMix:
         self.max_length = max_length
         self.seed = seed
         self.name = 'tokenized'
+        self.depends_on = ('untokenized', 'tokenizer')
         self._sources_info_cache: tuple[list[str], list[str], bool] | None = None
 
     def _mix_config(self) -> dict:
@@ -1014,35 +1015,34 @@ class TokenizedMultinomialMix:
     def clear(self) -> None:
         """Remove every cache this mix owns.
 
-        Not a `CachedArtifact`, so this is not an inherited `clear()`: the mix
-        writes through three separate artifacts in two different places, and a
-        single path cannot name them. The per-source tokenized caches sit
-        beside each source, outside the mix directory, which is what lets them
-        be shared across mixes -- and is why the pre-artifact cleanup, which
-        deleted one path under the mix directory, never touched them.
+        Not an inherited `CachedArtifact.clear()`: the mix writes through three
+        artifacts in two different places. The train plan and dev splits sit
+        under the mix directory, but the per-source tokenized caches sit beside
+        each *source*, outside it -- which is what lets them be shared across
+        mixes, and is why the pre-artifact cleanup, deleting one path under the
+        mix directory, never touched them.
+
+        Deliberately computes its targets by glob rather than by resolving the
+        sources. `_sources_info()` would resolve -- and therefore *build* --
+        every untokenized source just to learn which directory names to
+        delete, so a cleanup running against a cleared cache would re-download
+        the corpus in order to remove derived files. Source ids come from the
+        configuration alone, so globbing needs no I/O and additionally catches
+        variants left by other tokenizers, which is the right reading of a
+        `fresh_*` flag.
         """
-        _, untokenized_paths, add_labels = self._sources_info()
-        source_ids, *_ = self._sources_info()
+        targets = [os.path.join(self.mix_dir, "train_plan")]
+        targets += sorted(glob.glob(os.path.join(self.mix_dir, "dev_*")))
+        for index, source_config in enumerate(self.sources):
+            child_id = source_id(source_config, fallback=f"source_{index}")
+            targets += sorted(
+                glob.glob(os.path.join(self.base_cache_dir, child_id, "tokenized_*"))
+            )
 
-        for untokenized_path in untokenized_paths:
-            TokenizedSourceArtifact(
-                untokenized_path=untokenized_path,
-                tokenizer=self.tokenizer,
-                tokenizer_id=self.tokenizer_id,
-                max_length=self.max_length,
-                add_labels=add_labels,
-            ).clear()
-
-        TrainPlanArtifact(
-            mix_dir=self.mix_dir, source_ids=[], source_sizes=[],
-            samples_per_source=[], shuffle_seed=self.seed,
-        ).clear()
-
-        DevSplitsArtifact(
-            mix_dir=self.mix_dir, tokenizer_id=self.tokenizer_id,
-            max_length=self.max_length, add_labels=add_labels,
-            source_ids=source_ids,
-        ).clear()
+        for target in targets:
+            if os.path.exists(target):
+                print(f"Clearing cached tokenized mix data at {target}", file=sys.stderr)
+                shutil.rmtree(target)
 
     def resolve(self) -> DatasetDict:
         """Resolve the three sub-artifacts and assemble the mix.
@@ -1161,6 +1161,7 @@ class TokenizedDatasetArtifact(DatasetArtifact):
     """
 
     name = "tokenized"
+    depends_on = ("untokenized", "tokenizer")
 
     def __init__(
         self,

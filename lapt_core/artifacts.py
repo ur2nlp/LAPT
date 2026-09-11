@@ -282,7 +282,13 @@ class CachedArtifact(ABC):
     Attributes:
         name: Stable identifier for this stage, used as the default directory
             name and as the key in an `ArtifactGraph`.
-        depends_on: Names of the stages whose values `build` requires.
+        depends_on: Names of the stages this one sits downstream of. Read by
+            `ArtifactGraph` to derive what a change here invalidates. It is
+            *not* a required-argument contract: a stage whose inputs arrive
+            through its constructor -- which is every stage in practice, since
+            a tokenizer object or a resolved path is not itself an artifact --
+            declares its topology here and ignores `deps` entirely. `deps`
+            remains available for a builder that does want injection.
         path_includes_digest: Whether to append a config digest to the path.
         config_filename: Name of the YAML config record written inside the
             artifact directory. Override when adopting `CachedArtifact` for
@@ -432,8 +438,10 @@ class CachedArtifact(ABC):
         """Return the artifact, building it only if there is no valid cache.
 
         Args:
-            deps: Resolved dependency values, keyed by stage name. Required if
-                `depends_on` is non-empty.
+            deps: Resolved dependency values, keyed by stage name. Optional:
+                `depends_on` declares topology, not required arguments, so a
+                stage taking its inputs through the constructor resolves with
+                no deps at all.
             fresh: Discard any cached copy and rebuild unconditionally.
 
         Returns:
@@ -444,11 +452,6 @@ class CachedArtifact(ABC):
                 configuration and `fresh` is False.
         """
         deps = deps or {}
-        missing = [name for name in self.depends_on if name not in deps]
-        if missing:
-            raise KeyError(
-                f"{self.name} depends on {list(self.depends_on)} but was not given: {missing}"
-            )
 
         if fresh:
             self.clear()
