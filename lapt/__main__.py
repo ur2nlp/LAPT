@@ -27,7 +27,6 @@ from lapt.dataset_utils import (
     TokenizedDatasetArtifact,
     TokenizedMultinomialMix,
     build_untokenized_source,
-    is_instruction_dataset,
     prepare_eval_datasets,
 )
 from lapt.eval_utils import (
@@ -45,6 +44,7 @@ from lapt.model_utils import (
     is_local_model_path,
     set_random_seeds,
 )
+from lapt.tokenization import is_instruction_dataset
 from lapt.tokenizer_utils import TokenizerArtifact
 from lapt_core.artifacts import ArtifactGraph
 

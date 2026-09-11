@@ -1135,22 +1135,3 @@ class DataCollatorForInstructionTuning:
         batch['labels'] = torch.tensor(padded_labels, dtype=torch.long)
 
         return batch
-
-
-def is_instruction_dataset(dataset) -> bool:
-    """
-    Check if a dataset is an instruction-tuning dataset (has pre-computed labels).
-
-    Args:
-        dataset: A Dataset or DatasetDict
-
-    Returns:
-        True if the dataset has 'labels' column, indicating instruction format
-    """
-    if hasattr(dataset, 'keys'):
-        # DatasetDict - check the first split
-        sample_split = list(dataset.keys())[0]
-        return 'labels' in dataset[sample_split].column_names
-    else:
-        # Single Dataset
-        return 'labels' in dataset.column_names
