@@ -16,6 +16,7 @@ from lapt.sources.instruction_jsonl import InstructionJsonlDataset
 from lapt.sources.multinomial import MultinomialDataset
 from lapt.sources.oscar import OscarDataset
 from lapt.sources.plaintext import PlaintextDataset
+from lapt.sources.plaintext_dir import PlaintextDirDataset
 from lapt.sources.substituted import SubstitutedDataset, parse_substitutions
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     'MultinomialDataset',
     'OscarDataset',
     'PlaintextDataset',
+    'PlaintextDirDataset',
     'SubstitutedDataset',
     'make_source',
     'parse_substitutions',
