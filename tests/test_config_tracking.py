@@ -11,14 +11,17 @@ import tempfile
 import pytest
 from omegaconf import OmegaConf
 
+from lapt.__main__ import _build_pipeline_graph, _require_composite_dataset
 from lapt.artifact_configs import (
     DatasetConfig,
+    ModelConfig,
     TokenizedDatasetConfig,
     TokenizerConfig,
     dict_diff,
     focus_embedding_hash,
     multinomial_mix_slug,
 )
+from lapt_core.artifacts import ConfigMismatchError
 
 
 class TestDictDiff:
@@ -817,3 +820,108 @@ class TestMixSlugSeedKeying:
         """Only the digest moves, so a mix stays recognizable in a listing."""
         with_seed = multinomial_mix_slug({**self.BASE, 'seed': 7})
         assert with_seed.startswith("mix_a0.5_s5m_")
+
+
+class TestModelConfigCollisionCheck:
+    """Model outputs are not a cache; this is a collision check.
+
+    `output_dir` is effectively one directory per `experiment_id`, so a record
+    describing different parameters means either a preempted run is being
+    resumed with something changed, or an experiment label is being reused.
+    """
+
+    def _args(self, **overrides):
+        base = {
+            'hf_model': 'facebook/xglm-564M',
+            'output_dir': 'models',
+            'model_name': None,
+            'experiment_id': 'v01',
+            'seed': 1,
+            'preempt_resume': False,
+            'resume_from_checkpoint': None,
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy', 'dev_size': 0.1},
+            'training': {'name': 'basic', 'max_length': 512, 'learning_rate': 4e-5},
+            'focus': {'enabled': False},
+        }
+        base.update(overrides)
+        return OmegaConf.create(base)
+
+    def _record(self, tmp_path, args):
+        path = str(tmp_path / 'training_config.yaml')
+        ModelConfig.from_args(args).save(path)
+        return path
+
+    def test_identical_config_is_accepted(self, tmp_path):
+        args = self._args()
+        assert ModelConfig.from_args(args).check_cached(self._record(tmp_path, args))
+
+    def test_changed_hyperparameter_is_refused(self, tmp_path):
+        path = self._record(tmp_path, self._args())
+        changed = self._args(training={'name': 'basic', 'max_length': 512, 'learning_rate': 1e-4})
+
+        with pytest.raises(ConfigMismatchError, match="different parameters"):
+            ModelConfig.from_args(changed).check_cached(path)
+
+    def test_flipping_preempt_resume_is_not_a_mismatch(self, tmp_path):
+        """The workflow the check exists to protect must not trip it.
+
+        The record is the whole resolved config, so a naive comparison would
+        fire exactly when a preempted run is re-launched to resume.
+        """
+        path = self._record(tmp_path, self._args())
+        resuming = self._args(preempt_resume=True, resume_from_checkpoint='ckpt-500')
+
+        assert ModelConfig.from_args(resuming).check_cached(path)
+
+    def test_no_record_yet_is_accepted(self, tmp_path):
+        args = self._args()
+        assert ModelConfig.from_args(args).check_cached(str(tmp_path / 'absent.yaml'))
+
+
+class TestCacheCleanupCascade:
+    """The fresh_* flags derive their downstream sets from the graph."""
+
+    def _args(self, dataset_type='multinomial', **overrides):
+        sources = [{'id': 'got', 'type': 'plaintext', 'path': 'a'},
+                   {'id': 'eng', 'type': 'plaintext', 'path': 'b'}]
+        dataset = {'type': dataset_type, 'cache_dir': 'data/mix', 'language': 'got',
+                   'dev_size': 0.01}
+        if dataset_type == 'multinomial':
+            dataset.update({'alpha': 0.5, 'total_samples': 100, 'sources': sources})
+        elif dataset_type == 'concat':
+            dataset['sources'] = sources
+        else:
+            dataset['path'] = 'corpus.txt'
+        args = {'hf_model': 'facebook/xglm-564M', 'init_model_id': 'v74L', 'seed': 1,
+                'output_dir': 'models', 'model_name': None, 'experiment_id': 'v01',
+                'dataset': dataset, 'training': {'name': 'basic', 'max_length': 512},
+                'focus': {'enabled': False, 'tokenizer_path': None}}
+        args.update(overrides)
+        return OmegaConf.create(args)
+
+    def test_invalidating_the_corpus_reaches_the_model(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        graph = _build_pipeline_graph(self._args())
+
+        cascade = ['untokenized'] + graph.dependents('untokenized')
+        assert cascade == ['untokenized', 'tokenized', 'model']
+
+    def test_invalidating_the_model_reaches_nothing_else(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        graph = _build_pipeline_graph(self._args())
+
+        assert graph.dependents('model') == []
+
+    def test_fresh_mix_is_refused_on_a_leaf_dataset(self, tmp_path, monkeypatch):
+        """The top node of a leaf IS the acquisition, so invalidating it would
+        delete exactly the corpus the flag promises to keep."""
+        monkeypatch.chdir(tmp_path)
+        args = self._args(dataset_type='plaintext')
+
+        with pytest.raises(ValueError, match="fresh_mix DOES NOT APPLY"):
+            _require_composite_dataset(args)
+
+    def test_fresh_mix_is_allowed_on_composites(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        for dataset_type in ('multinomial', 'concat'):
+            assert _require_composite_dataset(self._args(dataset_type=dataset_type)) is None
