@@ -475,12 +475,21 @@ class CachedArtifact(ABC):
 
 
 class ArtifactGraph:
-    """A dependency graph of `CachedArtifact` stages.
+    """A topological graph of `CachedArtifact` stages.
 
-    Resolving a stage resolves its dependencies first and memoizes each value, so
-    a stage shared by two downstream consumers is built once. Invalidating a
-    stage also clears everything reachable from it, which replaces the
-    hand-maintained cascade that each pipeline otherwise grows.
+    `invalidate` is the load-bearing half: clearing a stage also clears
+    everything reachable from it, which replaces the hand-maintained cascade a
+    pipeline otherwise grows -- one `depends_on` declaration per class instead
+    of the same relationships restated in every branch of a cleanup function.
+
+    `get` is the other half, and is largely vestigial. It resolves a stage's
+    topological parents on the way to it and injects them as `deps`, which
+    suits a pipeline whose stages consume each other's *values*. In practice
+    stages consume things that are not artifacts -- a loaded tokenizer, a
+    resolved path, a config object -- so they take their inputs through their
+    constructors and are resolved directly, and `deps` arrives empty and
+    unread. Reach for `invalidate`; `get` is kept because a future stage may
+    genuinely want injection, not because it is the intended entry point.
     """
 
     def __init__(self, *artifacts: CachedArtifact):
@@ -531,7 +540,11 @@ class ArtifactGraph:
         return self.artifacts[name]
 
     def get(self, name: str, fresh: bool = False) -> Any:
-        """Resolve a stage, building its dependencies first as needed.
+        """Resolve a stage, building its topological parents first as needed.
+
+        Note that this *builds* upstream stages in order to reach a downstream
+        one, which is rarely what a caller wants from a graph whose stages
+        already receive their inputs directly. See the class docstring.
 
         Args:
             name: Stage to resolve.
