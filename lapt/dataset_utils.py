@@ -953,6 +953,7 @@ class TokenizedMultinomialMix:
         self.tokenizer_id = tokenizer_id
         self.max_length = max_length
         self.seed = seed
+        self.name = 'tokenized'
         self._sources_info_cache: tuple[list[str], list[str], bool] | None = None
 
     def _mix_config(self) -> dict:
@@ -1009,6 +1010,39 @@ class TokenizedMultinomialMix:
 
         self._sources_info_cache = (source_ids, untokenized_paths, add_labels)
         return self._sources_info_cache
+
+    def clear(self) -> None:
+        """Remove every cache this mix owns.
+
+        Not a `CachedArtifact`, so this is not an inherited `clear()`: the mix
+        writes through three separate artifacts in two different places, and a
+        single path cannot name them. The per-source tokenized caches sit
+        beside each source, outside the mix directory, which is what lets them
+        be shared across mixes -- and is why the pre-artifact cleanup, which
+        deleted one path under the mix directory, never touched them.
+        """
+        _, untokenized_paths, add_labels = self._sources_info()
+        source_ids, *_ = self._sources_info()
+
+        for untokenized_path in untokenized_paths:
+            TokenizedSourceArtifact(
+                untokenized_path=untokenized_path,
+                tokenizer=self.tokenizer,
+                tokenizer_id=self.tokenizer_id,
+                max_length=self.max_length,
+                add_labels=add_labels,
+            ).clear()
+
+        TrainPlanArtifact(
+            mix_dir=self.mix_dir, source_ids=[], source_sizes=[],
+            samples_per_source=[], shuffle_seed=self.seed,
+        ).clear()
+
+        DevSplitsArtifact(
+            mix_dir=self.mix_dir, tokenizer_id=self.tokenizer_id,
+            max_length=self.max_length, add_labels=add_labels,
+            source_ids=source_ids,
+        ).clear()
 
     def resolve(self) -> DatasetDict:
         """Resolve the three sub-artifacts and assemble the mix.
@@ -1125,6 +1159,8 @@ class TokenizedDatasetArtifact(DatasetArtifact):
     `load_untokenized_dataset` directly on a `type: multinomial` config, but
     not the production path for it; see `TokenizedMultinomialMix`).
     """
+
+    name = "tokenized"
 
     def __init__(
         self,
