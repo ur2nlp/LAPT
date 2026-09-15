@@ -24,6 +24,29 @@ conda env create -f environment.yml
 conda activate lapt
 ```
 
+To install the framework itself as a package, install the vendored `lapt-core`
+distribution first so pip resolves it from the working tree instead of looking
+for it on an index:
+
+```bash
+pip install -e packages/lapt-core
+pip install -e ".[dev]"
+```
+
+Neither step is needed to run the test suite, which reaches both packages
+through `pythonpath`.
+
+### Using `lapt-core` elsewhere
+
+`lapt_core` is a separate distribution so sibling projects can share the caching
+layer without inheriting this project's `transformers` pin:
+
+```bash
+pip install "lapt-core[datasets] @ git+https://github.com/ur2nlp/LAPT.git@<tag>#subdirectory=packages/lapt-core"
+```
+
+See `packages/lapt-core/README.md`.
+
 ## Usage
 
 ### Basic Training
@@ -110,8 +133,9 @@ Selective rebuilds, each clearing everything downstream of it:
   - `model_utils.py` - Model and tokenizer initialization
   - `tokenizer_utils.py` - Tokenizer training and FOCUS operations
   - `eval_utils.py` - Metrics, generation, and evaluation callbacks
-- `lapt_core/` - Domain-neutral caching layer, kept free of ML dependencies so
-  sibling projects can depend on it without inheriting this one's pins
+- `packages/lapt-core/lapt_core/` - Domain-neutral caching layer, packaged
+  separately so sibling projects can depend on it without inheriting this one's
+  pins
   - `artifacts.py` - `CachedArtifact`, config validation, `ArtifactGraph`
   - `mixing.py` - Source sampling arithmetic and mix cache naming
   - `composites.py` - Concatenation and multinomial mixing

@@ -19,6 +19,12 @@ dependencies = [
     "accelerate>=0.26",
     "datasets>=3,<4",
     "hydra-core>=1,<2",
+    # Lives in this repository at packages/lapt-core, but is a separate
+    # distribution: consumers outside LAPT install it from a git tag without
+    # inheriting the torch/transformers pins below. Install the local copy
+    # first (`pip install -e packages/lapt-core`) so pip resolves it from the
+    # working tree rather than looking for it on an index.
+    "lapt-core[datasets]",
     "numpy<2.0",
     "pandas",
     "plotnine",
@@ -47,6 +53,11 @@ Repository = "https://github.com/ur2nlp/LAPT"
 
 # The framework is a real, installable package. Project branches that add their
 # own package re-declare this table to include it alongside `lapt`.
+#
+# `lapt_core` is deliberately absent: it is its own distribution under
+# packages/, not a subpackage of this one. The glob stays `lapt*` rather than a
+# literal `lapt` so a project branch keeps matching `lapt` alone -- nothing at
+# the repository root can match it now that lapt_core has moved.
 [tool.setuptools.packages.find]
 include = ["lapt*"]
 
@@ -55,7 +66,10 @@ testpaths = ["tests"]
 # `.` makes `lapt` and `tools` importable from a bare checkout, so the suite
 # runs without an editable install. This replaces a sys.path.insert in
 # tests/conftest.py, and applies before collection rather than during it.
-pythonpath = ["."]
+# `packages/lapt-core` does the same for `lapt_core` now that it is a separate
+# distribution -- without it the suite would require installing that package,
+# which is exactly the bare-checkout property this line exists to preserve.
+pythonpath = [".", "packages/lapt-core"]
 addopts = "--strict-markers"
 
 [tool.coverage.run]
