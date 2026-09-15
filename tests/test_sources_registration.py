@@ -7,6 +7,11 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+# Mirrors `pythonpath` in pyproject.toml. The subprocess below does not inherit
+# that setting -- pytest applies it to its own interpreter only -- so the two
+# import roots have to be named again here, or `lapt_core` is unimportable now
+# that it is a separate distribution under packages/.
+IMPORT_ROOTS = [REPO_ROOT, REPO_ROOT / 'packages' / 'lapt-core']
 
 IMPORT_THE_PACKAGE = """
 import json
@@ -36,7 +41,10 @@ def _registered_types(script: str) -> list[str]:
     result = subprocess.run(
         [sys.executable, '-c', script],
         cwd=REPO_ROOT,
-        env={**os.environ, 'PYTHONPATH': str(REPO_ROOT)},
+        env={
+            **os.environ,
+            'PYTHONPATH': os.pathsep.join(str(root) for root in IMPORT_ROOTS),
+        },
         capture_output=True,
         text=True,
         check=True,

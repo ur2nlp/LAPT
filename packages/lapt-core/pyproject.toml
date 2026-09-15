@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lapt-core"
+version = "0.1.0"
+description = "Content-tracked caching and dataset-mixing primitives for multi-stage training pipelines"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "C.M. Downey", email = "cmdowney.nlp@gmail.com" }]
+
+# Deliberately minimal. `lapt_core.artifacts` and `lapt_core.mixing` import the
+# standard library and PyYAML only, which is what makes them cheap to import
+# from a CLI helper (88 ms, nearly all of it PyYAML) and fast to unit-test.
+# Nothing here pins torch, transformers or omegaconf -- a consumer supplies its
+# own, and this package must never narrow that choice.
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# `lapt_core.dataset_artifacts` and `lapt_core.composites` are the modules whose
+# value is a `DatasetDict` on disk, so they -- and only they -- need `datasets`.
+# Kept an extra rather than a hard requirement so a consumer that wants the
+# caching layer alone does not pay a 2 s import for a dependency it never calls.
+datasets = [
+    "datasets>=3,<4",
+]
+
+[project.urls]
+Repository = "https://github.com/ur2nlp/LAPT"
+
+[tool.setuptools.packages.find]
+include = ["lapt_core*"]

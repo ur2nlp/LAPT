@@ -39,7 +39,10 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [.]
+          # `packages/lapt-core` is a second root because `lapt_core` ships
+          # as its own distribution; griffe resolves modules by path, and
+          # this job installs nothing.
+          paths: [., packages/lapt-core]
           options:
             docstring_style: google
             show_source: true

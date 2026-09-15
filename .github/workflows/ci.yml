@@ -61,7 +61,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            packages/lapt-core/pyproject.toml
 
       # The CPU wheel is ~200MB against ~2.5GB for the default CUDA build, and
       # the runners have no GPU. Installed first so the editable install below
@@ -69,8 +71,14 @@ jobs:
       - name: Install CPU torch
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
+      # `lapt-core` is a separate distribution vendored at packages/lapt-core.
+      # Installing it first means the editable install below finds the
+      # requirement already satisfied instead of failing to locate it on PyPI,
+      # where it is deliberately not published.
       - name: Install project
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -e packages/lapt-core
+          pip install -e ".[dev]"
 
       # tests/conftest.py downloads the facebook/xglm-564M tokenizer once per
       # session; cache it so only the first run on a given key pays for it.
