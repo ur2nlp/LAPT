@@ -6,22 +6,26 @@ Reads tab-separated lines from stdin:
 Checks local trainer_states/ and configs/ directories to determine what
 already exists. Prints scp commands for runs that need fetching.
 
+The remote host is an ssh destination (a hostname, or an alias from your
+ssh config) given by --remote or the LAPT_REMOTE environment variable. Nothing
+is hardcoded: the host and the remote paths belong to whoever runs this.
+
 Usage:
-    ssh circ 'bash -s' < tools/remote_inventory.sh | python tools/fetch_diff.py
-    ssh circ 'bash -s' < tools/remote_inventory.sh | python tools/fetch_diff.py --dry-run
+    INV="ssh $LAPT_REMOTE 'bash -s' < tools/remote_inventory.sh -- -b /path/to/models"
+    eval "$INV" | python tools/fetch_diff.py --dry-run
+    eval "$INV" | python tools/fetch_diff.py | bash
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 import yaml
 
-TRAINER_STATES_DIR = Path("outputs/trainer_states")
-CONFIGS_DIR = Path("outputs/configs")
-REGISTRY_PATH = Path("outputs/registry.yaml")
+DEFAULT_OUTPUTS_DIR = Path(os.environ.get("LAPT_OUTPUTS_DIR", "outputs"))
 
 
 def normalize_exp_id(exp_id: str) -> str:
@@ -70,14 +74,38 @@ def main():
         action="store_true",
         help="Show what would be fetched without emitting scp commands",
     )
+    parser.add_argument(
+        "--remote",
+        default=os.environ.get("LAPT_REMOTE"),
+        help=(
+            "ssh destination the runs are fetched from, e.g. a hostname or an "
+            "alias from your ssh config. Defaults to $LAPT_REMOTE."
+        ),
+    )
+    parser.add_argument(
+        "--outputs-dir",
+        type=Path,
+        default=DEFAULT_OUTPUTS_DIR,
+        help=(
+            "Directory holding registry.yaml, configs/ and trainer_states/ "
+            f"(default: {DEFAULT_OUTPUTS_DIR}, or $LAPT_OUTPUTS_DIR)"
+        ),
+    )
     args = parser.parse_args()
 
-    manually_closed = load_manually_closed(REGISTRY_PATH)
+    if not args.remote:
+        parser.error("no remote host: pass --remote HOST or set LAPT_REMOTE")
+
+    trainer_states_dir = args.outputs_dir / "trainer_states"
+    configs_dir = args.outputs_dir / "configs"
+    registry_path = args.outputs_dir / "registry.yaml"
+
+    manually_closed = load_manually_closed(registry_path)
 
     # build local inventory from outputs/trainer_states/
     local_runs: dict[str, str] = {}
-    if TRAINER_STATES_DIR.exists():
-        for filepath in TRAINER_STATES_DIR.glob("*.json"):
+    if trainer_states_dir.exists():
+        for filepath in trainer_states_dir.glob("*.json"):
             try:
                 local_runs[normalize_exp_id(filepath.stem)] = get_local_status(filepath)
             except (json.JSONDecodeError, KeyError):
@@ -85,8 +113,8 @@ def main():
 
     # track which configs already exist locally
     local_configs: set[str] = set()
-    if CONFIGS_DIR.exists():
-        for filepath in CONFIGS_DIR.glob("*.yaml"):
+    if configs_dir.exists():
+        for filepath in configs_dir.glob("*.yaml"):
             local_configs.add(normalize_exp_id(filepath.stem))
 
     # read remote inventory from stdin
@@ -127,18 +155,18 @@ def main():
         sys.exit(0)
 
     if not args.dry_run:
-        print(f'mkdir -p "{TRAINER_STATES_DIR}" "{CONFIGS_DIR}"')
+        print(f'mkdir -p "{trainer_states_dir}" "{configs_dir}"')
 
     for exp_id, remote_ts, remote_cfg, reason in to_fetch:
-        ts_dest = TRAINER_STATES_DIR / f"{exp_id}.json"
+        ts_dest = trainer_states_dir / f"{exp_id}.json"
         if args.dry_run:
             cfg_note = " +config" if remote_cfg else ""
             print(f"  {exp_id}: {reason}{cfg_note}", file=sys.stderr)
         else:
-            print(f'scp "circ:{remote_ts}" "{ts_dest}"')
+            print(f'scp "{args.remote}:{remote_ts}" "{ts_dest}"')
             if remote_cfg:
-                cfg_dest = CONFIGS_DIR / f"{exp_id}.yaml"
-                print(f'scp "circ:{remote_cfg}" "{cfg_dest}"')
+                cfg_dest = configs_dir / f"{exp_id}.yaml"
+                print(f'scp "{args.remote}:{remote_cfg}" "{cfg_dest}"')
 
 
 if __name__ == "__main__":

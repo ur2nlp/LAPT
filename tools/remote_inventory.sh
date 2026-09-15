@@ -1,30 +1,45 @@
 #!/usr/bin/env bash
-# Inventory training runs on the CIRC cluster.
+# Inventory training runs on a remote cluster.
 #
 # Outputs TSV to stdout: experiment_id \t dir_name \t trainer_state_path \t config_path
 # Intended to be piped into tools/fetch_diff.py.
 #
+# This script executes on the *remote* host, so it cannot read the local
+# environment. The directories to scan are therefore arguments, passed either as
+# repeated -b flags or, if the remote shell exports it, as a colon-separated
+# LAPT_MODEL_DIRS. There is no built-in default: a path that is right for one
+# cluster account is wrong for every other one.
+#
 # Usage:
-#   ssh circ 'bash -s' < tools/remote_inventory.sh
-#   ssh circ 'bash -s' < tools/remote_inventory.sh -- -d 14
-#   ssh circ 'bash -s' < tools/remote_inventory.sh -- -d 14 -f seeded
+#   ssh "$LAPT_REMOTE" 'bash -s' < tools/remote_inventory.sh -- -b /path/to/models
+#   ssh "$LAPT_REMOTE" 'bash -s' < tools/remote_inventory.sh -- -b /a -b /b -d 14
+#   ssh "$LAPT_REMOTE" 'bash -s' < tools/remote_inventory.sh -- -d 14 -f seeded
 
 set -euo pipefail
 
-BASE_DIRS=(
-    "/scratch/cdowney4/LAPT/models/old_germanic"
-    "/scratch/cdowney4/LAPT/models/gothic_instruct"
-)
+BASE_DIRS=()
 DAYS=7
 FILTER=""
 
-while getopts "d:f:" opt; do
+while getopts "b:d:f:" opt; do
     case "$opt" in
+        b) BASE_DIRS+=("$OPTARG") ;;
         d) DAYS="$OPTARG" ;;
         f) FILTER="$OPTARG" ;;
-        *) echo "Usage: $0 [-d DAYS] [-f FILTER]" >&2; exit 1 ;;
+        *) echo "Usage: $0 [-b DIR]... [-d DAYS] [-f FILTER]" >&2; exit 1 ;;
     esac
 done
+
+# fall back to the remote environment when no -b was given
+if [ ${#BASE_DIRS[@]} -eq 0 ] && [ -n "${LAPT_MODEL_DIRS:-}" ]; then
+    IFS=':' read -r -a BASE_DIRS <<< "$LAPT_MODEL_DIRS"
+fi
+
+if [ ${#BASE_DIRS[@]} -eq 0 ]; then
+    echo "No model directories given. Pass -b DIR (repeatable), or export" >&2
+    echo "LAPT_MODEL_DIRS as a colon-separated list on the remote host." >&2
+    exit 1
+fi
 
 dirs=""
 for BASE_DIR in "${BASE_DIRS[@]}"; do

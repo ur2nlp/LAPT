@@ -7,7 +7,7 @@ trainer states in outputs/trainer_states/{run_id}.json.
 
 Subcommands:
     extract   - Parse training_config.yaml → extract key params → upsert into registry
-    show      - Display registry entries, optionally joined with metrics
+    show      - Display registry entries
     diff      - Show only parameters that vary between selected runs
     verify    - Check registry params match local config files in outputs/configs/
     annotate  - Set era/group/note/observation for a run
@@ -22,10 +22,10 @@ Usage:
     python tools/registry.py extract --pattern 'outputs/configs/v139-i[0-9a-z]\.yaml'
 
     # Bulk extract from stdin (multiple YAML docs separated by ---)
-    ssh circ '...' | python tools/registry.py extract --stdin --multi
+    ssh "$LAPT_REMOTE" '...' | python tools/registry.py extract --stdin --multi
 
-    # Show runs in a group with metrics
-    python tools/registry.py show --group dropout-sweep --metrics
+    # Show runs in a group
+    python tools/registry.py show --group dropout-sweep
 
     # Show all runs ordered by when they were extracted
     python tools/registry.py show --sort timestamp
@@ -44,6 +44,7 @@ Usage:
 """
 
 import argparse
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -51,7 +52,12 @@ from pathlib import Path
 
 import yaml
 
-REGISTRY_PATH = Path("outputs/registry.yaml")
+# The outputs root holds registry.yaml, configs/ and trainer_states/. It is a
+# default rather than a constant so a sibling project can keep its runs
+# somewhere else without editing this file: --outputs-dir overrides it per
+# invocation, $LAPT_OUTPUTS_DIR for a whole shell.
+DEFAULT_OUTPUTS_DIR = Path(os.environ.get("LAPT_OUTPUTS_DIR", "outputs"))
+REGISTRY_PATH = DEFAULT_OUTPUTS_DIR / "registry.yaml"
 
 # params hidden from display by default (usually redundant with max_steps)
 DEFAULT_HIDDEN_PARAMS = {"eval_steps", "logging_steps", "save_steps"}
@@ -157,8 +163,8 @@ def _is_scalar(value: object) -> bool:
 def _extract_source_sampling_params(sources: list) -> dict:
     """Extract per-source sampling_prob and upsampling_factor from dataset sources list.
 
-    For each source with an `id`, produces keys like `sampling_prob_got` and
-    `upsampling_factor_got-eng` so these can be tracked and diffed across runs.
+    For each source with an `id`, produces keys like `sampling_prob_<id>` and
+    `upsampling_factor_<id>` so these can be tracked and diffed across runs.
 
     Args:
         sources: The `dataset.sources` list from a training config.
@@ -332,7 +338,7 @@ def format_param_value(value: object) -> str:
 
 def cmd_extract(args: argparse.Namespace) -> None:
     """Handle the 'extract' subcommand."""
-    registry = load_registry()
+    registry = load_registry(registry_path(args))
     configs_to_process = []
 
     if args.stdin:
@@ -393,9 +399,9 @@ def cmd_extract(args: argparse.Namespace) -> None:
             print(f"Warning: {e}", file=sys.stderr)
 
     if extracted_count > 0:
-        save_registry(registry)
+        save_registry(registry, registry_path(args))
         print(
-            f"Updated {REGISTRY_PATH} ({extracted_count} run(s))",
+            f"Updated {registry_path(args)} ({extracted_count} run(s))",
             file=sys.stderr,
         )
     else:
@@ -404,7 +410,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
 
 def cmd_show(args: argparse.Namespace) -> None:
     """Handle the 'show' subcommand."""
-    registry = load_registry()
+    registry = load_registry(registry_path(args))
     if not registry:
         print("Registry is empty.", file=sys.stderr)
         return
@@ -435,29 +441,6 @@ def cmd_show(args: argparse.Namespace) -> None:
     else:
         run_ids.sort(key=_natural_sort_key)
 
-    # load metrics if requested
-    metrics = {}
-    if args.metrics:
-        try:
-            from tools.summarize_results import parse_trainer_state
-        except ImportError:
-            # try relative import for direct script execution
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-            from tools.summarize_results import parse_trainer_state
-
-        outputs_dir = Path("outputs/trainer_states")
-        for rid in run_ids:
-            json_path = outputs_dir / f"{rid}.json"
-            if json_path.exists():
-                try:
-                    summary = parse_trainer_state(json_path)
-                    metrics[rid] = summary
-                except Exception as e:
-                    print(
-                        f"Warning: failed to parse metrics for {rid}: {e}",
-                        file=sys.stderr,
-                    )
-
     # display
     for rid in run_ids:
         entry = registry[rid]
@@ -483,23 +466,12 @@ def cmd_show(args: argparse.Namespace) -> None:
             if value:
                 print(f"  {field_name}: {value}")
 
-        # metrics
-        if rid in metrics:
-            summary = metrics[rid]
-            step_str = f"{summary.global_step}/{summary.max_steps}"
-            print(f"  status: {summary.status} ({step_str})")
-            if summary.best_eval:
-                best_parts = []
-                for lang, (loss, step) in sorted(summary.best_eval.items()):
-                    best_parts.append(f"{lang}={loss:.4f}@{step}")
-                print(f"  best_eval: {', '.join(best_parts)}")
-
         print()
 
 
 def cmd_diff(args: argparse.Namespace) -> None:
     """Handle the 'diff' subcommand."""
-    registry = load_registry()
+    registry = load_registry(registry_path(args))
 
     run_ids = args.runs
     missing = [rid for rid in run_ids if rid not in registry]
@@ -557,7 +529,7 @@ def cmd_diff(args: argparse.Namespace) -> None:
 
 def cmd_annotate(args: argparse.Namespace) -> None:
     """Handle the 'annotate' subcommand."""
-    registry = load_registry()
+    registry = load_registry(registry_path(args))
     run_id = args.run
 
     if run_id not in registry:
@@ -572,7 +544,7 @@ def cmd_annotate(args: argparse.Namespace) -> None:
             updated = True
 
     if updated:
-        save_registry(registry)
+        save_registry(registry, registry_path(args))
         print(f"Updated annotations for {run_id}", file=sys.stderr)
     else:
         print("No annotations specified. Use --era, --group, --note, or --observation.")
@@ -585,7 +557,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
     re-extracts params using the same logic as 'extract', and diffs against
     what is stored in the registry.
     """
-    registry = load_registry()
+    registry = load_registry(registry_path(args))
 
     if args.runs:
         run_ids = list(args.runs)
@@ -604,7 +576,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
     mismatch_count = 0
 
     for run_id in run_ids:
-        config_path = Path("outputs/configs") / f"{run_id}.yaml"
+        config_path = args.outputs_dir / "configs" / f"{run_id}.yaml"
 
         if not config_path.exists():
             print(f"{run_id}: MISSING ({config_path})")
@@ -660,11 +632,15 @@ def cmd_verify(args: argparse.Namespace) -> None:
     )
 
 
-def _registry_artifact_stems() -> tuple[set[str], set[str]]:
-    """Return (config_stems, trainer_state_stems) found under outputs/."""
-    base = REGISTRY_PATH.parent
-    config_stems = {path.stem for path in (base / "configs").glob("*.yaml")}
-    state_stems = {path.stem for path in (base / "trainer_states").glob("*.json")}
+def registry_path(args: argparse.Namespace) -> Path:
+    """Return the registry file for this invocation's outputs root."""
+    return args.outputs_dir / "registry.yaml"
+
+
+def _registry_artifact_stems(outputs_dir: Path) -> tuple[set[str], set[str]]:
+    """Return (config_stems, trainer_state_stems) found under `outputs_dir`."""
+    config_stems = {path.stem for path in (outputs_dir / "configs").glob("*.yaml")}
+    state_stems = {path.stem for path in (outputs_dir / "trainer_states").glob("*.json")}
     return config_stems, state_stems
 
 
@@ -713,8 +689,8 @@ def cmd_debt(args: argparse.Namespace) -> None:
         empty obs      - missing/blank observation (common; soft signal only)
         orphan         - registry entry with no backing config or trainer state
     """
-    registry = load_registry()
-    config_stems, state_stems = _registry_artifact_stems()
+    registry = load_registry(registry_path(args))
+    config_stems, state_stems = _registry_artifact_stems(args.outputs_dir)
     debt = categorize_debt(registry, config_stems, state_stems)
     unregistered = debt["unregistered"]
     orphan = debt["orphan"]
@@ -774,15 +750,15 @@ def sort_registry(registry: dict, by: str) -> dict:
 
 def cmd_sort(args: argparse.Namespace) -> None:
     """Handle the 'sort' subcommand."""
-    registry = load_registry()
+    registry = load_registry(registry_path(args))
     if not registry:
         print("Registry is empty.", file=sys.stderr)
         return
 
     sorted_registry = sort_registry(registry, args.by)
-    save_registry(sorted_registry)
+    save_registry(sorted_registry, registry_path(args))
     print(
-        f"Reordered {REGISTRY_PATH} by {args.by} ({len(sorted_registry)} run(s))",
+        f"Reordered {registry_path(args)} by {args.by} ({len(sorted_registry)} run(s))",
         file=sys.stderr,
     )
 
@@ -805,6 +781,15 @@ def main():
         description="Experiment registry management",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
+    )
+    parser.add_argument(
+        "--outputs-dir",
+        type=Path,
+        default=DEFAULT_OUTPUTS_DIR,
+        help=(
+            "Directory holding registry.yaml, configs/ and trainer_states/ "
+            f"(default: {DEFAULT_OUTPUTS_DIR}, or $LAPT_OUTPUTS_DIR)"
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -854,11 +839,6 @@ def main():
     show_parser.add_argument(
         "--group",
         help="Filter by group",
-    )
-    show_parser.add_argument(
-        "--metrics",
-        action="store_true",
-        help="Join with metrics from outputs/trainer_states/*.json",
     )
     show_parser.add_argument(
         "--hide",

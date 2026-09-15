@@ -1,12 +1,6 @@
 """Tests for tools/registry.py — extract_params, upsert_entry, diff_runs."""
 
-import sys
-from pathlib import Path
-
 import pytest
-
-# add project root to path so we can import tools.registry
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.registry import (
     categorize_debt,
