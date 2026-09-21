@@ -7,20 +7,36 @@ projects depend on one implementation instead of a copy that drifts.
 ## Install
 
 ```
-pip install "lapt-core @ git+https://github.com/ur2nlp/LAPT.git@main#subdirectory=packages/lapt-core"
+pip install "lapt-core @ https://github.com/ur2nlp/LAPT/archive/refs/tags/<tag>.tar.gz#subdirectory=packages/lapt-core"
 ```
 
-Pin a tag rather than `main` for anything reproducible. Add the `datasets` extra
-if you use the dataset layer:
+Add the `datasets` extra if you use the dataset layer:
+
+```
+pip install "lapt-core[datasets] @ https://github.com/ur2nlp/LAPT/archive/refs/tags/<tag>.tar.gz#subdirectory=packages/lapt-core"
+```
+
+Always pin a tag. A branch is not reproducible, and this package decides cache
+paths.
+
+**Why a tarball and not `git+https://`.** Both work and install the same
+content, but pip shells out to the `git` binary to clone a VCS URL, and a
+cluster compute node is not guaranteed to have one -- BlueHive3's do not
+without `module load git`, which is how this was found. The tarball is fetched
+over plain HTTPS by pip itself. `#subdirectory=` is honoured on a remote
+archive exactly as on a VCS URL.
+
+Use the git form instead when this repository is private, where the tarball
+endpoint needs authentication:
 
 ```
 pip install "lapt-core[datasets] @ git+https://github.com/ur2nlp/LAPT.git@<tag>#subdirectory=packages/lapt-core"
 ```
 
-No PyPI account is involved, it works from a fork, and it is pinnable. It is
-deliberately *not* an editable install of a local checkout: that bakes an
-absolute machine path into the environment, so a student forking a consumer repo
-on their own machine gets nothing.
+Either way, no PyPI account is involved, it works from a fork, and it is
+pinnable. It is deliberately *not* an editable install of a local checkout:
+that bakes an absolute machine path into the environment, so a student forking
+a consumer repo on their own machine gets nothing.
 
 ## Modules
 
