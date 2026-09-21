@@ -42,10 +42,13 @@ through `pythonpath`.
 layer without inheriting this project's `transformers` pin:
 
 ```bash
-pip install "lapt-core[datasets] @ git+https://github.com/ur2nlp/LAPT.git@<tag>#subdirectory=packages/lapt-core"
+pip install "lapt-core[datasets] @ https://github.com/ur2nlp/LAPT/archive/refs/tags/<tag>.tar.gz#subdirectory=packages/lapt-core"
 ```
 
-See `packages/lapt-core/README.md`.
+A release tarball rather than `git+https://`, because pip needs the `git`
+binary to clone a VCS URL and a cluster compute node may not have one. See
+`packages/lapt-core/README.md` for the git form, which is what a private
+repository needs.
 
 ## Usage
 
