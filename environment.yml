@@ -6,20 +6,48 @@ dependencies:
   - accelerate>=0.26
   - datasets=3.*
   - hydra-core=1.*
+  # Capped for the wider stack, not for any one package. The original reason
+  # was plotnine, which is no longer valid: plotnine 0.15.x declares
+  # numpy>=1.23.5 with no upper bound, and every plotnine consumer in tools/
+  # renders byte-identically under numpy 2.4 (verified 2026-09-22). What has
+  # *not* been tested is torch/transformers/datasets/sentencepiece under
+  # numpy 2, which is the real risk surface. Drop this once a full environment
+  # has been built and a training run smoke-tested against it.
   - numpy<2.0
   - pandas
   - plotnine
-  - sentencepiece=0.*
-  - tokenizers=0.*
-  - transformers=4.*
+  # Pinned below 5 because HuggingFace has repeatedly shipped breaking changes
+  # in minor releases; an unbounded requirement would silently rot for anyone
+  # forking this template. The floor is the oldest release this framework is
+  # known to work with, not a verified minimum -- raise it only on a real
+  # incompatibility. Project branches pin an exact version; see cluster-pins.txt.
+  - transformers>=4.40,<5
   - pip
   - protobuf
   - pyyaml
   - pytest-cov
   - ruff
   - sacrebleu=2.*
+  - sentencepiece=0.*
+  - tokenizers=0.*
   - tqdm
   - yapf
   - pip:
+    # `lapt_core` lives at packages/lapt-core as its own distribution. Without
+    # this line `python -m lapt` fails with ModuleNotFoundError even though the
+    # test suite passes, because pyproject's `pythonpath` applies to pytest
+    # only. Installed editable so a checkout edit takes effect immediately.
+    - -e ./packages/lapt-core
+    # Floor of 2.6 is a genuine requirement, not a convenience bump:
+    # transformers' `check_torch_load_is_safe` raises outright below it, over
+    # CVE-2025-32434 in `torch.load`. It applies when loading `.bin`
+    # checkpoints; safetensors is exempt. No upper bound -- the CUDA build is
+    # the installing site's concern, not this template's.
     - torch>=2.6
     - deepfocus
+
+# Tested on (CIRC cluster, 2026-09):
+#   python 3.11 · torch 2.9.0 / CUDA 12.9 · transformers 4.57.1
+#   tokenizers 0.22.1 · accelerate 1.11.0 · numpy 1.26.4
+# Project branches pin these exactly via cluster-pins.txt; this file stays
+# loose so a fork is not bound to one site's hardware.
