@@ -162,3 +162,129 @@ class TestCaching:
 
         with pytest.raises(ConfigMismatchError):
             mix(root, corpora).resolve()
+
+
+class TestCanonicalDevSplits:
+    """A source that ships its own dev split keeps it instead of being re-carved.
+
+    The reason the mix carves dev *before* upsampling is that a randomly held
+    out example must not be duplicated into train. That argument is about
+    random splitting: a corpus that arrives already split is disjoint from its
+    own train upstream, before anything here runs, so no amount of upsampling
+    can leak it -- and it is the split results are comparable on. Carving a
+    fresh random slice and discarding the canonical one loses information and
+    buys no safety.
+
+    Stub children, because no source in this repository is pre-split.
+    """
+
+    @staticmethod
+    def _stub_factory(split_map):
+        from datasets import Dataset, DatasetDict
+
+        from lapt_core.dataset_artifacts import DatasetArtifact
+
+        class StubSource(DatasetArtifact):
+            def __init__(self, cache_dir, splits):
+                super().__init__(cache_dir)
+                self.splits = splits
+
+            def config(self):
+                return {'type': 'stub', 'splits': sorted(self.splits)}
+
+            def build(self, deps):
+                return DatasetDict({
+                    name: Dataset.from_dict({'text': values})
+                    for name, values in self.splits.items()
+                })
+
+        def factory(cache_dir, source_config, seed=1):
+            return StubSource(cache_dir, split_map[source_config['id']])
+
+        return factory
+
+    def _mix(self, tmp_path, split_map, sources=None, **overrides):
+        from lapt_core.composites import MultinomialArtifact
+
+        settings = {'alpha': 0.5, 'total_samples': 20, 'dev_size': 0.25}
+        settings.update(overrides)
+        return MultinomialArtifact(
+            str(tmp_path / "mix"),
+            sources if sources is not None else [{'id': name} for name in split_map],
+            settings['alpha'], settings['total_samples'], settings['dev_size'],
+            child_factory=self._stub_factory(split_map),
+            seed=1,
+        ).resolve()
+
+    def test_a_canonical_dev_split_is_used_as_is(self, tmp_path):
+        split_map = {'a': {
+            'train': [f"t{i}" for i in range(8)],
+            'validation': ['held-1', 'held-2'],
+        }}
+        result = self._mix(tmp_path, split_map)
+
+        assert sorted(result['a']['text']) == ['held-1', 'held-2']
+
+    def test_the_canonical_dev_examples_are_not_also_in_train(self, tmp_path):
+        split_map = {'a': {
+            'train': [f"t{i}" for i in range(8)],
+            'validation': ['held-1', 'held-2'],
+        }}
+        result = self._mix(tmp_path, split_map, total_samples=40)
+
+        assert not set(result['a']['text']) & set(result['train']['text'])
+
+    def test_the_whole_train_split_stays_available_for_sampling(self, tmp_path):
+        """Nothing is carved away, so every training example can be sampled."""
+        split_map = {'a': {
+            'train': [f"t{i}" for i in range(8)],
+            'validation': ['held-1'],
+        }}
+        result = self._mix(tmp_path, split_map, total_samples=8)
+
+        assert set(result['train']['text']) == {f"t{i}" for i in range(8)}
+
+    def test_a_source_without_one_is_still_carved(self, tmp_path):
+        split_map = {'a': {'train': [f"t{i}" for i in range(8)]}}
+        result = self._mix(tmp_path, split_map)
+
+        assert 'a' in result
+        assert set(result['a']['text']) <= {f"t{i}" for i in range(8)}
+
+    def test_a_per_source_dev_size_overrides_the_canonical_split(self, tmp_path):
+        split_map = {'a': {
+            'train': [f"t{i}" for i in range(8)],
+            'validation': ['held-1', 'held-2'],
+        }}
+        result = self._mix(
+            tmp_path, split_map, sources=[{'id': 'a', 'dev_size': 0.25}]
+        )
+
+        assert not set(result['a']['text']) & {'held-1', 'held-2'}
+
+    def test_skipping_dev_still_skips(self, tmp_path):
+        split_map = {'a': {'train': ['t0', 't1'], 'validation': ['held-1']}}
+        result = self._mix(tmp_path, split_map, dev_size=-1)
+
+        assert set(result) == {'train'}
+
+    def test_validation_wins_over_other_dev_names(self, tmp_path):
+        split_map = {'a': {
+            'train': ['t0', 't1'],
+            'validation': ['canonical'],
+            'dev': ['other'],
+        }}
+        result = self._mix(tmp_path, split_map)
+
+        assert result['a']['text'] == ['canonical']
+
+    def test_a_test_split_is_not_mistaken_for_dev(self, tmp_path):
+        split_map = {'a': {'train': [f"t{i}" for i in range(8)], 'test': ['unseen']}}
+        result = self._mix(tmp_path, split_map)
+
+        assert 'unseen' not in result['a']['text']
+
+    def test_a_source_with_no_train_split_is_refused_clearly(self, tmp_path):
+        split_map = {'a': {'validation': ['only']}}
+        with pytest.raises(ValueError, match="no 'train' split"):
+            self._mix(tmp_path, split_map)

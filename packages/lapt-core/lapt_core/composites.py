@@ -19,10 +19,18 @@ so it is handed a `child_factory` instead. The seam is deliberately narrow:
     (cache_dir, source_config, seed) -> DatasetArtifact
 
 `seed` is included because a child may subsample and must not silently fall
-back to global RNG state. A dev-split size is deliberately *excluded*: a
-composite's children must not hold out their own dev sets, because the mix does
+back to global RNG state. A dev-split *size* is deliberately excluded: a child
+must not carve its own dev set out of its training data, because the mix does
 that itself, before upsampling, so that a repeated training example cannot also
 appear in dev.
+
+That argument is about *random* splitting, and does not extend to a corpus that
+arrives already split. A canonical dev split -- `validation` on a Hub dataset,
+say -- is disjoint from its own train by construction, upstream, before anything
+here touches it, so using it as that source's dev set leaks nothing no matter
+how heavily train is later upsampled. It is also the split everyone else reports
+on. `MultinomialArtifact` therefore prefers a child's canonical dev split when
+it has one and carves only when it does not.
 
 `sources` arrive as plain dicts. Unwrapping a configuration object -- a Hydra
 `DictConfig`, say -- is the caller's job, done once at the boundary, which is
@@ -45,6 +53,30 @@ from lapt_core.mixing import (
 )
 
 ChildFactory = Callable[[str, dict, int], DatasetArtifact]
+
+# Split names that mean "held out for model selection", most preferred first.
+# Anything that is not `train` or `test` counts, which matches how consumers
+# already read a DatasetDict; the list only decides precedence when a corpus
+# ships more than one such split.
+DEV_SPLIT_NAMES = ('validation', 'dev', 'val')
+
+
+def canonical_dev_split(data) -> str | None:
+    """Return the name of a dataset's own dev split, if it has one.
+
+    Args:
+        data: A `DatasetDict`, or any mapping of split name to split.
+
+    Returns:
+        The split name, or None if the dataset carries only `train`/`test`.
+    """
+    candidates = [name for name in data if name not in ('train', 'test')]
+    if not candidates:
+        return None
+    for preferred in DEV_SPLIT_NAMES:
+        if preferred in candidates:
+            return preferred
+    return sorted(candidates)[0]
 
 SKIP_DEV_SPLIT = -1
 
@@ -286,10 +318,13 @@ class MultinomialArtifact(DatasetArtifact):
         return os.path.join(self.mix_dir, self.name)
 
     def _split_source(self, index: int, source_config) -> tuple[str, object, object]:
-        """Resolve one source and hold out its dev split.
+        """Resolve one source and obtain its dev split.
 
-        Splitting before upsampling is what keeps a repeated training example
-        out of dev.
+        A source that ships its own dev split keeps it. Otherwise one is carved
+        from the training data, before upsampling, which is what keeps a
+        repeated training example out of dev. A per-source `dev_size` override
+        forces carving even when a canonical split exists, since asking for a
+        specific size can only mean a deliberately different split.
 
         Args:
             index: Position in the source list, for naming and messages.
@@ -300,13 +335,19 @@ class MultinomialArtifact(DatasetArtifact):
 
         Raises:
             ValueError: On a per-source `dev_size` of 0 or a negative value
-                other than -1.
+                other than -1, or if the source has no `train` split.
         """
         child_id = source_id(source_config, fallback=f"source_{index}")
         child = self.child_factory(
             os.path.join(self.root, child_id), source_config, self.seed
         )
-        full_data = child.resolve()['train']
+        child_data = child.resolve()
+        if 'train' not in child_data:
+            raise ValueError(
+                f"Source {index} ({child_id}) has no 'train' split to sample "
+                f"from; it carries {sorted(child_data)}."
+            )
+        full_data = child_data['train']
 
         source_dev_size = field(source_config, 'dev_size', self.dev_size)
         if source_dev_size == 0:
@@ -320,17 +361,29 @@ class MultinomialArtifact(DatasetArtifact):
                 f"got {source_dev_size}."
             )
 
+        has_override = field(source_config, 'dev_size') is not None
+        own_dev = canonical_dev_split(child_data)
+
         if source_dev_size == SKIP_DEV_SPLIT:
             train_data, dev_data = full_data, None
+            label = (
+                f"dev_size={source_dev_size}" if has_override
+                else f"global dev_size={source_dev_size}"
+            )
+        elif own_dev is not None and not has_override:
+            # Disjoint from train upstream, so no amount of upsampling can leak
+            # it -- and it is the split results are comparable on.
+            train_data, dev_data = full_data, child_data[own_dev]
+            label = f"own '{own_dev}' split"
         else:
             split = full_data.train_test_split(test_size=source_dev_size, seed=self.seed)
             train_data, dev_data = split['train'], split['test']
-
-        has_override = field(source_config, 'dev_size') is not None
-        label = (
-            f"dev_size={source_dev_size}" if has_override
-            else f"global dev_size={source_dev_size}"
-        )
+            if own_dev is not None:
+                label = f"carved, dev_size={source_dev_size} overrides '{own_dev}'"
+            elif has_override:
+                label = f"carved, dev_size={source_dev_size}"
+            else:
+                label = f"carved, global dev_size={source_dev_size}"
         if dev_data is not None:
             print(
                 f"  Source {index} ({child_id}): {len(train_data)} train, "
