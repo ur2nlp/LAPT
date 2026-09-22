@@ -1,0 +1,30 @@
+# Exact versions of the CIRC cluster environment that Gothic results were
+# produced under, as of 2026-09.
+#
+# Why this is a separate file rather than tighter bounds in environment.yml:
+# environment.yml and pyproject.toml are byte-identical between `main` and the
+# project branches, so `git merge main` never conflicts on them. Pinning in
+# place would put a conflict on those lines in every propagation, forever.
+# This file simply does not exist on `main`.
+#
+# Apply after creating the environment:
+#
+#     conda env create -f environment.yml
+#     conda activate lapt
+#     conda install --file cluster-pins.txt
+#     pip install torch==2.9.0
+#
+# torch is listed as a comment, not a spec line: it is installed through pip
+# (see the pip block in environment.yml) and `conda install --file` cannot
+# read pip requirements. The cluster build is torch 2.9.0 against CUDA 12.9.
+#
+# `main` deliberately keeps loose bounds so a fork is not tied to this site's
+# hardware; see the "Tested on" block at the bottom of environment.yml.
+
+transformers=4.57.1
+tokenizers=0.22.1
+accelerate=1.11.0
+numpy=1.26.4
+
+# Installed via pip, not conda -- see the header:
+#   torch==2.9.0            (CUDA 12.9 build)
