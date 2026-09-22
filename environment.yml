@@ -5,13 +5,17 @@ dependencies:
   - python=3.11.*
   - datasets=3.*
   - hydra-core=1.*
-  # Capped for the wider stack, not for any one package. The original reason
-  # was plotnine, which is no longer valid: plotnine 0.15.x declares
-  # numpy>=1.23.5 with no upper bound, and every plotnine consumer in tools/
-  # renders byte-identically under numpy 2.4 (verified 2026-09-22). What has
-  # *not* been tested is torch/transformers/datasets/sentencepiece under
-  # numpy 2, which is the real risk surface. Drop this once a full environment
-  # has been built and a training run smoke-tested against it.
+  # Precautionary, and the only remaining doubt is runtime behaviour. The
+  # original reason was plotnine, which no longer applies: 0.15.x declares
+  # numpy>=1.23.5 with no ceiling, and every plotnine consumer in tools/ and
+  # gothic/ renders byte-identically under numpy 2.4 (verified 2026-09-22).
+  # Nothing else here *declares* a numpy<2 cap either -- the full set including
+  # deepfocus/fasttext, torch 2.14 and transformers 4.57.6 resolves cleanly
+  # against numpy 2. So lifting this needs a built environment and a training
+  # smoke test, not a dependency audit.
+  #
+  # Note the sibling ASR repository is in a different position: pyctcdecode
+  # hard-declares numpy<2.0.0 there, so its cap is mandatory, not a choice.
   - numpy<2.0
   - pandas
   - plotnine
