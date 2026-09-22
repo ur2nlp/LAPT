@@ -12,9 +12,12 @@ license = "MIT"
 authors = [{ name = "C.M. Downey", email = "cmdowney.nlp@gmail.com" }]
 
 # Mirrors environment.yml, which remains the canonical setup path for the
-# cluster (conda supplies the CUDA-linked torch build). This list exists so CI
-# and contributors can `pip install -e .` without conda. Pin minor versions only
-# where reproducibility depends on it.
+# cluster. This list exists so CI and contributors can `pip install -e .`
+# without conda. Pin minor versions only where reproducibility depends on it.
+#
+# Note that torch and accelerate come from pip in environment.yml too, not
+# conda -- see the comment there. Nothing in this project installs a
+# conda-supplied torch, so the CUDA build is always pip's to choose.
 dependencies = [
     "accelerate>=0.26",
     "datasets>=3,<4",

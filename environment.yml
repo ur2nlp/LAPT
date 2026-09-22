@@ -3,7 +3,6 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11.*
-  - accelerate>=0.26
   - datasets=3.*
   - hydra-core=1.*
   # Capped for the wider stack, not for any one package. The original reason
@@ -44,6 +43,15 @@ dependencies:
     # checkpoints; safetensors is exempt. No upper bound -- the CUDA build is
     # the installing site's concern, not this template's.
     - torch>=2.6
+    # Installed through pip rather than conda on purpose. conda-forge's
+    # `accelerate` hard-requires `pytorch>=2.0.0`, so listing it as a conda
+    # dependency pulls a conda `pytorch` + `libtorch` pair -- a CPU build --
+    # which pip then displaces when it installs `torch` above. What is left
+    # behind is ~200 MB of orphaned CPU `libtorch` libraries that nothing
+    # uses, and on a GPU node the risk of resolving against them.
+    # Verified with `conda env create --dry-run`: 240 conda packages
+    # including pytorch/libtorch before this move, 218 and neither after.
+    - accelerate>=0.26
     - deepfocus
 
 # Tested on (CIRC cluster, 2026-09):
