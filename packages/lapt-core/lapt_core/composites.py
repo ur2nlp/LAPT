@@ -50,7 +50,16 @@ SKIP_DEV_SPLIT = -1
 
 
 class ConcatArtifact(DatasetArtifact):
-    """Several sources concatenated into one training split.
+    """Several sources concatenated, split by split.
+
+    Every split name any source carries becomes a split of the result,
+    concatenated across the sources that have it. An earlier version took each
+    child's `train` and returned a single-split result, which silently dropped
+    held-out data that the configuration had asked for -- harmless while every
+    source was undifferentiated text, wrong as soon as one arrives pre-split, as
+    speech corpora routinely do (a Hub dataset with `train`/`validation`/`test`,
+    a paired directory with `train/` and `test/` subdirectories). It also raised
+    `KeyError` on a source with no `train` split at all.
 
     Children are resolved through the same registry as any other source, so a
     child may itself be composite. Each child caches under its own
@@ -123,29 +132,38 @@ class ConcatArtifact(DatasetArtifact):
         return built
 
     def build(self, deps) -> DatasetDict:
-        """Resolve each child and concatenate their training splits.
+        """Resolve each child and concatenate them split by split.
 
         Args:
             deps: Unused; children are resolved here rather than injected,
                 since the child set is only known from the configuration.
 
         Returns:
-            A `DatasetDict` with a single `train` split.
+            A `DatasetDict` holding every split name any source carried, each
+            concatenated across the sources that have it, in configuration
+            order.
         """
         print(f"Concatenating {len(self.sources)} dataset sources", file=sys.stderr)
 
-        to_concat = []
+        splits: dict[str, list] = {}
         for index, (child_id, child) in enumerate(self.children()):
             child_data = child.resolve()
-            to_concat.append(child_data['train'])
-            print(
-                f"  Source {index} ({child_id}): {len(child_data['train'])} examples",
-                file=sys.stderr,
+            for split_name, split_data in child_data.items():
+                splits.setdefault(split_name, []).append(split_data)
+            sizes = ", ".join(
+                f"{name}={len(data)}" for name, data in child_data.items()
             )
+            print(f"  Source {index} ({child_id}): {sizes}", file=sys.stderr)
 
-        concatenated = concatenate_datasets(to_concat)
-        print(f"  Concatenated to {len(concatenated)} total examples", file=sys.stderr)
-        return DatasetDict({'train': concatenated})
+        concatenated = DatasetDict({
+            split_name: concatenate_datasets(split_list)
+            for split_name, split_list in splits.items()
+        })
+        totals = ", ".join(
+            f"{name}={len(data)}" for name, data in concatenated.items()
+        )
+        print(f"  Concatenated to {totals}", file=sys.stderr)
+        return concatenated
 
 
 class MultinomialArtifact(DatasetArtifact):
