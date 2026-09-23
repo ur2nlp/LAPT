@@ -125,6 +125,119 @@ Selective rebuilds, each clearing everything downstream of it:
 | `fresh_tokenizer=true` | the tokenizer, the tokenized data, and the model |
 | `fresh_model=true` | model checkpoints only |
 
+## Experiment Tracking
+
+Runs are tracked by **experiment id** — the `experiment_id` you pass at launch,
+which also names the output directory. Everything below keys on it.
+
+```bash
+python -m lapt experiment_id=lr4e-5 training.learning_rate=4e-5
+```
+
+Three files per run live under `outputs/`:
+
+| path | holds |
+|---|---|
+| `outputs/configs/{id}.yaml` | the config the run was launched with |
+| `outputs/trainer_states/{id}.json` | the metric history HuggingFace wrote |
+| `outputs/registry.yaml` | one row per run: extracted params plus your notes |
+
+### Pulling runs off a cluster
+
+`fetch_results.sh` inventories the remote, works out what is missing or stale,
+and copies only that. No host or path is baked into the repository, so set them
+in your shell:
+
+```bash
+export LAPT_REMOTE=my-cluster                 # ssh host, or an alias from ~/.ssh/config
+export LAPT_MODEL_DIRS=/scratch/me/LAPT/models # colon-separated for several roots
+```
+
+```bash
+bash scripts/fetch_results.sh
+```
+
+Finished runs are never re-fetched, and an in-progress run has only its
+trainer state refreshed — a config cannot change mid-run. To see what it would
+do without moving anything:
+
+```bash
+INV="ssh $LAPT_REMOTE 'bash -s' < tools/remote_inventory.sh -- -b $LAPT_MODEL_DIRS"
+eval "$INV" | python tools/fetch_diff.py --dry-run
+```
+
+### Registering and annotating runs
+
+`extract` reads configs and upserts a row per run. It is safe to re-run; it
+updates rather than duplicates.
+
+```bash
+python tools/registry.py extract outputs/configs/lr4e-5.yaml
+python tools/registry.py extract --pattern 'outputs/configs/lr.*\.yaml'
+```
+
+The parameters come from the config automatically. What only you can supply is
+why the run existed and what it showed:
+
+```bash
+python tools/registry.py annotate lr4e-5 \
+    --note "lr 4e-5, 32k adapted vocabulary, effective batch 60" \
+    --observation "best held-out bpc in this sweep; larger model plateaus above it" \
+    --era adapted-vocab --group lr-sweep
+```
+
+`--status manually_closed` retires a run, which also stops `fetch_results.sh`
+re-fetching it.
+
+### Reading the registry
+
+```bash
+python tools/registry.py show                      # everything
+python tools/registry.py show --era adapted-vocab --group lr-sweep
+python tools/registry.py diff lr2e-5 lr4e-5        # only what differs
+python tools/registry.py verify                    # rows still match outputs/configs/
+python tools/registry.py debt                      # runs on disk with no row, rows with no note
+```
+
+`diff` is the one to reach for when comparing a sweep: it prints only the
+parameters that vary across the runs you name and lists the rest as constant, so
+a forty-field config collapses to the three things you actually changed.
+
+`debt --strict` exits non-zero, which makes it usable as a pre-commit or CI check
+that no run went un-annotated.
+
+### Plotting
+
+`training_plot.py` reads trainer states directly — no registry required.
+
+```bash
+# one run, several metrics
+python tools/training_plot.py --metrics loss eval_loss \
+    --state-file outputs/trainer_states/lr4e-5.json
+
+# compare runs; --state-pattern is a regex over paths
+python tools/training_plot.py --metric "eval_.*_bpc" \
+    --state-pattern "outputs/trainer_states/lr(2|4)e-5\.json"
+
+# discover what a run actually logged
+python tools/training_plot.py --list-metrics --state-file outputs/trainer_states/lr4e-5.json
+```
+
+Metric names are regexes, so `--metric "eval_.*_bpc"` draws every per-language
+bpc series on one panel and `--metrics loss "eval_.*"` gives one panel per match.
+
+Useful when the defaults fight you:
+
+| flag | does |
+|---|---|
+| `--output plot.png` | save instead of opening a window |
+| `--ylim 0 5` | shared y-limits across panels |
+| `--ylims eval_loss:1:3` | per-metric limits; repeatable, wins over `--ylim` |
+| `--run-names baseline adapted` | legend labels instead of file paths |
+| `--exclude-pattern` | drop runs the state pattern swept up |
+| `--x-axis epoch` | plot against epochs rather than steps |
+| `--dark` | light-on-dark, for slides |
+
 ## Project Structure
 
 - `lapt/` - Framework source (installable package)
