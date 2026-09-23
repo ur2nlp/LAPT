@@ -131,7 +131,7 @@ Runs are tracked by **experiment id** — the `experiment_id` you pass at launch
 which also names the output directory. Everything below keys on it.
 
 ```bash
-python -m lapt experiment_id=lr4e-5 training.learning_rate=4e-5
+python -m lapt experiment_id=<your_run_id> training.learning_rate=4e-5
 ```
 
 Three files per run live under `outputs/`:
@@ -149,8 +149,8 @@ and copies only that. No host or path is baked into the repository, so set them
 in your shell:
 
 ```bash
-export LAPT_REMOTE=my-cluster                 # ssh host, or an alias from ~/.ssh/config
-export LAPT_MODEL_DIRS=/scratch/me/LAPT/models # colon-separated for several roots
+export LAPT_REMOTE=<ssh_host_or_alias>        # e.g. a Host entry in ~/.ssh/config
+export LAPT_MODEL_DIRS=<remote_models_dir>    # colon-separated for several roots
 ```
 
 ```bash
@@ -172,7 +172,9 @@ eval "$INV" | python tools/fetch_diff.py --dry-run
 updates rather than duplicates.
 
 ```bash
-python tools/registry.py extract outputs/configs/lr4e-5.yaml
+python tools/registry.py extract outputs/configs/<your_run_id>.yaml
+
+# --pattern takes a regex over paths; this takes every id starting with 'lr'
 python tools/registry.py extract --pattern 'outputs/configs/lr.*\.yaml'
 ```
 
@@ -180,10 +182,10 @@ The parameters come from the config automatically. What only you can supply is
 why the run existed and what it showed:
 
 ```bash
-python tools/registry.py annotate lr4e-5 \
+python tools/registry.py annotate <your_run_id> \
     --note "lr 4e-5, 32k adapted vocabulary, effective batch 60" \
     --observation "best held-out bpc in this sweep; larger model plateaus above it" \
-    --era adapted-vocab --group lr-sweep
+    --era <your_era> --group <your_group>
 ```
 
 `--status manually_closed` retires a run, which also stops `fetch_results.sh`
@@ -193,8 +195,8 @@ re-fetching it.
 
 ```bash
 python tools/registry.py show                      # everything
-python tools/registry.py show --era adapted-vocab --group lr-sweep
-python tools/registry.py diff lr2e-5 lr4e-5        # only what differs
+python tools/registry.py show --era <your_era> --group <your_group>
+python tools/registry.py diff lr2e-5 lr4e-5        # only what differs (ids are examples)
 python tools/registry.py verify                    # rows still match outputs/configs/
 python tools/registry.py debt                      # runs on disk with no row, rows with no note
 ```
@@ -213,14 +215,14 @@ that no run went un-annotated.
 ```bash
 # one run, several metrics
 python tools/training_plot.py --metrics loss eval_loss \
-    --state-file outputs/trainer_states/lr4e-5.json
+    --state-file outputs/trainer_states/<your_run_id>.json
 
-# compare runs; --state-pattern is a regex over paths
+# compare runs; --state-pattern is a regex over paths (ids here are examples)
 python tools/training_plot.py --metric "eval_.*_bpc" \
     --state-pattern "outputs/trainer_states/lr(2|4)e-5\.json"
 
 # discover what a run actually logged
-python tools/training_plot.py --list-metrics --state-file outputs/trainer_states/lr4e-5.json
+python tools/training_plot.py --list-metrics --state-file outputs/trainer_states/<your_run_id>.json
 ```
 
 Metric names are regexes, so `--metric "eval_.*_bpc"` draws every per-language
