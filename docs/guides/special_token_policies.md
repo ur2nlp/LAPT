@@ -52,10 +52,11 @@ There is no structure to lose.
 ### Append above the learned block
 
 Some base models have a special-token block that is *structured*, and the
-structure is load-bearing. A speech model may hold a start-of-transcript token,
-a contiguous run of language tokens, task tokens, and a long run of timestamp
-tokens — with its generation config addressing them through index arithmetic and
-through language/task maps, not just by name.
+structure is load-bearing. Whisper is the clearest case: its added-token block
+holds `<|startoftranscript|>`, a contiguous run of language tokens,
+`<|transcribe|>`/`<|translate|>`, `<|notimestamps|>`, `<|endoftext|>`, and 1501
+timestamp tokens — and its generation config addresses them through index
+arithmetic and through `lang_to_id`/`task_to_id` maps, not just by name.
 
 Minting those into SentencePiece scatters them through the learned vocabulary
 and destroys the arithmetic. The alternative is to train only `<unk>`, then
@@ -73,6 +74,13 @@ internally consistent. Which means this policy is only half a mechanism:
     you get a tokenizer that is internally correct and a checkpoint whose
     configs point at the wrong rows.
 
+!!! note "Reference implementation"
+    [`ur2nlp/ASR`](https://github.com/ur2nlp/ASR) applies this policy to Whisper
+    in [`src/focus.py`](https://github.com/ur2nlp/ASR/blob/main/src/focus.py).
+    `_append_base_special_tokens` re-attaches the block and verifies that it
+    landed contiguously and in order; `remap_special_token_ids` is the companion
+    pass that rewrites `config` and `generation_config` by name.
+
 ## What LAPT implements
 
 The first two, chosen automatically by `_assign_special_token_ids` in
@@ -83,7 +91,7 @@ LAPT does **not** implement the third. The decoder-only bases it targets have no
 structured special block, and the policy would be incomplete without the
 model-side remap described above. If you are adapting LAPT to a base model whose
 special block carries arithmetic, that is the gap to fill, and you need both
-halves.
+halves — the reference implementation above is a worked example.
 
 ## Do not collapse these into one policy
 
