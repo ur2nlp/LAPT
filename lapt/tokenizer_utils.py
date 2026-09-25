@@ -23,6 +23,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase, PreTrainedToken
 
 from lapt.artifact_configs import TokenizerConfig
 from lapt_core.artifacts import ArtifactConfig, CachedArtifact
+from lapt_core.spm import apply_spm_pipeline, create_bpe_backend, create_unigram_backend
 
 
 def prepare_focus_training_data(
@@ -274,16 +275,16 @@ class TokenizerArtifact(CachedArtifact):
 
         # Convert SentencePiece model to HuggingFace tokenizer backend. Both branches
         # build the model manually and apply the same SentencePiece pipeline via
-        # _apply_spm_pipeline, so Unigram and BPE stay as comparable as possible.
+        # lapt_core.spm, so Unigram and BPE stay as comparable as possible.
         if model_type == 'bpe':
             model_file = os.path.join(output_path, 'spm.model')
-            backend_tokenizer = _create_bpe_tokenizer(
+            backend_tokenizer = create_bpe_backend(
                 spm_model_path=model_file,
                 vocab_scores=vocab_with_scores,
                 unk_token=special_tokens_config['unk_piece'],
             )
         else:
-            backend_tokenizer = _create_unigram_tokenizer(
+            backend_tokenizer = create_unigram_backend(
                 vocab_with_scores,
                 unk_id=special_tokens_config['unk_id'],
             )
@@ -421,106 +422,7 @@ def _detect_tokenizer_algorithm(tokenizer: PreTrainedTokenizerFast) -> str:
         )
 
 
-def _apply_spm_pipeline(backend_tokenizer) -> None:
-    """
-    Configure the normalizer, pre-tokenizer, and decoder to match SentencePiece.
 
-    Shared by the Unigram and BPE fresh-tokenizer branches so both reproduce
-    identical text handling regardless of the underlying model:
-    - Empty normalizer: no text transformations (matches normalization_rule_name='identity')
-    - Metaspace pre-tokenizer: handle spaces as ▁ tokens (SentencePiece convention)
-    - Metaspace decoder: convert ▁ back to spaces when decoding (see
-      decisions/metaspace_decoder.md - required for FOCUS encode/decode consistency)
-
-    Args:
-        backend_tokenizer: A tokenizers.Tokenizer to configure in place
-    """
-    from tokenizers import decoders, normalizers
-    from tokenizers.pre_tokenizers import Metaspace
-
-    backend_tokenizer.normalizer = normalizers.Sequence(normalizers=[])  # type: ignore
-    backend_tokenizer.pre_tokenizer = Metaspace(replacement="▁", prepend_scheme="always")
-    backend_tokenizer.decoder = decoders.Metaspace(replacement="▁", prepend_scheme="always")
-
-
-def _create_unigram_tokenizer(vocab_scores: list[tuple[str, float]], unk_id: int = 0):
-    """
-    Create a HuggingFace Tokenizer with Unigram model from SentencePiece vocabulary.
-
-    Builds a complete tokenization pipeline with:
-    - Unigram model initialized with vocab and scores
-    - Shared SentencePiece pipeline (empty normalizer + Metaspace pre-tokenizer/decoder)
-
-    Args:
-        vocab_scores: List of (token, score) tuples from SentencePiece model
-        unk_id: Token ID for unknown tokens (default: 0)
-
-    Returns:
-        Configured Tokenizer object ready for use with PreTrainedTokenizerFast
-    """
-    from tokenizers import Tokenizer
-    from tokenizers.models import Unigram
-
-    # Initialize Unigram model with vocabulary and scores from SentencePiece
-    # byte_fallback=False: use <unk> for unknown chars (matches SentencePiece training)
-    unigram_model = Unigram(vocab_scores, unk_id=unk_id, byte_fallback=False)
-    backend_tokenizer = Tokenizer(unigram_model)
-
-    _apply_spm_pipeline(backend_tokenizer)
-
-    return backend_tokenizer
-
-
-def _create_bpe_tokenizer(
-    spm_model_path: str,
-    vocab_scores: list[tuple[str, float]],
-    unk_token: str,
-):
-    """
-    Create a HuggingFace Tokenizer with BPE model from a SentencePiece BPE model.
-
-    A SentencePiece BPE model stores only pieces and their scores, not an explicit
-    merge list, so the merges must be reconstructed. This mirrors HuggingFace's own
-    ``SpmConverter`` (transformers.convert_slow_tokenizer): the merges are derived
-    from the piece scores via ``SentencePieceExtractor`` (higher score = earlier
-    merge), and the vocabulary IDs follow the piece order.
-
-    The same shared SentencePiece pipeline as the Unigram branch is applied so the
-    two algorithms are as comparable as possible (identical normalizer,
-    pre-tokenizer, and decoder).
-
-    Args:
-        spm_model_path: Path to the trained SentencePiece .model file
-        vocab_scores: List of (token, score) tuples from the SentencePiece model,
-            in piece-ID order
-        unk_token: Unknown-token string (e.g. base tokenizer's ``<unk>``)
-
-    Returns:
-        Configured Tokenizer object ready for use with PreTrainedTokenizerFast
-    """
-    from tokenizers import Tokenizer
-    from tokenizers.models import BPE
-    from transformers.convert_slow_tokenizer import SentencePieceExtractor
-
-    # Reconstruct merges from piece scores, exactly as transformers' SpmConverter does.
-    _, merges = SentencePieceExtractor(spm_model_path).extract(vocab_scores)
-    bpe_vocab = {piece: index for index, (piece, _score) in enumerate(vocab_scores)}
-
-    # fuse_unk=True and byte_fallback=False match the SpmConverter defaults for a
-    # (non-byte-level) SentencePiece BPE model trained with byte_fallback disabled.
-    bpe_model = BPE(
-        bpe_vocab,
-        merges,
-        unk_token=unk_token,
-        fuse_unk=True,
-        byte_fallback=False,
-        dropout=None,
-    )
-    backend_tokenizer = Tokenizer(bpe_model)
-
-    _apply_spm_pipeline(backend_tokenizer)
-
-    return backend_tokenizer
 
 
 def _copy_base_post_processor(
@@ -536,7 +438,7 @@ def _copy_base_post_processor(
     their ids — XGLM's prepends ``</s>`` to every input, which the adapted model
     still expects. Other post-processors belong to their own pipeline: Qwen3's
     ``ByteLevel`` post-processor assumes byte-level pre-tokenization and would
-    corrupt offsets on the metaspace pipeline ``_apply_spm_pipeline`` installs.
+    corrupt offsets on the metaspace pipeline ``lapt_core.spm`` installs.
 
     Args:
         backend_tokenizer: Newly built ``tokenizers.Tokenizer`` to modify in place

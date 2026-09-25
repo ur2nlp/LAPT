@@ -71,8 +71,9 @@ from transformers import AutoTokenizer, PreTrainedTokenizerFast
 # editable install, for running this script straight from a checkout.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from lapt_core.spm import create_unigram_backend
+
 from lapt.tokenizer_utils import (
-    _create_unigram_tokenizer,
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _train_sentencepiece_model,
@@ -474,7 +475,7 @@ def build_combined_tokenizer(
             break
 
     # Build HuggingFace tokenizer from combined vocab+scores
-    backend_tokenizer = _create_unigram_tokenizer(combined, unk_id=unk_id)
+    backend_tokenizer = create_unigram_backend(combined, unk_id=unk_id)
 
     # Copy post-processor from base tokenizer (critical for XGLM's EOS prepending)
     if (
@@ -796,7 +797,7 @@ def main():
                 unk_id = i
                 break
 
-        backend_tokenizer = _create_unigram_tokenizer(refined_vocab, unk_id=unk_id)
+        backend_tokenizer = create_unigram_backend(refined_vocab, unk_id=unk_id)
         if (
             hasattr(base_tokenizer, '_tokenizer')
             and hasattr(base_tokenizer._tokenizer, 'post_processor')
