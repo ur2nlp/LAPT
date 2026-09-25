@@ -320,6 +320,7 @@ class TokenizerArtifact(CachedArtifact):
                     'additional_special_tokens': base_tokenizer.additional_special_tokens
                 })
 
+        _validate_special_token_ids(new_tokenizer, special_tokens_config)
         _validate_tokenizer(new_tokenizer, config.vocab_size)
         return new_tokenizer
 
@@ -680,6 +681,51 @@ def _assign_special_token_ids(
         file=sys.stderr,
     )
     return assigned_ids
+
+
+def _validate_special_token_ids(
+    tokenizer: PreTrainedTokenizerBase,
+    special_tokens_config: dict,
+) -> None:
+    """
+    Check that each special-token role landed on the id it was assigned.
+
+    The ids in ``special_tokens_config`` are a *request*: they are handed to
+    SentencePiece as ``unk_id``/``bos_id``/``eos_id``/``pad_id`` and then have to
+    survive the conversion to a HuggingFace backend and the role resolution in
+    ``_resolve_hf_special_tokens``, which drops a role to None when its piece is
+    absent from the trained vocabulary. Nothing downstream re-checks the result,
+    so a role that silently went missing surfaces much later as a model that
+    never stops generating (see .claude/deep_dives/generation_config_eos_bug.md).
+
+    Roles the base model lacks carry id -1 and are skipped, as is an aliased role
+    such as Qwen3's pad, which is deliberately trained with -1 and recovered by
+    string.
+
+    Args:
+        tokenizer: The tokenizer just built
+        special_tokens_config: Output of _extract_special_tokens
+
+    Raises:
+        ValueError: If a requested role is missing or sits on a different id
+    """
+    mismatches = []
+    for role in SPECIAL_TOKEN_ROLES:
+        requested_id = special_tokens_config.get(f'{role}_id', -1)
+        if requested_id < 0:
+            continue
+        actual_id = getattr(tokenizer, f'{role}_token_id', None)
+        if actual_id != requested_id:
+            piece = special_tokens_config.get(f'{role}_piece')
+            mismatches.append(
+                f"{role} ({piece!r}): requested id {requested_id}, got {actual_id}"
+            )
+
+    if mismatches:
+        raise ValueError(
+            "Special-token ids did not survive tokenizer construction: "
+            + "; ".join(mismatches)
+        )
 
 
 def _base_special_token_ids_preserved(
