@@ -10,6 +10,7 @@ from lapt.tokenizer_utils import (
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _resolve_hf_special_tokens,
+    _validate_special_token_ids,
     _validate_tokenizer,
 )
 
@@ -263,6 +264,65 @@ class TestSpecialTokensNonXglmBase:
         resolved = _resolve_hf_special_tokens(stub, config, {"▁a", "▁b"})
 
         assert all(token is None for token in resolved.values())
+
+
+class TestSpecialTokenIdValidation:
+    """
+    Tests for the post-condition that special tokens kept their assigned ids.
+
+    The ids in special_tokens_config are a request made to SentencePiece, not a
+    fact about the built tokenizer, so they are checked after the fact.
+    """
+
+    class _Built:
+        """A tokenizer stand-in exposing only the role ids the check reads."""
+
+        def __init__(self, **role_ids):
+            for role, token_id in role_ids.items():
+                setattr(self, f"{role}_token_id", token_id)
+
+    def test_passes_when_every_requested_id_survived(self):
+        config = {"unk_piece": "<unk>", "unk_id": 3, "eos_piece": "</s>", "eos_id": 2}
+        built = self._Built(unk=3, bos=None, eos=2, pad=None)
+
+        _validate_special_token_ids(built, config)
+
+    def test_rejects_a_role_that_moved(self):
+        config = {"eos_piece": "</s>", "eos_id": 2}
+        built = self._Built(unk=None, bos=None, eos=7, pad=None)
+
+        with pytest.raises(ValueError, match="requested id 2, got 7"):
+            _validate_special_token_ids(built, config)
+
+    def test_rejects_a_role_that_vanished(self):
+        """
+        _resolve_hf_special_tokens drops a role to None when its piece is absent
+        from the trained vocabulary. That is the right call there, but nothing
+        downstream noticed, which is how an eos goes missing unremarked.
+        """
+        config = {"eos_piece": "</s>", "eos_id": 2}
+        built = self._Built(unk=None, bos=None, eos=None, pad=None)
+
+        with pytest.raises(ValueError, match="requested id 2, got None"):
+            _validate_special_token_ids(built, config)
+
+    def test_skips_roles_the_base_model_lacks(self):
+        """A role carrying id -1 was never requested, so it cannot have moved."""
+        config = {"bos_id": -1, "pad_id": -1, "unk_piece": "<unk>", "unk_id": 0}
+        built = self._Built(unk=0, bos=None, eos=None, pad=None)
+
+        _validate_special_token_ids(built, config)
+
+    def test_skips_an_aliased_pad(self):
+        """
+        Qwen3 sets pad_token == eos_token. SentencePiece cannot mint the string
+        twice, so pad is trained with -1 and recovered by string on the wrapper,
+        landing on the eos id. That is expected, not a mismatch.
+        """
+        config = {"eos_piece": "<|endoftext|>", "eos_id": 5, "pad_id": -1}
+        built = self._Built(unk=None, bos=None, eos=5, pad=5)
+
+        _validate_special_token_ids(built, config)
 
 
 class TestTokenizerValidation:
