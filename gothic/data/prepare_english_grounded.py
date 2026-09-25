@@ -86,7 +86,7 @@ def make_length_filter(
     response survives in full.
 
     The tokenization mirrors ``_tokenize_instruction_examples`` in
-    ``src/dataset_utils.py``: prompt with special tokens, response without, plus
+    ``lapt/tokenized_data.py``: prompt with special tokens, response without, plus
     one appended EOS. The filter is therefore tokenizer-specific.
 
     Args:

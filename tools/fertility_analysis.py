@@ -18,7 +18,11 @@ from transformers import AutoTokenizer
 
 # Allow imports from src/
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from lapt.tokenizer_utils import extract_target_seed_vocab
+# NOTE: non-functional. `extract_target_seed_vocab`, `apply_character_weighting`
+# and `normalize_vocab_mass` were removed with the hybrid seed-vocabulary
+# feature in f7d1942 (2026-09-04); these two tools were never updated. The
+# module path below is current, the names are not.
+from lapt.tokenizer import extract_target_seed_vocab
 
 
 def load_corpus_word_counts(

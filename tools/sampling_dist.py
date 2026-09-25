@@ -1,7 +1,7 @@
 """
 Show sampling probabilities and exhaustion rates for a multinomial dataset.
 
-Mirrors the probability logic in src/dataset_utils.py:_compute_sampling_probs.
+Mirrors the probability logic in lapt/sources/sampling.py:compute_sampling_probs.
 Sources may have their probability pinned via --sp (sampling_prob) or --uf
 (upsampling_factor); remaining sources are weighted by alpha.
 
