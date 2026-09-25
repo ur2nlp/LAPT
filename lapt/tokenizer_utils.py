@@ -695,8 +695,9 @@ def _validate_special_token_ids(
     survive the conversion to a HuggingFace backend and the role resolution in
     ``_resolve_hf_special_tokens``, which drops a role to None when its piece is
     absent from the trained vocabulary. Nothing downstream re-checks the result,
-    so a role that silently went missing surfaces much later as a model that
-    never stops generating (see .claude/deep_dives/generation_config_eos_bug.md).
+    so a role that silently went missing surfaces much later and indirectly: a
+    vocabulary-adapted model whose eos is gone never emits a stop token, and
+    generation runs to max_new_tokens on every prompt.
 
     Roles the base model lacks carry id -1 and are skipped, as is an aliased role
     such as Qwen3's pad, which is deliberately trained with -1 and recovered by
