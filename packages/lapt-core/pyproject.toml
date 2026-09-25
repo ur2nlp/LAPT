@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lapt-core"
-version = "0.1.3"
+version = "0.1.4"
 description = "Content-tracked caching and dataset-mixing primitives for multi-stage training pipelines"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,6 +41,17 @@ tokenizers = [
     "tokenizers",
     "transformers>=4.40,<5",
     "sentencepiece",
+]
+
+# `lapt_core.plotting` is the only module that draws anything. plotnine pulls
+# pandas and matplotlib behind it, which is a large install for a consumer that
+# only wants the caching layer, so it stays optional. No version bounds: the
+# plotting API used here has been stable across plotnine 0.12-0.15, and the
+# numpy<2 cap plotnine once forced is gone (0.15.x declares numpy>=1.23.5 with
+# no ceiling).
+plotting = [
+    "pandas",
+    "plotnine",
 ]
 
 [project.urls]
