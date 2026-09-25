@@ -1,11 +1,11 @@
-"""Tests for tokenizer_utils module."""
+"""Tests for the tokenizer module."""
 
 import os
 
 import pytest
 
 from lapt.artifact_configs import TokenizerConfig
-from lapt.tokenizer_utils import (
+from lapt.tokenizer import (
     TokenizerArtifact,
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
@@ -602,7 +602,7 @@ from types import SimpleNamespace
 
 import torch
 
-from lapt.tokenizer_utils import (
+from lapt.focus import (
     LEGACY_INPUT_NAME,
     LEGACY_OUTPUT_NAME,
     _sidecar_paths,

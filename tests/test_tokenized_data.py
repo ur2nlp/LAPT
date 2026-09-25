@@ -1,4 +1,4 @@
-"""Tests for dataset_utils: tokenization, collation, and the tokenized stages.
+"""Tests for lapt.tokenized_data: the transformations and the tokenized stages.
 
 Per-source loading is covered by `tests/test_source_*.py`, one file per
 registered type, which exercise the artifact classes directly. This file
@@ -12,7 +12,6 @@ Testing approach:
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -20,253 +19,14 @@ from datasets import Dataset, DatasetDict, load_from_disk
 from transformers import AutoTokenizer
 
 from lapt.artifact_configs import DatasetConfig, TokenizedDatasetConfig
-from lapt.dataset_utils import (
+from lapt.tokenized_data import (
     TokenizedDatasetArtifact,
     TokenizedMultinomialMix,
     _partition_source_indices,
-    load_external_eval_set,
 )
 from lapt.sources.sampling import compute_sampling_probs
 
 
-class TestExternalEvalSetLoader:
-    """
-    Tests for loading and tokenizing external evaluation datasets.
-
-    Testing strategy:
-    - Use real files (via tmp_path) to test actual I/O
-    - Mock tokenizer for controlled tokenization behavior
-    - Test both plaintext and JSONL formats
-    - Test error cases (missing file, invalid format, missing columns)
-    """
-
-    def test_load_external_eval_plaintext(self, tmp_path):
-        """
-        Test loading a plaintext external eval set.
-
-        Strategy: Create real text file, mock tokenizer, verify tokenization.
-        """
-        # Setup: Create test plaintext file
-        test_file = tmp_path / "eval_data.txt"
-        test_lines = [
-            "First eval example",
-            "Second eval example",
-            "Third eval example",
-        ]
-        test_file.write_text("\n".join(test_lines))
-
-        # Create mock tokenizer
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = {
-            'input_ids': [[1, 2, 3]] * 3,
-            'attention_mask': [[1, 1, 1]] * 3
-        }
-
-        eval_config = {
-            'name': 'held_out',
-            'path': str(test_file),
-            'format': 'plaintext'
-        }
-
-        # Act: Load and tokenize
-        dataset = load_external_eval_set(
-            eval_config=eval_config,
-            tokenizer=mock_tokenizer,
-            max_length=512
-        )
-
-        # Assert: Verify dataset structure
-        assert isinstance(dataset, Dataset)
-        assert len(dataset) == 3
-
-        # Verify tokenizer was called correctly
-        assert mock_tokenizer.called
-        call_args = mock_tokenizer.call_args
-        assert call_args[1]['truncation'] is True
-        assert call_args[1]['max_length'] == 512
-
-    def test_load_external_eval_jsonl(self, tmp_path):
-        """
-        Test loading a JSONL external eval set.
-
-        Strategy: Create JSONL file, verify correct field extraction.
-        """
-        import json
-
-        # Setup: Create test JSONL file
-        test_file = tmp_path / "eval_data.jsonl"
-        test_data = [
-            {"text": "Example 1", "label": "A"},
-            {"text": "Example 2", "label": "B"},
-        ]
-        with open(test_file, 'w') as f:
-            for item in test_data:
-                f.write(json.dumps(item) + '\n')
-
-        # Create mock tokenizer
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = {
-            'input_ids': [[1, 2]] * 2,
-            'attention_mask': [[1, 1]] * 2
-        }
-
-        eval_config = {
-            'name': 'test_set',
-            'path': str(test_file),
-            'format': 'jsonl'
-        }
-
-        # Act: Load and tokenize
-        dataset = load_external_eval_set(
-            eval_config=eval_config,
-            tokenizer=mock_tokenizer,
-            max_length=256
-        )
-
-        # Assert: Verify dataset
-        assert len(dataset) == 2
-        assert mock_tokenizer.called
-
-    def test_load_external_eval_jsonl_custom_column(self, tmp_path):
-        """
-        Test loading JSONL with custom text column name.
-
-        Strategy: Use different field name, verify it's read correctly.
-        """
-        import json
-
-        test_file = tmp_path / "eval_data.jsonl"
-        test_data = [
-            {"content": "Custom field 1"},
-            {"content": "Custom field 2"},
-        ]
-        with open(test_file, 'w') as f:
-            for item in test_data:
-                f.write(json.dumps(item) + '\n')
-
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = {
-            'input_ids': [[1]] * 2,
-            'attention_mask': [[1]] * 2
-        }
-
-        eval_config = {
-            'name': 'custom',
-            'path': str(test_file),
-            'format': 'jsonl',
-            'text_column': 'content'
-        }
-
-        # Act: Load and tokenize
-        dataset = load_external_eval_set(
-            eval_config=eval_config,
-            tokenizer=mock_tokenizer,
-            max_length=256
-        )
-
-        # Assert: Should succeed
-        assert len(dataset) == 2
-
-    def test_load_external_eval_missing_file(self, tmp_path):
-        """
-        Test that loading non-existent file raises appropriate error.
-        """
-        mock_tokenizer = MagicMock()
-
-        eval_config = {
-            'name': 'missing',
-            'path': str(tmp_path / 'nonexistent.txt')
-        }
-
-        with pytest.raises(ValueError) as exc_info:
-            load_external_eval_set(
-                eval_config=eval_config,
-                tokenizer=mock_tokenizer,
-                max_length=512
-            )
-
-        assert "not found" in str(exc_info.value).lower()
-
-    def test_load_external_eval_invalid_format(self, tmp_path):
-        """
-        Test that unsupported format raises appropriate error.
-        """
-        test_file = tmp_path / "data.csv"
-        test_file.write_text("col1,col2\nval1,val2")
-
-        mock_tokenizer = MagicMock()
-
-        eval_config = {
-            'name': 'csv_test',
-            'path': str(test_file),
-            'format': 'csv'  # Unsupported format
-        }
-
-        with pytest.raises(ValueError) as exc_info:
-            load_external_eval_set(
-                eval_config=eval_config,
-                tokenizer=mock_tokenizer,
-                max_length=512
-            )
-
-        assert "unsupported format" in str(exc_info.value).lower()
-
-    def test_load_external_eval_jsonl_missing_column(self, tmp_path):
-        """
-        Test that JSONL with missing text column raises error.
-        """
-        import json
-
-        test_file = tmp_path / "bad_data.jsonl"
-        test_data = [{"wrong_field": "value"}]
-        with open(test_file, 'w') as f:
-            f.write(json.dumps(test_data[0]) + '\n')
-
-        mock_tokenizer = MagicMock()
-
-        eval_config = {
-            'name': 'bad_jsonl',
-            'path': str(test_file),
-            'format': 'jsonl',
-            'text_column': 'text'  # Expected column that doesn't exist
-        }
-
-        with pytest.raises(ValueError) as exc_info:
-            load_external_eval_set(
-                eval_config=eval_config,
-                tokenizer=mock_tokenizer,
-                max_length=512
-            )
-
-        assert "missing" in str(exc_info.value).lower()
-
-    def test_load_external_eval_strips_empty_lines(self, tmp_path):
-        """
-        Test that empty lines are filtered out from plaintext files.
-        """
-        test_file = tmp_path / "data.txt"
-        test_file.write_text("Line 1\n\n\nLine 2\n   \n")
-
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = {
-            'input_ids': [[1]] * 2,
-            'attention_mask': [[1]] * 2
-        }
-
-        eval_config = {
-            'name': 'test',
-            'path': str(test_file)
-        }
-
-        # Act: Load and tokenize
-        dataset = load_external_eval_set(
-            eval_config=eval_config,
-            tokenizer=mock_tokenizer,
-            max_length=512
-        )
-
-        # Assert: Should only have 2 non-empty lines
-        assert len(dataset) == 2
 
 
 class TestTokenizeInstructionExamples:
@@ -294,7 +54,7 @@ class TestTokenizeInstructionExamples:
         3. Response tokens have actual token IDs in labels
         4. input_ids and labels have same length
         """
-        from lapt.dataset_utils import tokenize_instruction_examples
+        from lapt.tokenized_data import tokenize_instruction_examples
 
         examples = {
             'prompt': ['Translate to Gothic: hello\nResponse:'],
@@ -333,7 +93,7 @@ class TestTokenizeInstructionExamples:
 
         Strategy: Tokenize prompt alone, count tokens, verify that many are masked.
         """
-        from lapt.dataset_utils import tokenize_instruction_examples
+        from lapt.tokenized_data import tokenize_instruction_examples
 
         prompt = "This is a test prompt with several words\nResponse:"
         response = " Yes"
@@ -360,7 +120,7 @@ class TestTokenizeInstructionExamples:
 
         Verifies each example is tokenized independently.
         """
-        from lapt.dataset_utils import tokenize_instruction_examples
+        from lapt.tokenized_data import tokenize_instruction_examples
 
         examples = {
             'prompt': [
@@ -392,7 +152,7 @@ class TestTokenizeInstructionExamples:
 
         Strategy: Use very short max_length, verify output is truncated.
         """
-        from lapt.dataset_utils import tokenize_instruction_examples
+        from lapt.tokenized_data import tokenize_instruction_examples
 
         # Long prompt and response
         examples = {
@@ -417,7 +177,7 @@ class TestTokenizeInstructionExamples:
         immediately rather than continuing the prompt. So every label is -100
         except a final EOS.
         """
-        from lapt.dataset_utils import tokenize_instruction_examples
+        from lapt.tokenized_data import tokenize_instruction_examples
 
         examples = {
             'prompt': ['Prompt text\nResponse:'],
@@ -440,7 +200,7 @@ class TestTokenizeInstructionExamples:
         Our JSONL format uses ' response' (with leading space) to ensure
         proper tokenization as a continuation.
         """
-        from lapt.dataset_utils import tokenize_instruction_examples
+        from lapt.tokenized_data import tokenize_instruction_examples
 
         examples = {
             'prompt': ['Test\nResponse:'],
@@ -454,169 +214,6 @@ class TestTokenizeInstructionExamples:
         assert len(result['labels'][0]) > 0
 
 
-class TestDataCollatorForInstructionTuning:
-    """
-    Tests for DataCollatorForInstructionTuning.
-
-    This collator handles batching of instruction-tuning data:
-    - Pads input_ids with pad_token_id
-    - Pads attention_mask with 0
-    - Pads labels with -100 (so padded positions don't contribute to loss)
-
-    Testing strategy:
-    - Test with features of different lengths to verify padding
-    - Test single-example batch (no padding needed)
-    - Verify tensor shapes and dtypes
-    """
-
-    def test_basic_padding(self, base_tokenizer):
-        """
-        Test that features of different lengths are padded correctly.
-
-        Verifies:
-        1. All sequences padded to same length
-        2. input_ids padded with pad_token_id
-        3. attention_mask padded with 0
-        4. labels padded with -100
-        """
-        import torch
-
-        from lapt.dataset_utils import DataCollatorForInstructionTuning
-
-        collator = DataCollatorForInstructionTuning(base_tokenizer)
-
-        # Features with different lengths
-        features = [
-            {
-                'input_ids': [1, 2, 3, 4, 5],
-                'attention_mask': [1, 1, 1, 1, 1],
-                'labels': [-100, -100, 3, 4, 5]
-            },
-            {
-                'input_ids': [1, 2, 3],
-                'attention_mask': [1, 1, 1],
-                'labels': [-100, 2, 3]
-            }
-        ]
-
-        batch = collator(features)
-
-        # Check shapes - should be padded to longest (5)
-        assert batch['input_ids'].shape == (2, 5)
-        assert batch['attention_mask'].shape == (2, 5)
-        assert batch['labels'].shape == (2, 5)
-
-        # Check dtypes
-        assert batch['input_ids'].dtype == torch.long
-        assert batch['labels'].dtype == torch.long
-
-        # Check padding values for second (shorter) sequence
-        # Last 2 positions should be padded
-        pad_token_id = base_tokenizer.pad_token_id or base_tokenizer.eos_token_id
-        assert batch['input_ids'][1, 3].item() == pad_token_id
-        assert batch['input_ids'][1, 4].item() == pad_token_id
-        assert batch['attention_mask'][1, 3].item() == 0
-        assert batch['attention_mask'][1, 4].item() == 0
-        assert batch['labels'][1, 3].item() == -100
-        assert batch['labels'][1, 4].item() == -100
-
-    def test_single_example_batch(self, base_tokenizer):
-        """
-        Test batch with single example (no padding needed).
-        """
-        from lapt.dataset_utils import DataCollatorForInstructionTuning
-
-        collator = DataCollatorForInstructionTuning(base_tokenizer)
-
-        features = [
-            {
-                'input_ids': [1, 2, 3],
-                'attention_mask': [1, 1, 1],
-                'labels': [-100, 2, 3]
-            }
-        ]
-
-        batch = collator(features)
-
-        # Should have batch size 1
-        assert batch['input_ids'].shape == (1, 3)
-        assert batch['labels'].shape == (1, 3)
-
-        # Values should be unchanged
-        assert batch['input_ids'][0].tolist() == [1, 2, 3]
-        assert batch['labels'][0].tolist() == [-100, 2, 3]
-
-    def test_preserves_masked_labels(self, base_tokenizer):
-        """
-        Test that -100 labels are preserved (not overwritten by padding logic).
-        """
-        from lapt.dataset_utils import DataCollatorForInstructionTuning
-
-        collator = DataCollatorForInstructionTuning(base_tokenizer)
-
-        features = [
-            {
-                'input_ids': [1, 2, 3, 4],
-                'attention_mask': [1, 1, 1, 1],
-                'labels': [-100, -100, 3, 4]  # First two are masked
-            }
-        ]
-
-        batch = collator(features)
-
-        # Original -100 values should be preserved
-        assert batch['labels'][0, 0].item() == -100
-        assert batch['labels'][0, 1].item() == -100
-        assert batch['labels'][0, 2].item() == 3
-        assert batch['labels'][0, 3].item() == 4
-
-    def test_handles_all_masked_labels(self, base_tokenizer):
-        """
-        Test handling of sequence where all labels are -100.
-
-        This can happen with empty responses or very long prompts.
-        """
-        from lapt.dataset_utils import DataCollatorForInstructionTuning
-
-        collator = DataCollatorForInstructionTuning(base_tokenizer)
-
-        features = [
-            {
-                'input_ids': [1, 2, 3],
-                'attention_mask': [1, 1, 1],
-                'labels': [-100, -100, -100]  # All masked
-            }
-        ]
-
-        batch = collator(features)
-
-        # Should work without errors
-        assert batch['labels'].shape == (1, 3)
-        assert batch['labels'][0].tolist() == [-100, -100, -100]
-
-    def test_returns_pytorch_tensors(self, base_tokenizer):
-        """
-        Test that output is PyTorch tensors, not lists.
-        """
-        import torch
-
-        from lapt.dataset_utils import DataCollatorForInstructionTuning
-
-        collator = DataCollatorForInstructionTuning(base_tokenizer)
-
-        features = [
-            {
-                'input_ids': [1, 2, 3],
-                'attention_mask': [1, 1, 1],
-                'labels': [-100, 2, 3]
-            }
-        ]
-
-        batch = collator(features)
-
-        assert isinstance(batch['input_ids'], torch.Tensor)
-        assert isinstance(batch['attention_mask'], torch.Tensor)
-        assert isinstance(batch['labels'], torch.Tensor)
 
 
 def load_tokenized_dataset(untokenized_path, tokenized_path, tokenizer, max_length, dev_size):

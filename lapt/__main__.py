@@ -22,21 +22,16 @@ from lapt.artifact_configs import (
     resolve_dev_size,
 )
 from lapt.custom_trainer import FlooredPerExampleLossTrainer
-from lapt.dataset_utils import (
-    DataCollatorForInstructionTuning,
-    TokenizedDatasetArtifact,
-    TokenizedMultinomialMix,
-    build_untokenized_source,
-    prepare_eval_datasets,
-)
-from lapt.eval_utils import (
+from lapt.evaluation import (
     BPCCallback,
+    DataCollatorForInstructionTuning,
+    prepare_eval_datasets,
     GenerationChrfCallback,
     compute_chars_per_token,
     compute_ttr_metrics,
     preprocess_logits_for_metrics,
 )
-from lapt.model_utils import (
+from lapt.model import (
     ModelOutput,
     get_init_model_identifier,
     get_tokenized_path,
@@ -44,8 +39,13 @@ from lapt.model_utils import (
     is_local_model_path,
     set_random_seeds,
 )
-from lapt.tokenization import is_instruction_dataset
-from lapt.tokenizer_utils import TokenizerArtifact
+from lapt.tokenized_data import (
+    TokenizedDatasetArtifact,
+    TokenizedMultinomialMix,
+    build_untokenized_source,
+    is_instruction_dataset,
+)
+from lapt.tokenizer import TokenizerArtifact
 from lapt_core.artifacts import ArtifactGraph
 
 OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))

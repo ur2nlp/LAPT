@@ -21,13 +21,13 @@ from lapt.artifact_configs import (
     format_number,
     get_model_shortname,
 )
-from lapt.tokenizer_utils import (
+from lapt.focus import (
     LEGACY_INPUT_NAME,
-    TokenizerArtifact,
     apply_focus_initialization,
     prepare_focus_training_data,
     resolve_cached_embedding_paths,
 )
+from lapt.tokenizer import TokenizerArtifact
 from lapt_core.artifacts import CachedArtifact
 
 

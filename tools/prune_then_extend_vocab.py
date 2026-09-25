@@ -73,7 +73,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lapt_core.spm import create_unigram_backend
 
-from lapt.tokenizer_utils import (
+from lapt.tokenizer import (
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _train_sentencepiece_model,
