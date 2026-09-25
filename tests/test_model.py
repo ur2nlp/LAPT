@@ -1,10 +1,10 @@
-"""Tests for model_utils module."""
+"""Tests for the model module."""
 
 import pytest
 from omegaconf import OmegaConf
 
 from lapt.__main__ import _validate_init_model_id
-from lapt.model_utils import (
+from lapt.model import (
     format_number,
     get_init_model_identifier,
     get_model_shortname,
@@ -211,7 +211,7 @@ from types import SimpleNamespace
 
 import torch
 
-import lapt.model_utils as model_utils_mod
+import lapt.model as model_mod
 from lapt.artifact_configs import TokenizerConfig, focus_embedding_hash
 from lapt.focus import _sidecar_paths
 
@@ -283,7 +283,7 @@ class TestInitializeFocusModelJsonlGating:
 
     def _common_patches(self, monkeypatch, jsonl_calls, focus_calls):
         monkeypatch.setattr(
-            model_utils_mod, 'prepare_focus_training_data',
+            model_mod, 'prepare_focus_training_data',
             lambda **kw: (jsonl_calls.append(kw) or '/tmp/fake.jsonl'),
         )
 
@@ -303,12 +303,12 @@ class TestInitializeFocusModelJsonlGating:
             def resolve(self):
                 return _FakeTokenizer()
 
-        monkeypatch.setattr(model_utils_mod, 'TokenizerArtifact', _FakeTokenizerArtifact)
+        monkeypatch.setattr(model_mod, 'TokenizerArtifact', _FakeTokenizerArtifact)
         def _apply(**kw):
             focus_calls.append(kw)
             n = len(kw['target_tokenizer'])
             return torch.zeros(n, 4), None
-        monkeypatch.setattr(model_utils_mod, 'apply_focus_initialization', _apply)
+        monkeypatch.setattr(model_mod, 'apply_focus_initialization', _apply)
 
         class _CfgStub:
             @staticmethod
@@ -319,9 +319,9 @@ class TestInitializeFocusModelJsonlGating:
         class _TokStub:
             @staticmethod
             def from_pretrained(name, **kw): return _FakeTokenizer()
-        monkeypatch.setattr(model_utils_mod, 'AutoConfig', _CfgStub)
-        monkeypatch.setattr(model_utils_mod, 'AutoModelForCausalLM', _ModelStub)
-        monkeypatch.setattr(model_utils_mod, 'AutoTokenizer', _TokStub)
+        monkeypatch.setattr(model_mod, 'AutoConfig', _CfgStub)
+        monkeypatch.setattr(model_mod, 'AutoModelForCausalLM', _ModelStub)
+        monkeypatch.setattr(model_mod, 'AutoTokenizer', _TokStub)
 
     def test_skips_jsonl_when_both_caches_hit(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -341,7 +341,7 @@ class TestInitializeFocusModelJsonlGating:
         jsonl_calls, focus_calls = [], []
         self._common_patches(monkeypatch, jsonl_calls, focus_calls)
 
-        model_utils_mod._initialize_focus_model(args)
+        model_mod._initialize_focus_model(args)
         assert jsonl_calls == [], (
             "prepare_focus_training_data should NOT be called when both "
             f"tokenizer and embeddings are cached; got {len(jsonl_calls)} call(s)."
@@ -362,7 +362,7 @@ class TestInitializeFocusModelJsonlGating:
         jsonl_calls, focus_calls = [], []
         self._common_patches(monkeypatch, jsonl_calls, focus_calls)
 
-        model_utils_mod._initialize_focus_model(args)
+        model_mod._initialize_focus_model(args)
         assert len(jsonl_calls) == 1, (
             f"prepare_focus_training_data should be called exactly once when "
             f"embeddings are missing; got {len(jsonl_calls)} call(s)."

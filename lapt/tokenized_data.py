@@ -1,12 +1,24 @@
-"""
-Utilities for loading and processing datasets for language-adaptive pretraining.
+"""Turn corpus text into the tokenized datasets training consumes.
 
-This module handles downloading OSCAR corpus data, converting it to line-based format,
-tokenizing with provided tokenizers, and caching results.
+Two layers that were previously two modules:
+
+* **Transformations** -- stateless functions mapping text rows to tokenized
+  rows, plus the cache-directory names that identify their output. Pure
+  functions of their arguments.
+* **Artifacts** -- `TokenizedSourceArtifact`, `TrainPlanArtifact`,
+  `DevSplitsArtifact`, `TokenizedMultinomialMix` and `TokenizedDatasetArtifact`,
+  which supply the caching, the config record, and the cache-or-build decision
+  that run those transformations.
+
+This is a peer of `lapt/sources/`, not a member of it. `sources` is the
+untokenized layer: it produces text, and `sources/text_processing.py` holds the
+helpers source types call themselves. Nothing here is called by a source; these
+belong to the stage that consumes one. That separation also keeps
+`transformers` out of `sources`, which depends only on `datasets` and is the
+layer nearest to being shared with sibling projects.
 """
 
 import glob
-import json
 import os
 import shutil
 import sys
@@ -24,16 +36,6 @@ from lapt.artifact_configs import (
 from lapt.sources.concat import source_id
 from lapt.sources.factory import make_source
 from lapt.sources.sampling import compute_sampling_probs
-from lapt.sources.text_processing import (
-    read_instruction_jsonl,
-)
-from lapt.tokenization import (
-    dev_splits_dirname,
-    source_has_instruction_columns,
-    tokenize_instruction_examples,
-    tokenize_plaintext_with_labels,
-    tokenized_source_dirname,
-)
 from lapt_core.artifacts import ArtifactConfig, CachedArtifact
 from lapt_core.dataset_artifacts import DatasetArtifact
 
@@ -885,253 +887,208 @@ def _partition_source_indices(
     return train_indices, dev_indices
 
 
-def load_external_eval_set(
-    eval_config: dict,
+def tokenize_plaintext_with_labels(
+    examples: dict,
     tokenizer: PreTrainedTokenizer,
-    max_length: int,
-    add_labels: bool = False,
-) -> Dataset:
+    max_length: int
+) -> dict:
     """
-    Load and tokenize an external evaluation dataset.
+    Tokenize plaintext examples and add labels for causal LM loss.
+
+    Used for plaintext splits in mixed instruction/plaintext datasets, where the
+    DataCollatorForInstructionTuning expects all examples to have 'labels'.
+    For plaintext, labels = input_ids (loss on all tokens).
 
     Args:
-        eval_config: Dictionary with 'name', 'path', and optional 'format' keys
-            - name: Name for the eval set (used in metrics)
-            - path: Path to the data file
-            - format: 'plaintext' (default) or 'jsonl'
-            - text_column: Column name for jsonl format (default: 'text')
-        tokenizer: Tokenizer to use for tokenization
-        max_length: Maximum sequence length for tokenization
-        add_labels: If True, add a 'labels' column (=input_ids) for plaintext/jsonl
-            formats so the set is compatible with DataCollatorForInstructionTuning.
-            instruction_jsonl format always includes masked labels regardless.
+        examples: Batch with 'text' field
+        tokenizer: Tokenizer to use
+        max_length: Maximum sequence length
 
     Returns:
-        Tokenized Dataset ready for evaluation
+        Dict with 'input_ids', 'attention_mask', and 'labels' fields
     """
-    name = eval_config['name']
-    path = eval_config['path']
-    file_format = eval_config.get('format', 'plaintext')
-    text_column = eval_config.get('text_column', 'text')
+    tokenized = tokenizer(
+        examples['text'], max_length=max_length, truncation=True
+    )
+    # For plaintext, labels = input_ids (standard causal LM loss on all tokens)
+    tokenized['labels'] = [ids.copy() for ids in tokenized['input_ids']]
+    return tokenized
 
-    print(f"Loading external eval set '{name}' from {path}", file=sys.stderr)
 
-    if not os.path.exists(path):
-        raise ValueError(f"External eval set file not found: {path}")
+def tokenize_instruction_examples(
+    examples: dict,
+    tokenizer: PreTrainedTokenizer,
+    max_length: int
+) -> dict:
+    """
+    Tokenize instruction examples with label masking.
 
-    # Load data based on format
-    if file_format == 'plaintext':
-        # Read lines from plaintext file
-        with open(path, encoding='utf-8') as f:
-            lines = [line.strip() for line in f if line.strip()]
-        dataset = Dataset.from_dict({'text': lines})
-        is_instruction = False
+    For each example, tokenizes prompt and response separately, then concatenates.
+    Creates labels where prompt tokens are masked (-100) and only response tokens
+    contribute to the loss.
 
-    elif file_format == 'jsonl':
-        # Load JSONL file
-        data = []
-        with open(path, encoding='utf-8') as f:
-            for line in f:
-                if line.strip():
-                    obj = json.loads(line)
-                    if text_column in obj:
-                        data.append(obj[text_column])
-                    else:
-                        raise ValueError(
-                            f"JSONL file missing '{text_column}' column: {path}"
-                        )
-        dataset = Dataset.from_dict({'text': data})
-        is_instruction = False
+    Also handles mixed datasets where some examples have prompt/response (instruction)
+    and others have only text (plaintext). Plaintext examples get labels = input_ids
+    (standard causal LM loss on all tokens).
 
-    elif file_format == 'instruction_jsonl':
-        # Load instruction JSONL with prompt/response fields
-        prompts, responses = read_instruction_jsonl(path)
-        dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
-        is_instruction = True
+    Args:
+        examples: Batch with 'prompt' and 'response' fields, optionally 'text'
+        tokenizer: Tokenizer to use
+        max_length: Maximum sequence length (prompt + response combined)
 
-    else:
-        raise ValueError(
-            f"Unsupported format '{file_format}' for external eval set. "
-            f"Supported formats: 'plaintext', 'jsonl', 'instruction_jsonl'"
-        )
+    Returns:
+        Dict with 'input_ids', 'attention_mask', and 'labels' fields
+    """
+    all_input_ids = []
+    all_attention_masks = []
+    all_labels = []
 
-    print(f"  Loaded {len(dataset)} examples", file=sys.stderr)
+    # Get text column if it exists (for mixed datasets)
+    texts = examples.get('text', [None] * len(examples['prompt']))
 
-    # Tokenize the dataset
-    if is_instruction:
-        # Instruction format: use label masking (loss only on response)
-        dataset = dataset.map(
-            lambda examples: tokenize_instruction_examples(examples, tokenizer, max_length),
-            batched=True,
-            remove_columns=['prompt', 'response'],
-            desc=f"Tokenizing external eval set '{name}'"
-        )
-    else:
-        # Plain text format: standard tokenization
-        if add_labels:
-            tokenize_fn = lambda examples: tokenize_plaintext_with_labels(
-                examples, tokenizer, max_length
+    for prompt, response, text in zip(examples['prompt'], examples['response'], texts):
+        # Check if this is an instruction example or plaintext
+        is_instruction = prompt is not None and response is not None
+
+        if is_instruction:
+            # Instruction example: tokenize prompt and response separately
+            prompt_tokens = tokenizer(
+                prompt,
+                add_special_tokens=True,
+                truncation=False
             )
+
+            response_tokens = tokenizer(
+                response,
+                add_special_tokens=False,
+                truncation=False
+            )
+
+            # Append EOS so the model learns to terminate responses
+            response_ids = response_tokens['input_ids'] + [tokenizer.eos_token_id]
+            response_mask = response_tokens['attention_mask'] + [1]
+
+            # Concatenate
+            # TODO: fix linting issue here
+            input_ids = prompt_tokens['input_ids'] + response_ids
+            attention_mask = prompt_tokens['attention_mask'] + response_mask
+
+            # Create labels: -100 for prompt (masked), actual tokens for response
+            prompt_length = len(prompt_tokens['input_ids'])
+            labels = [-100] * prompt_length + response_ids
         else:
-            tokenize_fn = lambda examples: tokenizer(
-                examples['text'], max_length=max_length, truncation=True
-            )
-        dataset = dataset.map(
-            tokenize_fn,
-            batched=True,
-            remove_columns=['text'],
-            desc=f"Tokenizing external eval set '{name}'"
-        )
-
-    return dataset
-
-
-def prepare_eval_datasets(
-    dataset: DatasetDict,
-    tokenizer: PreTrainedTokenizer,
-    max_length: int,
-    external_eval_sets: list = None
-):
-    """
-    Prepare evaluation datasets from loaded data and optional external sources.
-
-    Handles both:
-    - Extracting dev splits from tokenized dataset (single or per-language)
-    - Loading and merging external evaluation sets
-
-    Args:
-        dataset: Tokenized DatasetDict with train and dev/test splits
-        tokenizer: Tokenizer for tokenizing external eval sets
-        max_length: Max sequence length for tokenization
-        external_eval_sets: Optional list of external eval configs, each with
-            'name', 'path', and optional 'format' keys
-
-    Returns:
-        Either a single Dataset (standard case) or dict of Datasets (multinomial
-        or when external eval sets are added)
-    """
-    # Dev splits are any non-train splits except 'test'
-    dev_splits = [key for key in dataset.keys() if key != 'train' and key != 'test']
-
-    if dev_splits:
-        # Multinomial sampling case: multiple per-language dev sets
-        eval_dataset = {key: dataset[key] for key in dev_splits}
-        print(
-            f"Using {len(eval_dataset)} per-language eval sets: {', '.join(dev_splits)}",
-            file=sys.stderr
-        )
-    else:
-        # Standard case: single dev/test split
-        eval_dataset = dataset['test']
-
-    # Load external evaluation sets if configured
-    if external_eval_sets:
-        # If eval_dataset is not already a dict, convert it
-        if not isinstance(eval_dataset, dict):
-            eval_dataset = {'dev': eval_dataset}
-            print("Converted single eval dataset to dict for external eval sets", file=sys.stderr)
-
-        # If the existing eval sets carry labels (instruction-tuning run), plaintext
-        # external eval sets must also have labels to be compatible with
-        # DataCollatorForInstructionTuning.
-        existing_has_labels = any(
-            'labels' in ds.column_names for ds in eval_dataset.values()
-        )
-
-        # Load and add each external eval set
-        for eval_config in external_eval_sets:
-            name = eval_config['name']
-
-            # Check for name conflicts
-            if name in eval_dataset:
+            # Plaintext example: standard tokenization, labels = input_ids
+            if text is None:
                 raise ValueError(
-                    f"External eval set name '{name}' conflicts with existing eval set. "
-                    f"Existing eval sets: {list(eval_dataset.keys())}"
+                    "Example has neither valid prompt/response nor text. "
+                    "Mixed datasets must have 'text' for plaintext examples."
                 )
 
-            external_dataset = load_external_eval_set(
-                eval_config=eval_config,
-                tokenizer=tokenizer,
-                max_length=max_length,
-                add_labels=existing_has_labels,
-            )
-            eval_dataset[name] = external_dataset
-            print(
-                f"Added external eval set '{name}' with {len(external_dataset)} examples",
-                file=sys.stderr
+            tokens = tokenizer(
+                text,
+                add_special_tokens=True,
+                truncation=False
             )
 
-    return eval_dataset
+            input_ids = tokens['input_ids']
+            attention_mask = tokens['attention_mask']
+            # Standard causal LM: predict all tokens
+            labels = list(input_ids)
+
+        # Truncate if needed
+        if len(input_ids) > max_length:
+            input_ids = input_ids[:max_length]
+            attention_mask = attention_mask[:max_length]
+            labels = labels[:max_length]
+
+        all_input_ids.append(input_ids)
+        all_attention_masks.append(attention_mask)
+        all_labels.append(labels)
+
+    return {
+        'input_ids': all_input_ids,
+        'attention_mask': all_attention_masks,
+        'labels': all_labels
+    }
 
 
-class DataCollatorForInstructionTuning:
+# Plan / per-source tokenization for multinomial mixes.
+# The training-time multinomial pipeline upsamples by repeating row indices
+# rather than duplicating tokenized rows. The pieces below implement that:
+#
+#   <cache_dir>/<source_id>/untokenized/                      (text, mix-agnostic)
+#   <cache_dir>/<source_id>/tokenized_<tok>_ml<L>_{labels,nolabels}/  (mix-agnostic)
+#   <mix_dir>/train_plan.npz                                  (shuffled global indices)
+#   <mix_dir>/dev/                                            (per-source tokenized dev)
+#
+# The training Dataset is built as
+# `concatenate_datasets(per_source_tokenized).select(global_indices)`,
+# which produces an Arrow indices-mapped view; no rows are duplicated.
+
+
+def tokenized_source_dirname(
+    tokenizer_id: str,
+    max_length: int,
+    add_labels: bool,
+    variant_suffix: str = "",
+) -> str:
     """
-    Data collator for instruction tuning with pre-computed labels.
+    Build the per-source tokenized cache directory name.
 
-    This collator expects examples that already have 'labels' field with
-    prompt tokens masked as -100. It handles padding for:
-    - input_ids: padded with tokenizer.pad_token_id
-    - attention_mask: padded with 0
-    - labels: padded with -100 (ignored by CrossEntropyLoss)
+    The optional ``variant_suffix`` carries the untokenized variant (e.g.
+    ``_sub_<hash>`` for a substituted source) so a substituted source tokenizes
+    into a distinct cache rather than colliding with the raw one. An empty
+    suffix reproduces the original ``tokenized_<id>_ml<L>_<labels>`` name, so
+    pre-existing raw caches stay valid.
+    """
+    label_suffix = "labels" if add_labels else "nolabels"
+    return f"tokenized{variant_suffix}_{tokenizer_id}_ml{max_length}_{label_suffix}"
 
-    Unlike DataCollatorForLanguageModeling, this collator does NOT create labels
-    from input_ids - it uses the pre-computed labels from the dataset.
+
+def dev_splits_dirname(
+    tokenizer_id: str,
+    max_length: int,
+    add_labels: bool,
+) -> str:
+    """
+    Build the mix-level tokenized dev-splits cache directory name.
+
+    The dev splits hold token ids, so the cache must be keyed by the same
+    parameters as the per-source tokenized caches. The mix slug that names the
+    parent directory deliberately excludes the tokenizer (sources and plans are
+    shared across tokenizers), so without this suffix a dev cache written by one
+    model's tokenizer would be silently reused by a model with a different
+    tokenizer.
+    """
+    label_suffix = "labels" if add_labels else "nolabels"
+    return f"dev_{tokenizer_id}_ml{max_length}_{label_suffix}"
+
+
+def source_has_instruction_columns(untokenized_path: str) -> bool:
+    """Return True if the source's untokenized 'train' split has prompt/response columns."""
+    data = load_from_disk(untokenized_path)
+    if isinstance(data, DatasetDict):
+        split = data['train'] if 'train' in data else data[list(data.keys())[0]]
+    else:
+        split = data
+    cols = split.column_names
+    return 'prompt' in cols and 'response' in cols
+
+
+def is_instruction_dataset(dataset) -> bool:
+    """
+    Check if a dataset is an instruction-tuning dataset (has pre-computed labels).
 
     Args:
-        tokenizer: Tokenizer used for padding
-        padding: Padding strategy ('longest', 'max_length', or False)
-        max_length: Maximum length when padding='max_length'
+        dataset: A Dataset or DatasetDict
+
+    Returns:
+        True if the dataset has 'labels' column, indicating instruction format
     """
-
-    def __init__(
-        self,
-        tokenizer: PreTrainedTokenizer,
-        padding: str = 'longest',
-        max_length: int = None
-    ):
-        self.tokenizer = tokenizer
-        self.padding = padding
-        self.max_length = max_length
-
-        # Ensure tokenizer has a pad token
-        if self.tokenizer.pad_token_id is None:
-            # Use EOS token as pad token if not set
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-
-    def __call__(self, features: list) -> dict:
-        """
-        Collate a batch of features.
-
-        Args:
-            features: List of dicts with 'input_ids', 'attention_mask', and 'labels'
-
-        Returns:
-            Batch dict with padded tensors
-        """
-        import torch
-
-        # Separate labels from other features for custom padding
-        labels = [f['labels'] for f in features]
-        # Remove labels temporarily for tokenizer padding
-        features_without_labels = [{k: v for k, v in f.items() if k != 'labels'} for f in features]
-
-        # Use tokenizer's padding for input_ids and attention_mask
-        batch = self.tokenizer.pad(
-            features_without_labels,
-            padding=self.padding,
-            max_length=self.max_length,
-            return_tensors='pt'
-        )
-
-        # Pad labels with -100 (ignored by loss function)
-        max_label_length = max(len(l) for l in labels)
-        padded_labels = []
-        for label in labels:
-            padding_length = max_label_length - len(label)
-            # Pad on the right with -100
-            padded_label = label + [-100] * padding_length
-            padded_labels.append(padded_label)
-
-        batch['labels'] = torch.tensor(padded_labels, dtype=torch.long)
-
-        return batch
+    if hasattr(dataset, 'keys'):
+        # DatasetDict - check the first split
+        sample_split = list(dataset.keys())[0]
+        return 'labels' in dataset[sample_split].column_names
+    else:
+        # Single Dataset
+        return 'labels' in dataset.column_names
