@@ -164,7 +164,7 @@ known-third-party = ["tokenizers"]
 # Mutate the framework modules, but scope each run with `only_mutate` -- a whole
 # -tree run is far more mutants than a single sitting warrants.
 source_paths = ["lapt"]
-only_mutate = ["lapt/dataset_utils.py"]
+only_mutate = ["lapt/tokenized_data.py"]
 # Deliberately left off. It would skip mutants on lines no test executes, but it
 # buys that by running a whole extra in-process pytest pass to collect coverage
 # -- and a second pytest run in one process re-imports torch, which dies with

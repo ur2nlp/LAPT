@@ -245,12 +245,13 @@ Useful when the defaults fight you:
 - `lapt/` - Framework source (installable package)
   - `__main__.py` - Training orchestration
   - `sources/` - One module per dataset type, registered by its `type` field
-  - `dataset_utils.py` - Tokenized-dataset stages, eval sets, data collation
-  - `tokenization.py` - Stateless text-to-token helpers
+  - `tokenized_data.py` - Text-to-token transformations and the cached
+    tokenized stages that run them
   - `artifact_configs.py` - Per-stage configuration records and cache paths
-  - `model_utils.py` - Model and tokenizer initialization
-  - `tokenizer_utils.py` - Tokenizer training and FOCUS operations
-  - `eval_utils.py` - Metrics, generation, and evaluation callbacks
+  - `model.py` - Model loading and vocabulary adaptation
+  - `tokenizer.py` - Tokenizer training and special-token placement
+  - `focus.py` - FOCUS embedding initialization and its sidecar cache
+  - `evaluation.py` - Eval sets, metrics, generation, and evaluation callbacks
 - `packages/lapt-core/lapt_core/` - Domain-neutral caching layer, packaged
   separately so sibling projects can depend on it without inheriting this one's
   pins
