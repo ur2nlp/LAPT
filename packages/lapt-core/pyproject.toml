@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lapt-core"
-version = "0.1.2"
+version = "0.1.3"
 description = "Content-tracked caching and dataset-mixing primitives for multi-stage training pipelines"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,20 @@ dependencies = [
 # caching layer alone does not pay a 2 s import for a dependency it never calls.
 datasets = [
     "datasets>=3,<4",
+]
+
+# `lapt_core.spm` turns a trained SentencePiece model into a HuggingFace
+# tokenizer backend, so it needs all three of these and nothing else does.
+# The floor is `prepend_scheme` on the Metaspace pre-tokenizer and decoder,
+# which arrived in tokenizers 0.15 and became the only spelling in 0.19 when
+# `add_prefix_space` was dropped -- a release that also changed Metaspace
+# output, so straddling it would silently change tokenization. No separate
+# tokenizers bound is declared because transformers pins it far more tightly
+# than this package would (4.40 requires tokenizers>=0.19,<0.20).
+tokenizers = [
+    "tokenizers",
+    "transformers>=4.40,<5",
+    "sentencepiece",
 ]
 
 [project.urls]
