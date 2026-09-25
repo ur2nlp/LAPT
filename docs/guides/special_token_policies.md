@@ -84,7 +84,7 @@ internally consistent. Which means this policy is only half a mechanism:
 ## What LAPT implements
 
 The first two, chosen automatically by `_assign_special_token_ids` in
-`lapt/tokenizer_utils.py`. It tries to preserve base ids and falls back to
+`lapt/tokenizer.py`. It tries to preserve base ids and falls back to
 positional assignment, reporting on stderr when it does.
 
 LAPT does **not** implement the third. The decoder-only bases it targets have no

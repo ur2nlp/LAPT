@@ -49,7 +49,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 # Put the repository root on sys.path so `lapt` imports without an
 # editable install, for running this script straight from a checkout.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from lapt.tokenizer_utils import apply_focus_initialization
+from lapt.focus import apply_focus_initialization
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)

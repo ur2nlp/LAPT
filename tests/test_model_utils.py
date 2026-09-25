@@ -213,7 +213,7 @@ import torch
 
 import lapt.model_utils as model_utils_mod
 from lapt.artifact_configs import TokenizerConfig, focus_embedding_hash
-from lapt.tokenizer_utils import _sidecar_paths
+from lapt.focus import _sidecar_paths
 
 
 def _focus_model_args(cache_dir_base: str, language: str = "hy"):

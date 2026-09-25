@@ -45,7 +45,7 @@ from lapt.model_utils import (
     set_random_seeds,
 )
 from lapt.tokenization import is_instruction_dataset
-from lapt.tokenizer_utils import TokenizerArtifact
+from lapt.tokenizer import TokenizerArtifact
 from lapt_core.artifacts import ArtifactGraph
 
 OmegaConf.register_new_resolver("divide", lambda x, y: int(x / y))
