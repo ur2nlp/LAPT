@@ -50,6 +50,38 @@ binary to clone a VCS URL and a cluster compute node may not have one. See
 `packages/lapt-core/README.md` for the git form, which is what a private
 repository needs.
 
+## Staying current with upstream
+
+A fork does not follow this repository on its own. Point it at one once:
+
+```bash
+git remote add upstream https://github.com/ur2nlp/LAPT.git
+```
+
+Then pull whenever you want the latest framework changes:
+
+```bash
+git pull upstream main
+```
+
+Anything you add under `configs/training/`, `configs/focus/`,
+`configs/external_eval/` or `configs/chrf_eval/` is a new file that does not
+exist here, so a merge leaves it alone.
+
+`configs/main.yaml` is the one to expect conflicts in, and unlike the config
+groups you cannot avoid it by convention: the dataset is configured *inline*
+there rather than selected from `configs/dataset/`. Two things keep it small:
+
+* Prefer command-line overrides for anything that varies per run —
+  `dataset.language=hy`, `hf_model=...` — rather than editing the defaults.
+* When you do have to edit it, keep the edits to the `dataset:` block. Merges
+  resolve cleanly when the two sides touch different regions of a file.
+
+`lapt-core` is installed from the working tree (`pip install -e
+packages/lapt-core`), so a pull picks up its code with no reinstall. Re-run that
+one command only when a merge changes its packaging metadata — its version,
+dependencies or extras in `packages/lapt-core/pyproject.toml`.
+
 ## Usage
 
 ### Basic Training
