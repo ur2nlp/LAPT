@@ -29,7 +29,6 @@ from lapt_core.artifacts import ArtifactConfig, CachedArtifact
 from lapt_core.spm import create_bpe_backend, create_unigram_backend
 
 
-
 class TokenizerArtifact(CachedArtifact):
     """A FOCUS tokenizer trained by SentencePiece, cached on `TokenizerConfig`.
 

@@ -18,7 +18,6 @@ Usage:
 
 from lapt_core.fetch_diff import main
 
-
 if __name__ == "__main__":
     # LAPT ids are hand-typed, so v8L and v08L are the same run and must resolve
     # to one record. Pass --no-normalize-ids to turn that off for one invocation.

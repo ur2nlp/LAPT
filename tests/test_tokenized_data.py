@@ -19,14 +19,12 @@ from datasets import Dataset, DatasetDict, load_from_disk
 from transformers import AutoTokenizer
 
 from lapt.artifact_configs import DatasetConfig, TokenizedDatasetConfig
+from lapt.sources.sampling import compute_sampling_probs
 from lapt.tokenized_data import (
     TokenizedDatasetArtifact,
     TokenizedMultinomialMix,
     _partition_source_indices,
 )
-from lapt.sources.sampling import compute_sampling_probs
-
-
 
 
 class TestTokenizeInstructionExamples:

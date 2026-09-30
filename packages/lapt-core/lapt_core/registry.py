@@ -17,6 +17,7 @@ from pathlib import Path
 
 import yaml
 
+
 @dataclass(frozen=True)
 class RegistrySchema:
     """Everything about a registry that is project-specific.

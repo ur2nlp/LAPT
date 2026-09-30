@@ -16,7 +16,6 @@ from lapt_core.registry import (
     save_registry,
     upsert_entry,
 )
-
 from tools.registry import LAPT_SCHEMA
 
 
