@@ -15,6 +15,7 @@ import sys
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
+from lapt.sources.base import SOURCE_REBUILD_HINT
 from lapt_core.artifacts import config_digest
 from lapt_core.dataset_artifacts import DatasetArtifact
 
@@ -60,6 +61,8 @@ class SubstitutedDataset(DatasetArtifact):
     Deliberately not registered in `SOURCE_TYPES`: this is not a dataset type a
     config can name, it is a transformation any source may carry.
     """
+
+    rebuild_hint = SOURCE_REBUILD_HINT
 
     def __init__(self, base: DatasetArtifact, substitutions: list[tuple[str, str]]):
         """Initialize the wrapper.

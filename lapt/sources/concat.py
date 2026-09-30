@@ -1,6 +1,6 @@
 """LAPT's binding of the shared concat composite to its source registry."""
 
-from lapt.sources.base import SOURCE_TYPES
+from lapt.sources.base import MIX_REBUILD_HINT, SOURCE_TYPES
 from lapt.sources.factory import make_source, normalize_sources
 from lapt_core.composites import ConcatArtifact
 from lapt_core.mixing import field, source_id
@@ -33,6 +33,7 @@ class ConcatDataset(ConcatArtifact):
         )
 
     type_name = "concat"
+    rebuild_hint = MIX_REBUILD_HINT
 
     @classmethod
     def from_config(

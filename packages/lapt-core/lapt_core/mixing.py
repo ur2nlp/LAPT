@@ -201,8 +201,8 @@ def mix_slug(dataset_config: dict) -> str:
 
     The upsampled training split produced by multinomial sampling depends on
     alpha, total_samples, dev_size, per-source sampling_prob /
-    upsampling_factor / dev_size overrides, and the seed, but NOT on the
-    underlying source datasets (which live in parent-level subdirectories and
+    upsampling_factor / dev_size / sample_seed overrides, and the seed, but NOT
+    on the underlying source datasets (which live in parent-level subdirectories and
     can be shared across mixes). Caching mix-dependent artifacts inside {cache_dir}/{slug}/
     instead of directly under {cache_dir}/ means sweeping alpha or sample
     counts no longer clobbers the previous mix and source caches are
@@ -220,20 +220,28 @@ def mix_slug(dataset_config: dict) -> str:
     alpha = dataset_config.get('alpha')
     total_samples = dataset_config['total_samples']
 
+    source_keys = []
+    for source in dataset_config.get('sources', []):
+        keys = {
+            'id': source.get('id') or source.get('language'),
+            'sampling_prob': source.get('sampling_prob'),
+            'upsampling_factor': source.get('upsampling_factor'),
+            'dev_size': source.get('dev_size'),
+            'substitutions': source.get('substitutions'),
+        }
+        # a source's `sample_seed` selects which examples it holds, so mixes
+        # over two samples of one corpus must not share a directory. added
+        # only when present, for the same reason as the mix seed below: every
+        # slug built before it existed stays unchanged.
+        if source.get('sample_seed') is not None:
+            keys['sample_seed'] = source['sample_seed']
+        source_keys.append(keys)
+
     mix_keys = {
         'alpha': alpha,
         'total_samples': total_samples,
         'dev_size': dataset_config.get('dev_size'),
-        'sources': [
-            {
-                'id': source.get('id') or source.get('language'),
-                'sampling_prob': source.get('sampling_prob'),
-                'upsampling_factor': source.get('upsampling_factor'),
-                'dev_size': source.get('dev_size'),
-                'substitutions': source.get('substitutions'),
-            }
-            for source in dataset_config.get('sources', [])
-        ],
+        'sources': source_keys,
     }
     # a non-default seed changes which examples are sampled and repeated, so
     # mixes that differ only by seed must not share a directory. the key is

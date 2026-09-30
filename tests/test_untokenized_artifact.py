@@ -205,17 +205,19 @@ class TestSubstitutions:
 
 
 class TestSeedPropagation:
-    """`args.seed` must reach the sources that record it.
+    """A subsampling source records the seed its sample was actually drawn with.
 
-    The subsampling sources key their cache on the seed, so a seed that is only
-    set in the global RNG would produce records claiming a value the run did
-    not use.
+    That is the default seed unless `resample_sources` opts it into the global
+    one, so a seed replicate reuses the existing sample rather than colliding
+    with it -- and the record never claims a value the sample did not use.
     """
 
-    def test_configured_seed_reaches_a_subsampling_source(self, tmp_path, corpus):
+    def resolve_capped(self, tmp_path, corpus, resample: bool):
         from unittest.mock import patch
 
         from datasets import Dataset
+
+        from lapt.sources.factory import resample_sources
 
         args = plaintext_args(tmp_path, corpus)
         args.seed = 77
@@ -223,6 +225,8 @@ class TestSeedPropagation:
         args.dataset.name = 'fake/ds'
         args.dataset.max_samples = 2
         args.dataset.split_into_lines = False
+        if resample:
+            resample_sources(args.dataset, args.seed)
 
         documents = Dataset.from_dict({'text': ["one two", "three four"]})
         with patch('lapt.sources.huggingface.load_dataset', return_value=documents):
@@ -230,4 +234,14 @@ class TestSeedPropagation:
             artifact.resolve()
 
         with open(os.path.join(artifact.path, 'config.yaml')) as record:
-            assert yaml.safe_load(record)['seed'] == 77
+            return artifact.path, yaml.safe_load(record)['seed']
+
+    def test_global_seed_does_not_reach_a_subsampling_source_by_default(self, tmp_path, corpus):
+        path, seed = self.resolve_capped(tmp_path, corpus, resample=False)
+        assert seed == 1
+        assert os.path.basename(path) == 'untokenized'
+
+    def test_resampled_seed_reaches_a_subsampling_source(self, tmp_path, corpus):
+        path, seed = self.resolve_capped(tmp_path, corpus, resample=True)
+        assert seed == 77
+        assert os.path.basename(path) == 'untokenized_seed77'

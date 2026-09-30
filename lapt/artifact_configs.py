@@ -94,6 +94,10 @@ class TokenizerConfig(ArtifactConfig):
     - Passing to TokenizerArtifact (lapt/tokenizer.py)
     """
     artifact_name = "Tokenizer"
+    rebuild_hint = (
+        "Retrain it with fresh_tokenizer=true, which also clears the\n"
+        "     tokenized data and model downstream"
+    )
 
     # Core tokenizer parameters
     hf_model: str
@@ -391,6 +395,7 @@ class DatasetConfig(ArtifactConfig):
         'fresh_dataset',
         'fresh_tokenizer',
         'fresh_model',
+        'resample_sources',
         'output_dir',
         'model_name',
     )
@@ -702,6 +707,7 @@ class ModelConfig(ArtifactConfig):
         'fresh_dataset',
         'fresh_tokenizer',
         'fresh_model',
+        'resample_sources',
         'output_dir',
         'model_name',
     )

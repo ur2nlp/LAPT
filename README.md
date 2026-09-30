@@ -147,6 +147,12 @@ Two consequences worth knowing before you run anything twice:
 - **A changed parameter that *isn't* in the path is an error, not a silent
   reuse.** You will be told what differs and pointed at the flag that rebuilds
   that stage.
+- **The global `seed` does not re-draw a subsampled corpus.** A source with
+  `max_samples` (a C4 slice, say) draws its sample at its own `sample_seed`,
+  default 1, so a seed replicate reuses the existing sample. Pass
+  `+resample_sources=true` to draw every such source at the global seed instead;
+  the new sample caches beside the old one as `untokenized_seed<n>`, and the
+  run's saved config records the `sample_seed` it used.
 
 Selective rebuilds, each clearing everything downstream of it:
 

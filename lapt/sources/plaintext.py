@@ -5,7 +5,7 @@ import sys
 
 from datasets import Dataset, DatasetDict
 
-from lapt.sources.base import SOURCE_TYPES
+from lapt.sources.base import SOURCE_REBUILD_HINT, SOURCE_TYPES
 from lapt.sources.factory import field
 from lapt_core.dataset_artifacts import DatasetArtifact
 
@@ -18,6 +18,7 @@ class PlaintextDataset(DatasetArtifact):
     """
 
     type_name = "plaintext"
+    rebuild_hint = SOURCE_REBUILD_HINT
 
     def __init__(self, cache_dir: str, file_path: str):
         """Initialize the source.

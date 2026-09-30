@@ -95,8 +95,12 @@ def expected_record(cache_dir: str, cached: dict, seed: int) -> dict:
     if source_type == 'substituted':
         return dict(cached)
 
+    # a subsampling source reads its seed from the entry's `sample_seed`, not
+    # the global seed argument, so the seed goes in there
     source_class = SOURCE_TYPES.get(source_type)
-    source = source_class.from_config(os.path.dirname(cache_dir), cached, seed)
+    source = source_class.from_config(
+        os.path.dirname(cache_dir), {**cached, 'sample_seed': seed}, seed
+    )
     return source.config()
 
 

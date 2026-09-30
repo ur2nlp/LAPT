@@ -4,7 +4,7 @@ import sys
 
 from datasets import DatasetDict, load_dataset
 
-from lapt.sources.base import SOURCE_TYPES
+from lapt.sources.base import SOURCE_REBUILD_HINT, SOURCE_TYPES
 from lapt.sources.factory import field
 from lapt.sources.text_processing import docs_to_lines
 from lapt_core.dataset_artifacts import DatasetArtifact
@@ -17,6 +17,7 @@ class OscarDataset(DatasetArtifact):
     """
 
     type_name = "oscar"
+    rebuild_hint = SOURCE_REBUILD_HINT
 
     def __init__(self, cache_dir: str, language_code: str):
         """Initialize the source.
