@@ -381,3 +381,30 @@ class TestArtifactGraph:
         graph.get("derived")
         graph.invalidate("derived")
         assert os.path.exists(graph.artifacts["recording"].path)
+
+
+
+class HintedArtifact(RecordingArtifact):
+    """A `recording` artifact whose pipeline supplies its own rebuild hint."""
+
+    rebuild_hint = "Run the frobnicator"
+
+
+class TestRebuildHint:
+    """The mismatch message's first way out is the artifact's own, not a flag guess."""
+
+    def mismatch_message(self, tmp_path, artifact_class) -> str:
+        artifact_class(str(tmp_path), payload="v1").resolve()
+        with pytest.raises(ConfigMismatchError) as caught:
+            artifact_class(str(tmp_path), payload="v2").resolve()
+        return str(caught.value)
+
+    def test_default_names_no_pipeline_flag(self, tmp_path):
+        message = self.mismatch_message(tmp_path, RecordingArtifact)
+        assert "fresh_" not in message
+        assert "removing this artifact's" in message
+
+    def test_artifact_hint_replaces_the_default(self, tmp_path):
+        message = self.mismatch_message(tmp_path, HintedArtifact)
+        assert "1. Run the frobnicator" in message
+        assert "removing this artifact's" not in message

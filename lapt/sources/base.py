@@ -16,3 +16,23 @@ the current record everywhere.
 from lapt_core.dataset_artifacts import DatasetRegistry
 
 SOURCE_TYPES = DatasetRegistry()
+
+# What a config-mismatch message offers first for each kind of source. Written
+# out per kind because the obvious flag is the wrong one: `fresh_dataset`
+# removes the whole cache tree, so it rebuilds every source to fix one.
+SOURCE_REBUILD_HINT = (
+    "Rebuild this source alone by removing its directory (the one\n"
+    "     holding the cached config above). Not fresh_dataset=true, which\n"
+    "     removes every source under dataset.cache_dir"
+)
+SAMPLED_SOURCE_REBUILD_HINT = (
+    "If only `seed` differs, this cache predates seed-keyed paths:\n"
+    "     rename its directory to untokenized_seed<n>, n the cached seed, to\n"
+    "     keep it as that seed's sample. Otherwise, rebuild this source alone\n"
+    "     by removing its directory. Not fresh_dataset=true, which removes\n"
+    "     every source under dataset.cache_dir"
+)
+MIX_REBUILD_HINT = (
+    "Resample the mix with fresh_mix=true, which keeps the per-source\n"
+    "     caches it draws on"
+)

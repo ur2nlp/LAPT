@@ -5,7 +5,7 @@ import sys
 
 from datasets import Dataset, DatasetDict, load_dataset
 
-from lapt.sources.base import SOURCE_TYPES
+from lapt.sources.base import SAMPLED_SOURCE_REBUILD_HINT, SOURCE_TYPES
 from lapt.sources.factory import field, sample_seed, seed_keyed_path
 from lapt_core.dataset_artifacts import DatasetArtifact
 
@@ -25,6 +25,7 @@ class InstructionHFDataset(DatasetArtifact):
     """
 
     type_name = "instruction_hf"
+    rebuild_hint = SAMPLED_SOURCE_REBUILD_HINT
 
     def __init__(
         self,

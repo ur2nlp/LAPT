@@ -5,7 +5,7 @@ import sys
 
 from datasets import Dataset, DatasetDict, load_dataset
 
-from lapt.sources.base import SOURCE_TYPES
+from lapt.sources.base import SAMPLED_SOURCE_REBUILD_HINT, SOURCE_TYPES
 from lapt.sources.factory import field, sample_seed, seed_keyed_path
 from lapt.sources.text_processing import collect_from_stream, docs_to_filtered_lines
 from lapt_core.dataset_artifacts import DatasetArtifact
@@ -22,6 +22,7 @@ class HuggingFaceDataset(DatasetArtifact):
     """
 
     type_name = "huggingface"
+    rebuild_hint = SAMPLED_SOURCE_REBUILD_HINT
 
     def __init__(
         self,

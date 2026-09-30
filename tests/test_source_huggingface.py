@@ -191,3 +191,26 @@ class TestC4MigrationTarget:
 
         with open(source.config_path) as record:
             assert yaml.safe_load(record) == source.config()
+
+
+class TestMismatchMessage:
+    def test_points_at_the_seed_and_away_from_fresh_dataset(self, tmp_path, fake_download):
+        """The old message's advice, fresh_dataset, removes every source."""
+        cache = str(tmp_path / "c")
+        HuggingFaceDataset(
+            cache, "fake/ds", text_column='content',
+            max_samples=2, split_into_lines=False, seed=1,
+        ).resolve()
+        record = tmp_path / "c" / "untokenized" / "config.yaml"
+        tracked = yaml.safe_load(record.read_text())
+        tracked['seed'] = 3
+        record.write_text(yaml.safe_dump(tracked))
+
+        with pytest.raises(ConfigMismatchError) as caught:
+            HuggingFaceDataset(
+                cache, "fake/ds", text_column='content',
+                max_samples=2, split_into_lines=False, seed=1,
+            ).resolve()
+
+        assert "untokenized_seed<n>" in str(caught.value)
+        assert "Not fresh_dataset=true" in str(caught.value)

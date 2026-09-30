@@ -167,6 +167,15 @@ class ArtifactConfig:
 
     artifact_name: str = "Artifact"
 
+    # The first way out a mismatch message offers. Deliberately names no flag:
+    # how a stage is rebuilt is the consuming pipeline's vocabulary, and naming
+    # one here told a LAPT user to reach for a flag that deletes every source
+    # to fix a single one. Override with the precise instruction.
+    rebuild_hint: str = (
+        "Rebuild it with the current config, by removing this artifact's\n"
+        "     directory (the one holding the cached config above)"
+    )
+
     def to_dict(self) -> dict:
         """Return the parameters that determine this artifact's contents."""
         raise NotImplementedError
@@ -242,8 +251,7 @@ class ArtifactConfig:
             + f"\n\n"
             f"The cached config at {config_path} records what actually created\n"
             f"this artifact. To proceed, either:\n\n"
-            f"  1. Rebuild with the current config, by passing the matching\n"
-            f"     fresh_* flag for this stage\n"
+            f"  1. {self.rebuild_hint}\n"
             f"  2. Change your config back to match the cached version\n"
             f"{divider}\n"
         )
@@ -256,9 +264,11 @@ class _DictArtifactConfig(ArtifactConfig):
     each of them having to declare a config class.
     """
 
-    def __init__(self, payload: dict, artifact_name: str):
+    def __init__(self, payload: dict, artifact_name: str, rebuild_hint: str | None = None):
         self.payload = payload
         self.artifact_name = artifact_name
+        if rebuild_hint is not None:
+            self.rebuild_hint = rebuild_hint
 
     def to_dict(self) -> dict:
         return self.payload
@@ -294,12 +304,16 @@ class CachedArtifact(ABC):
             artifact directory. Override when adopting `CachedArtifact` for
             caches that already carry a record under a different name, so the
             existing records are read rather than silently ignored.
+        rebuild_hint: How to rebuild this stage, offered first when its cache
+            fails validation. None keeps `ArtifactConfig`'s generic default;
+            a pipeline sets it to name its own mechanism.
     """
 
     name: str = "artifact"
     depends_on: tuple[str, ...] = ()
     path_includes_digest: bool = False
     config_filename: str = CONFIG_FILENAME
+    rebuild_hint: str | None = None
 
     def __init__(self, root: str):
         """Initialize the artifact.
@@ -381,7 +395,7 @@ class CachedArtifact(ABC):
 
     def artifact_config(self) -> ArtifactConfig:
         """Wrap `config()` in the `ArtifactConfig` validation interface."""
-        return _DictArtifactConfig(self.config(), self.name)
+        return _DictArtifactConfig(self.config(), self.name, self.rebuild_hint)
 
     def validate(self, error_on_mismatch: bool = True) -> bool:
         """Check a cached artifact's recorded config against the current one.
