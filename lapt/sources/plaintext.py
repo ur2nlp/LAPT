@@ -5,11 +5,12 @@ import sys
 
 from datasets import Dataset, DatasetDict
 
-from lapt.sources.base import SOURCE_TYPES, SourceDataset
+from lapt.sources.base import SOURCE_TYPES
 from lapt.sources.factory import field
+from lapt_core.dataset_artifacts import DatasetArtifact
 
 
-class PlaintextDataset(SourceDataset):
+class PlaintextDataset(DatasetArtifact):
     """A corpus read from a single plaintext file.
 
     Blank lines are dropped and surrounding whitespace stripped, so the example

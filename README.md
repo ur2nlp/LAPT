@@ -9,10 +9,11 @@ A modular framework for continued pre-training of multilingual language models w
 
 ## Features
 
-- **Flexible dataset loading**: OSCAR corpus, local plaintext files, directory-based loading, concatenation, and temperature-scaled multinomial sampling
+- **Flexible dataset loading**: OSCAR corpus, local plaintext files, directory-based loading, concatenation, temperature-scaled multinomial sampling, and instruction-tuning data with prompt-token loss masking
 - **FOCUS integration**: Optional vocabulary specialization with new tokenizer training using SentencePiece
 - **Hydra configuration**: Composable YAML configs for easy experimentation
 - **Per-language evaluation**: Automatic per-language dev set tracking for multilingual training
+- **Tracked, resumable caches**: Every pipeline stage records the configuration that produced it and refuses to reuse a cache that does not match — see [Caching](#caching)
 
 ## Installation
 
@@ -22,6 +23,64 @@ Create a conda environment from the provided configuration:
 conda env create -f environment.yml
 conda activate lapt
 ```
+
+To install the framework itself as a package, install the vendored `lapt-core`
+distribution first so pip resolves it from the working tree instead of looking
+for it on an index:
+
+```bash
+pip install -e packages/lapt-core
+pip install -e ".[dev]"
+```
+
+Neither step is needed to run the test suite, which reaches both packages
+through `pythonpath`.
+
+### Using `lapt-core` elsewhere
+
+`lapt_core` is a separate distribution so sibling projects can share the caching
+layer without inheriting this project's `transformers` pin:
+
+```bash
+pip install "lapt-core[datasets] @ https://github.com/ur2nlp/LAPT/archive/refs/tags/<tag>.tar.gz#subdirectory=packages/lapt-core"
+```
+
+A release tarball rather than `git+https://`, because pip needs the `git`
+binary to clone a VCS URL and a cluster compute node may not have one. See
+`packages/lapt-core/README.md` for the git form, which is what a private
+repository needs.
+
+## Staying current with upstream
+
+A fork does not follow this repository on its own. Point it at one once:
+
+```bash
+git remote add upstream https://github.com/ur2nlp/LAPT.git
+```
+
+Then pull whenever you want the latest framework changes:
+
+```bash
+git pull upstream main
+```
+
+Anything you add under `configs/training/`, `configs/focus/`,
+`configs/external_eval/` or `configs/chrf_eval/` is a new file that does not
+exist here, so a merge leaves it alone.
+
+`configs/main.yaml` is the one to expect conflicts in, and unlike the config
+groups you cannot avoid it by convention: the dataset is configured *inline*
+there rather than selected from `configs/dataset/`. Two things keep it small:
+
+* Prefer command-line overrides for anything that varies per run —
+  `dataset.language=hy`, `hf_model=...` — rather than editing the defaults.
+* When you do have to edit it, keep the edits to the `dataset:` block. Merges
+  resolve cleanly when the two sides touch different regions of a file.
+
+`lapt-core` is installed from the working tree (`pip install -e
+packages/lapt-core`), so a pull picks up its code with no reinstall. Re-run that
+one command only when a merge changes its packaging metadata — its version,
+dependencies or extras in `packages/lapt-core/pyproject.toml`.
 
 ## Usage
 
@@ -72,15 +131,175 @@ Train on your own plaintext files:
 python -m lapt dataset.type=plaintext dataset.path=/path/to/data.txt
 ```
 
+## Caching
+
+Each expensive stage — the untokenized corpus, the tokenizer, the tokenized
+dataset — is an *artifact*: it owns its cache directory, records the
+configuration that produced it in a YAML file beside the data, and decides for
+itself whether to load or rebuild.
+
+Two consequences worth knowing before you run anything twice:
+
+- **Most config changes need no flags.** Cache paths encode the parameters that
+  distinguish one result from another, so changing the vocabulary size (say)
+  builds a new tokenizer in its own directory and leaves the old one and the
+  corpus untouched. Configurations coexist rather than overwrite.
+- **A changed parameter that *isn't* in the path is an error, not a silent
+  reuse.** You will be told what differs and pointed at the flag that rebuilds
+  that stage.
+
+Selective rebuilds, each clearing everything downstream of it:
+
+| flag | clears |
+|---|---|
+| `fresh_dataset=true` | the dataset cache tree outright, sources included — use when you do not trust what is on disk |
+| `fresh_mix=true` | a multinomial or concat mix, *keeping* the per-source caches it draws on |
+| `fresh_tokenizer=true` | the tokenizer, the tokenized data, and the model |
+| `fresh_model=true` | model checkpoints only |
+
+## Experiment Tracking
+
+Runs are tracked by **experiment id** — the `experiment_id` you pass at launch,
+which also names the output directory. Everything below keys on it.
+
+```bash
+python -m lapt experiment_id=<your_run_id> training.learning_rate=4e-5
+```
+
+Three files per run live under `outputs/`:
+
+| path | holds |
+|---|---|
+| `outputs/configs/{id}.yaml` | the config the run was launched with |
+| `outputs/trainer_states/{id}.json` | the metric history HuggingFace wrote |
+| `outputs/registry.yaml` | one row per run: extracted params plus your notes |
+
+### Pulling runs off a cluster
+
+`fetch_results.sh` inventories the remote, works out what is missing or stale,
+and copies only that. No host or path is baked into the repository, so set them
+in your shell:
+
+```bash
+export LAPT_REMOTE=<ssh_host_or_alias>        # e.g. a Host entry in ~/.ssh/config
+export LAPT_MODEL_DIRS=<remote_models_dir>    # colon-separated for several roots
+```
+
+```bash
+bash scripts/fetch_results.sh
+```
+
+Finished runs are never re-fetched, and an in-progress run has only its
+trainer state refreshed — a config cannot change mid-run. To see what it would
+do without moving anything:
+
+```bash
+INV="ssh $LAPT_REMOTE 'bash -s' < tools/remote_inventory.sh -- -b $LAPT_MODEL_DIRS"
+eval "$INV" | python tools/fetch_diff.py --dry-run
+```
+
+### Registering and annotating runs
+
+`extract` reads configs and upserts a row per run. It is safe to re-run; it
+updates rather than duplicates.
+
+```bash
+python tools/registry.py extract outputs/configs/<your_run_id>.yaml
+
+# --pattern takes a regex over paths; this takes every id starting with 'lr'
+python tools/registry.py extract --pattern 'outputs/configs/lr.*\.yaml'
+```
+
+The parameters come from the config automatically. What only you can supply is
+why the run existed and what it showed:
+
+```bash
+python tools/registry.py annotate <your_run_id> \
+    --note "lr 4e-5, 32k adapted vocabulary, effective batch 60" \
+    --observation "best held-out bpc in this sweep; larger model plateaus above it" \
+    --era <your_era> --group <your_group>
+```
+
+`--status manually_closed` retires a run, which also stops `fetch_results.sh`
+re-fetching it.
+
+### Reading the registry
+
+```bash
+python tools/registry.py show                      # everything
+python tools/registry.py show --era <your_era> --group <your_group>
+python tools/registry.py diff lr2e-5 lr4e-5        # only what differs (ids are examples)
+python tools/registry.py verify                    # rows still match outputs/configs/
+python tools/registry.py debt                      # runs on disk with no row, rows with no note
+```
+
+`diff` is the one to reach for when comparing a sweep: it prints only the
+parameters that vary across the runs you name and lists the rest as constant, so
+a forty-field config collapses to the three things you actually changed.
+
+`debt --strict` exits non-zero, which makes it usable as a pre-commit or CI check
+that no run went un-annotated.
+
+### Plotting
+
+`training_plot.py` reads trainer states directly — no registry required.
+
+```bash
+# one run, several metrics
+python tools/training_plot.py --metrics loss eval_loss \
+    --state-file outputs/trainer_states/<your_run_id>.json
+
+# compare runs; --state-pattern is a regex over paths (ids here are examples)
+python tools/training_plot.py --metric "eval_.*_bpc" \
+    --state-pattern "outputs/trainer_states/lr(2|4)e-5\.json"
+
+# discover what a run actually logged
+python tools/training_plot.py --list-metrics --state-file outputs/trainer_states/<your_run_id>.json
+```
+
+Metric names are regexes, so `--metric "eval_.*_bpc"` draws every per-language
+bpc series on one panel and `--metrics loss "eval_.*"` gives one panel per match.
+
+Useful when the defaults fight you:
+
+| flag | does |
+|---|---|
+| `--output plot.png` | save instead of opening a window |
+| `--ylim 0 5` | shared y-limits across panels |
+| `--ylims eval_loss:1:3` | per-metric limits; repeatable, wins over `--ylim` |
+| `--run-names baseline adapted` | legend labels instead of file paths |
+| `--exclude-pattern` | drop runs the state pattern swept up |
+| `--x-axis epoch` | plot against epochs rather than steps |
+| `--dark` | light-on-dark, for slides |
+
 ## Project Structure
 
-- `lapt/` - Main source code (installable package)
+- `lapt/` - Framework source (installable package)
   - `__main__.py` - Training orchestration
-  - `dataset_utils.py` - Dataset loading and processing
-  - `model_utils.py` - Model and tokenizer initialization
-  - `tokenizer_utils.py` - Tokenizer training and FOCUS operations
+  - `sources/` - One module per dataset type, registered by its `type` field
+  - `tokenized_data.py` - Text-to-token transformations and the cached
+    tokenized stages that run them
+  - `artifact_configs.py` - Per-stage configuration records and cache paths
+  - `model.py` - Model loading and vocabulary adaptation
+  - `tokenizer.py` - Tokenizer training and special-token placement
+  - `focus.py` - FOCUS embedding initialization and its sidecar cache
+  - `evaluation.py` - Eval sets, metrics, generation, and evaluation callbacks
+- `packages/lapt-core/lapt_core/` - Domain-neutral caching layer, packaged
+  separately so sibling projects can depend on it without inheriting this one's
+  pins
+  - `artifacts.py` - `CachedArtifact`, config validation, `ArtifactGraph`
+  - `mixing.py` - Source sampling arithmetic and mix cache naming
+  - `composites.py` - Concatenation and multinomial mixing
 - `configs/` - Hydra configuration files
+- `tools/` - Analysis and plotting scripts
 - `tests/` - Unit tests
+
+### Adding a dataset type
+
+One new module in `lapt/sources/`: subclass `DatasetArtifact`, set `type_name`,
+implement `config()` (the parameters the cache is keyed on), `build()`, and
+`from_config()`, then call `SOURCE_TYPES.register(...)` and import it in
+`lapt/sources/__init__.py`. There is no dispatcher to edit.
 
 ## Citation
 

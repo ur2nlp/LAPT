@@ -1,21 +1,33 @@
-"""
-Evaluation utilities for measuring prediction diversity and detecting model collapse.
+"""Everything that measures a model rather than trains one.
 
-This module provides metrics for diagnosing pathological model behavior, particularly
-degenerate generation where models collapse to repeatedly predicting a small set of
-high-frequency tokens. Also provides bits-per-character (BPC) computation for
-tokenizer-agnostic evaluation.
+Three groups:
+
+* **Eval data** -- `load_external_eval_set` and `prepare_eval_datasets` assemble
+  the held-out sets a run reports on, and `DataCollatorForInstructionTuning`
+  batches them.
+* **Metrics** -- prediction-diversity and collapse diagnostics for degenerate
+  generation, where a model falls back on a small set of high-frequency tokens,
+  plus tokenizer-agnostic bits-per-character.
+* **Callbacks** -- the Trainer hooks that run the above during training.
 """
 
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import torch
+from datasets import Dataset, DatasetDict
 from sacrebleu.metrics import CHRF
-from transformers import TrainerCallback
+from transformers import PreTrainedTokenizer, TrainerCallback
+
+from lapt.sources.text_processing import read_instruction_jsonl
+from lapt.tokenized_data import (
+    tokenize_instruction_examples,
+    tokenize_plaintext_with_labels,
+)
 
 
 def preprocess_logits_for_metrics(logits, labels):
@@ -553,3 +565,255 @@ class GenerationChrfCallback(TrainerCallback):
         # recent log_history entry so chrF appears in the saved trainer state.
         if chrf_values and state.log_history:
             state.log_history[-1].update(chrf_values)
+
+
+def load_external_eval_set(
+    eval_config: dict,
+    tokenizer: PreTrainedTokenizer,
+    max_length: int,
+    add_labels: bool = False,
+) -> Dataset:
+    """
+    Load and tokenize an external evaluation dataset.
+
+    Args:
+        eval_config: Dictionary with 'name', 'path', and optional 'format' keys
+            - name: Name for the eval set (used in metrics)
+            - path: Path to the data file
+            - format: 'plaintext' (default) or 'jsonl'
+            - text_column: Column name for jsonl format (default: 'text')
+        tokenizer: Tokenizer to use for tokenization
+        max_length: Maximum sequence length for tokenization
+        add_labels: If True, add a 'labels' column (=input_ids) for plaintext/jsonl
+            formats so the set is compatible with DataCollatorForInstructionTuning.
+            instruction_jsonl format always includes masked labels regardless.
+
+    Returns:
+        Tokenized Dataset ready for evaluation
+    """
+    name = eval_config['name']
+    path = eval_config['path']
+    file_format = eval_config.get('format', 'plaintext')
+    text_column = eval_config.get('text_column', 'text')
+
+    print(f"Loading external eval set '{name}' from {path}", file=sys.stderr)
+
+    if not os.path.exists(path):
+        raise ValueError(f"External eval set file not found: {path}")
+
+    # Load data based on format
+    if file_format == 'plaintext':
+        # Read lines from plaintext file
+        with open(path, encoding='utf-8') as f:
+            lines = [line.strip() for line in f if line.strip()]
+        dataset = Dataset.from_dict({'text': lines})
+        is_instruction = False
+
+    elif file_format == 'jsonl':
+        # Load JSONL file
+        data = []
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    obj = json.loads(line)
+                    if text_column in obj:
+                        data.append(obj[text_column])
+                    else:
+                        raise ValueError(
+                            f"JSONL file missing '{text_column}' column: {path}"
+                        )
+        dataset = Dataset.from_dict({'text': data})
+        is_instruction = False
+
+    elif file_format == 'instruction_jsonl':
+        # Load instruction JSONL with prompt/response fields
+        prompts, responses = read_instruction_jsonl(path)
+        dataset = Dataset.from_dict({'prompt': prompts, 'response': responses})
+        is_instruction = True
+
+    else:
+        raise ValueError(
+            f"Unsupported format '{file_format}' for external eval set. "
+            f"Supported formats: 'plaintext', 'jsonl', 'instruction_jsonl'"
+        )
+
+    print(f"  Loaded {len(dataset)} examples", file=sys.stderr)
+
+    # Tokenize the dataset
+    if is_instruction:
+        # Instruction format: use label masking (loss only on response)
+        dataset = dataset.map(
+            lambda examples: tokenize_instruction_examples(examples, tokenizer, max_length),
+            batched=True,
+            remove_columns=['prompt', 'response'],
+            desc=f"Tokenizing external eval set '{name}'"
+        )
+    else:
+        # Plain text format: standard tokenization
+        if add_labels:
+            tokenize_fn = lambda examples: tokenize_plaintext_with_labels(
+                examples, tokenizer, max_length
+            )
+        else:
+            tokenize_fn = lambda examples: tokenizer(
+                examples['text'], max_length=max_length, truncation=True
+            )
+        dataset = dataset.map(
+            tokenize_fn,
+            batched=True,
+            remove_columns=['text'],
+            desc=f"Tokenizing external eval set '{name}'"
+        )
+
+    return dataset
+
+
+def prepare_eval_datasets(
+    dataset: DatasetDict,
+    tokenizer: PreTrainedTokenizer,
+    max_length: int,
+    external_eval_sets: list = None
+):
+    """
+    Prepare evaluation datasets from loaded data and optional external sources.
+
+    Handles both:
+    - Extracting dev splits from tokenized dataset (single or per-language)
+    - Loading and merging external evaluation sets
+
+    Args:
+        dataset: Tokenized DatasetDict with train and dev/test splits
+        tokenizer: Tokenizer for tokenizing external eval sets
+        max_length: Max sequence length for tokenization
+        external_eval_sets: Optional list of external eval configs, each with
+            'name', 'path', and optional 'format' keys
+
+    Returns:
+        Either a single Dataset (standard case) or dict of Datasets (multinomial
+        or when external eval sets are added)
+    """
+    # Dev splits are any non-train splits except 'test'
+    dev_splits = [key for key in dataset.keys() if key != 'train' and key != 'test']
+
+    if dev_splits:
+        # Multinomial sampling case: multiple per-language dev sets
+        eval_dataset = {key: dataset[key] for key in dev_splits}
+        print(
+            f"Using {len(eval_dataset)} per-language eval sets: {', '.join(dev_splits)}",
+            file=sys.stderr
+        )
+    else:
+        # Standard case: single dev/test split
+        eval_dataset = dataset['test']
+
+    # Load external evaluation sets if configured
+    if external_eval_sets:
+        # If eval_dataset is not already a dict, convert it
+        if not isinstance(eval_dataset, dict):
+            eval_dataset = {'dev': eval_dataset}
+            print("Converted single eval dataset to dict for external eval sets", file=sys.stderr)
+
+        # If the existing eval sets carry labels (instruction-tuning run), plaintext
+        # external eval sets must also have labels to be compatible with
+        # DataCollatorForInstructionTuning.
+        existing_has_labels = any(
+            'labels' in ds.column_names for ds in eval_dataset.values()
+        )
+
+        # Load and add each external eval set
+        for eval_config in external_eval_sets:
+            name = eval_config['name']
+
+            # Check for name conflicts
+            if name in eval_dataset:
+                raise ValueError(
+                    f"External eval set name '{name}' conflicts with existing eval set. "
+                    f"Existing eval sets: {list(eval_dataset.keys())}"
+                )
+
+            external_dataset = load_external_eval_set(
+                eval_config=eval_config,
+                tokenizer=tokenizer,
+                max_length=max_length,
+                add_labels=existing_has_labels,
+            )
+            eval_dataset[name] = external_dataset
+            print(
+                f"Added external eval set '{name}' with {len(external_dataset)} examples",
+                file=sys.stderr
+            )
+
+    return eval_dataset
+
+
+class DataCollatorForInstructionTuning:
+    """
+    Data collator for instruction tuning with pre-computed labels.
+
+    This collator expects examples that already have 'labels' field with
+    prompt tokens masked as -100. It handles padding for:
+    - input_ids: padded with tokenizer.pad_token_id
+    - attention_mask: padded with 0
+    - labels: padded with -100 (ignored by CrossEntropyLoss)
+
+    Unlike DataCollatorForLanguageModeling, this collator does NOT create labels
+    from input_ids - it uses the pre-computed labels from the dataset.
+
+    Args:
+        tokenizer: Tokenizer used for padding
+        padding: Padding strategy ('longest', 'max_length', or False)
+        max_length: Maximum length when padding='max_length'
+    """
+
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        padding: str = 'longest',
+        max_length: int = None
+    ):
+        self.tokenizer = tokenizer
+        self.padding = padding
+        self.max_length = max_length
+
+        # Ensure tokenizer has a pad token
+        if self.tokenizer.pad_token_id is None:
+            # Use EOS token as pad token if not set
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
+    def __call__(self, features: list) -> dict:
+        """
+        Collate a batch of features.
+
+        Args:
+            features: List of dicts with 'input_ids', 'attention_mask', and 'labels'
+
+        Returns:
+            Batch dict with padded tensors
+        """
+        import torch
+
+        # Separate labels from other features for custom padding
+        labels = [f['labels'] for f in features]
+        # Remove labels temporarily for tokenizer padding
+        features_without_labels = [{k: v for k, v in f.items() if k != 'labels'} for f in features]
+
+        # Use tokenizer's padding for input_ids and attention_mask
+        batch = self.tokenizer.pad(
+            features_without_labels,
+            padding=self.padding,
+            max_length=self.max_length,
+            return_tensors='pt'
+        )
+
+        # Pad labels with -100 (ignored by loss function)
+        max_label_length = max(len(l) for l in labels)
+        padded_labels = []
+        for label in labels:
+            padding_length = max_label_length - len(label)
+            # Pad on the right with -100
+            padded_label = label + [-100] * padding_length
+            padded_labels.append(padded_label)
+
+        batch['labels'] = torch.tensor(padded_labels, dtype=torch.long)
+
+        return batch

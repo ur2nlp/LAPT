@@ -282,7 +282,13 @@ class CachedArtifact(ABC):
     Attributes:
         name: Stable identifier for this stage, used as the default directory
             name and as the key in an `ArtifactGraph`.
-        depends_on: Names of the stages whose values `build` requires.
+        depends_on: Names of the stages this one sits downstream of. Read by
+            `ArtifactGraph` to derive what a change here invalidates. It is
+            *not* a required-argument contract: a stage whose inputs arrive
+            through its constructor -- which is every stage in practice, since
+            a tokenizer object or a resolved path is not itself an artifact --
+            declares its topology here and ignores `deps` entirely. `deps`
+            remains available for a builder that does want injection.
         path_includes_digest: Whether to append a config digest to the path.
         config_filename: Name of the YAML config record written inside the
             artifact directory. Override when adopting `CachedArtifact` for
@@ -432,8 +438,10 @@ class CachedArtifact(ABC):
         """Return the artifact, building it only if there is no valid cache.
 
         Args:
-            deps: Resolved dependency values, keyed by stage name. Required if
-                `depends_on` is non-empty.
+            deps: Resolved dependency values, keyed by stage name. Optional:
+                `depends_on` declares topology, not required arguments, so a
+                stage taking its inputs through the constructor resolves with
+                no deps at all.
             fresh: Discard any cached copy and rebuild unconditionally.
 
         Returns:
@@ -444,11 +452,6 @@ class CachedArtifact(ABC):
                 configuration and `fresh` is False.
         """
         deps = deps or {}
-        missing = [name for name in self.depends_on if name not in deps]
-        if missing:
-            raise KeyError(
-                f"{self.name} depends on {list(self.depends_on)} but was not given: {missing}"
-            )
 
         if fresh:
             self.clear()
@@ -472,12 +475,21 @@ class CachedArtifact(ABC):
 
 
 class ArtifactGraph:
-    """A dependency graph of `CachedArtifact` stages.
+    """A topological graph of `CachedArtifact` stages.
 
-    Resolving a stage resolves its dependencies first and memoizes each value, so
-    a stage shared by two downstream consumers is built once. Invalidating a
-    stage also clears everything reachable from it, which replaces the
-    hand-maintained cascade that each pipeline otherwise grows.
+    `invalidate` is the load-bearing half: clearing a stage also clears
+    everything reachable from it, which replaces the hand-maintained cascade a
+    pipeline otherwise grows -- one `depends_on` declaration per class instead
+    of the same relationships restated in every branch of a cleanup function.
+
+    `get` is the other half, and is largely vestigial. It resolves a stage's
+    topological parents on the way to it and injects them as `deps`, which
+    suits a pipeline whose stages consume each other's *values*. In practice
+    stages consume things that are not artifacts -- a loaded tokenizer, a
+    resolved path, a config object -- so they take their inputs through their
+    constructors and are resolved directly, and `deps` arrives empty and
+    unread. Reach for `invalidate`; `get` is kept because a future stage may
+    genuinely want injection, not because it is the intended entry point.
     """
 
     def __init__(self, *artifacts: CachedArtifact):
@@ -528,7 +540,11 @@ class ArtifactGraph:
         return self.artifacts[name]
 
     def get(self, name: str, fresh: bool = False) -> Any:
-        """Resolve a stage, building its dependencies first as needed.
+        """Resolve a stage, building its topological parents first as needed.
+
+        Note that this *builds* upstream stages in order to reach a downstream
+        one, which is rarely what a caller wants from a graph whose stages
+        already receive their inputs directly. See the class docstring.
 
         Args:
             name: Stage to resolve.

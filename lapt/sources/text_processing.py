@@ -1,6 +1,6 @@
 """Text-shaping helpers shared by the corpus source types.
 
-These live here rather than in `lapt.dataset_utils` so that source modules can
+These live here rather than in `lapt.tokenized_data` so that source modules can
 use them without importing back into the module that imports *them*, which
 would be circular.
 """

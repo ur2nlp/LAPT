@@ -56,7 +56,7 @@ import torch
 from sacrebleu.metrics import CHRF
 from tqdm import tqdm
 
-from lapt.eval_utils import count_new_tokens
+from lapt.evaluation import count_new_tokens
 
 
 def load_instruction_jsonl(file_path: str) -> tuple[list[str], list[str]]:
@@ -123,7 +123,7 @@ def generate_responses(
     ``text-generation`` pipeline, so the raw generated token ids are available:
     the pipeline only hands back decoded text, which cannot distinguish a model
     that halted on EOS from one that rambled to ``max_new_tokens`` and was cut
-    off. This mirrors ``lapt/eval_utils.generate_greedy_batched``, the
+    off. This mirrors ``lapt/evaluation.generate_greedy_batched``, the
     training-loop counterpart, which slices the prompt off by token index for
     the same reason.
 

@@ -1,7 +1,7 @@
 """Summarize a mutmut run as a line-oriented report.
 
 `mutmut results` lists one entry per mutant, named after the function it lives
-in (`dataset_utils.x__apply_substitutions__mutmut_2`). That is the wrong unit
+in (`tokenized_data.x__apply_substitutions__mutmut_2`). That is the wrong unit
 for reading: mutmut generates several mutants per source line, so a function
 with 25 surviving mutants may represent only 6 distinct untested lines, and a
 per-function count reads as far more alarming than the code warrants.

@@ -15,8 +15,8 @@ import sys
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-from lapt.sources.base import SourceDataset
 from lapt_core.artifacts import config_digest
+from lapt_core.dataset_artifacts import DatasetArtifact
 
 
 def parse_substitutions(raw) -> list[tuple[str, str]]:
@@ -51,7 +51,7 @@ def parse_substitutions(raw) -> list[tuple[str, str]]:
     return substitutions
 
 
-class SubstitutedDataset(SourceDataset):
+class SubstitutedDataset(DatasetArtifact):
     """A source with regex substitutions applied to every string column.
 
     Caches beside the source it wraps, as `{base}_sub_{digest}`, so the raw
@@ -61,7 +61,7 @@ class SubstitutedDataset(SourceDataset):
     config can name, it is a transformation any source may carry.
     """
 
-    def __init__(self, base: SourceDataset, substitutions: list[tuple[str, str]]):
+    def __init__(self, base: DatasetArtifact, substitutions: list[tuple[str, str]]):
         """Initialize the wrapper.
 
         Args:

@@ -29,6 +29,7 @@ from lapt_core.artifacts import (
     dict_diff,
     format_number,
 )
+from lapt_core.mixing import mix_slug as multinomial_mix_slug
 
 
 def resolve_dev_size(args: DictConfig):
@@ -61,7 +62,7 @@ def resolve_dev_size(args: DictConfig):
 
     # TODO: currently dev_size is required, but it would be reasonable to allow
     # skipping it when using only external eval sets. Would need dev_size=None
-    # support in load_tokenized_dataset.
+    # support in TokenizedDatasetArtifact.build().
     raise ValueError(
         "dev_size not found in dataset or training config. "
         "Please set dataset.dev_size in your config."
@@ -82,67 +83,6 @@ def get_model_shortname(hf_model: str) -> str:
     return model_name.lower().replace('-', '').replace('.', '')
 
 
-DEFAULT_SEED = 1
-
-
-def multinomial_mix_slug(dataset_config: dict) -> str:
-    """
-    Build a deterministic subdirectory name for a multinomial dataset mix.
-
-    The upsampled training split produced by multinomial sampling depends on
-    alpha, total_samples, dev_size, per-source sampling_prob /
-    upsampling_factor / dev_size overrides, and the seed, but NOT on the
-    underlying source datasets (which live in parent-level subdirectories and
-    can be shared across mixes). Caching mix-dependent artifacts inside {cache_dir}/{slug}/
-    instead of directly under {cache_dir}/ means sweeping alpha or sample
-    counts no longer clobbers the previous mix and source caches are
-    transparently shared.
-
-    Args:
-        dataset_config: Dict with at least 'total_samples' and 'sources'. Must
-            correspond to a multinomial dataset. 'alpha' is optional, since it is
-            omissible for mixes where it cannot affect the sampling probabilities.
-            'seed' is optional and defaults to DEFAULT_SEED.
-
-    Returns:
-        Slug like "mix_a0.5_s5m_ab12cd34", or "mix_s5m_ab12cd34" without alpha.
-    """
-    alpha = dataset_config.get('alpha')
-    total_samples = dataset_config['total_samples']
-
-    mix_keys = {
-        'alpha': alpha,
-        'total_samples': total_samples,
-        'dev_size': dataset_config.get('dev_size'),
-        'sources': [
-            {
-                'id': source.get('id') or source.get('language'),
-                'sampling_prob': source.get('sampling_prob'),
-                'upsampling_factor': source.get('upsampling_factor'),
-                'dev_size': source.get('dev_size'),
-                'substitutions': source.get('substitutions'),
-            }
-            for source in dataset_config.get('sources', [])
-        ],
-    }
-    # a non-default seed changes which examples are sampled and repeated, so
-    # mixes that differ only by seed must not share a directory. the key is
-    # omitted at the default so that slugs predating seed-keying are unchanged
-    # -- every mix built before this was built at DEFAULT_SEED, so the omission
-    # records a fact rather than papering over one. the seed is recorded in the
-    # config unconditionally either way, so validation is unaffected.
-    seed = dataset_config.get('seed', DEFAULT_SEED)
-    if seed != DEFAULT_SEED:
-        mix_keys['seed'] = seed
-
-    digest = config_digest(mix_keys)
-
-    # omit the alpha segment when the config has no alpha, rather than writing
-    # "aNone" into the directory name; slugs for configs that do set it are unchanged
-    alpha_part = f"a{alpha}_" if alpha is not None else ""
-    return f"mix_{alpha_part}s{format_number(total_samples)}_{digest}"
-
-
 @dataclass
 class TokenizerConfig(ArtifactConfig):
     """
@@ -151,7 +91,7 @@ class TokenizerConfig(ArtifactConfig):
     Contains all parameters that affect the tokenizer artifact. Used for:
     - Generating cache paths
     - Validating cached tokenizers match current config
-    - Passing to train_new_tokenizer()
+    - Passing to TokenizerArtifact (lapt/tokenizer.py)
     """
     artifact_name = "Tokenizer"
 
@@ -161,14 +101,6 @@ class TokenizerConfig(ArtifactConfig):
     num_samples: int
     character_coverage: float
     inherit_additional_special_tokens: bool
-
-    # Seed vocabulary parameters
-    use_seed_vocabulary: bool
-    seed_vocab_multiplier: float
-    seed_lambda: float
-    seed_min_frequency: int
-    seed_round_mode: str
-    seed_score_mode: str
 
     # Embedding initialization
     fasttext_model_min_count: int
@@ -233,12 +165,6 @@ class TokenizerConfig(ArtifactConfig):
                 'inherit_additional_special_tokens', True
             ),
             tokenizer_algorithm=tokenizer_algorithm,
-            use_seed_vocabulary=args.focus.get('use_seed_vocabulary', False),
-            seed_vocab_multiplier=args.focus.get('seed_vocab_multiplier', 5.0),
-            seed_lambda=args.focus.get('seed_lambda', 0.5),
-            seed_min_frequency=args.focus.get('seed_min_frequency', 1),
-            seed_round_mode=args.focus.get('seed_round_mode', 'round'),
-            seed_score_mode=args.focus.get('seed_score_mode', 'count'),
             fasttext_model_min_count=args.focus.get('fasttext_model_min_count', 4),
             seed=args.seed,
             init_model_id=init_model_id,
@@ -269,15 +195,6 @@ class TokenizerConfig(ArtifactConfig):
         if self.focus_dataset is not None:
             suffix += "_customdata"
 
-        if self.use_seed_vocabulary:
-            suffix += "_seeded"
-            suffix += f"-{self.seed_vocab_multiplier}x"
-            suffix += f"-lambda{self.seed_lambda}"
-            if self.seed_min_frequency > 1:
-                suffix += f"-min{self.seed_min_frequency}"
-            if self.seed_score_mode != 'count':
-                suffix += f"-{self.seed_score_mode}"
-
         return suffix
 
     def _model_shortname(self) -> str:
@@ -294,24 +211,9 @@ class TokenizerConfig(ArtifactConfig):
             language: Language code for the tokenizer
 
         Returns:
-            Path like "tokenizers/got/xglm564m_focus-v16k-s100k_seeded-5.0x-lambda0.5"
+            Path like "tokenizers/got/xglm564m_focus-v16k-s100k"
         """
         return f"tokenizers/{language}/{self.tokenizer_id()}"
-
-    def seed_tokenizer_suffix(self) -> str:
-        """
-        Generate directory name for the intermediate seed tokenizer.
-
-        The seed tokenizer is shared across lambda values since it only depends
-        on vocab_size, num_samples, and multiplier.
-
-        Returns:
-            String like "xglm564m_focus-v16k-s200k_seed-5.0x"
-        """
-        model_short = self._model_shortname()
-        vocab_str = format_number(self.vocab_size)
-        samples_str = format_number(self.num_samples)
-        return f"{model_short}_focus-v{vocab_str}-s{samples_str}_seed-{self.seed_vocab_multiplier}x"
 
     def tokenizer_id(self) -> str:
         """
@@ -325,7 +227,7 @@ class TokenizerConfig(ArtifactConfig):
         tokenizer training parameters that don't apply.
 
         Returns:
-            String like "xglm564m_focus-v16k-s100k_seeded-5.0x-lambda0.5"
+            String like "xglm564m_focus-v16k-s100k"
             or "xglm564m_ptex_test-s5m" for pre-built tokenizers
         """
         model_short = self._model_shortname()
@@ -352,13 +254,27 @@ class TokenizerConfig(ArtifactConfig):
         'fasttext_model_min_count',
     )
 
+    # Fields removed when the hybrid seed-vocabulary feature was retired
+    # (September 2026; see deep_dives/seed_vocabulary.md). Stripped from a
+    # cached config the same way as _embedding_only_fields, but for a
+    # different reason: these described a feature that no longer exists at
+    # all, not a provenance split within a feature that's still live.
+    _retired_fields = (
+        'use_seed_vocabulary',
+        'seed_vocab_multiplier',
+        'seed_lambda',
+        'seed_min_frequency',
+        'seed_round_mode',
+        'seed_score_mode',
+    )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for saving to YAML.
 
         When tokenizer_path is set (pre-built tokenizer), only fields that
         actually affect the downstream artifacts are included. Tokenizer
-        training params (vocab_size, character_coverage, seed vocab settings,
-        etc.) are excluded since they were bypassed.
+        training params (vocab_size, character_coverage, etc.) are excluded
+        since they were bypassed.
         """
         if self.tokenizer_path:
             return {
@@ -375,19 +291,20 @@ class TokenizerConfig(ArtifactConfig):
         return d
 
     def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
-        """Validate cached tokenizer config, tolerating legacy embedding-only fields.
+        """Validate cached tokenizer config, tolerating legacy and retired fields.
 
         Older tokenizer caches recorded fields like `train_dataset_cache`,
         `focus_dataset`, and `fasttext_model_min_count` that we now consider
-        embedding-level (not tokenizer-level) provenance. Strip them from the
-        cached config before diffing so previously valid caches keep working
-        and a mix change no longer forces a full tokenizer retrain.
+        embedding-level (not tokenizer-level) provenance, and caches from
+        before the seed-vocabulary retirement record fields that no longer
+        exist at all. Strip both from the cached config before diffing so
+        previously valid caches keep working.
         """
         if not os.path.exists(config_path):
             return True
         with open(config_path) as f:
             cached = yaml.safe_load(f) or {}
-        for k in self._embedding_only_fields:
+        for k in self._embedding_only_fields + self._retired_fields:
             cached.pop(k, None)
         # Backward compat: caches predating tokenizer_algorithm were all trained
         # with the inherited algorithm (None), so treat a missing key as such.
@@ -462,6 +379,82 @@ class DatasetConfig(ArtifactConfig):
     def to_dict(self) -> dict:
         """Return config dictionary for saving to YAML."""
         return dict(self._config)
+
+    # How a run was launched, rather than what it trains. Stripped before
+    # comparison but kept in the saved record: the archived config is
+    # provenance, and `tools/registry.py` reads its fields to describe runs.
+    # Without this the check would fire the moment `preempt_resume` flipped
+    # false -> true, which is exactly the workflow it exists to protect.
+    _operational_fields = (
+        'preempt_resume',
+        'resume_from_checkpoint',
+        'fresh_dataset',
+        'fresh_tokenizer',
+        'fresh_model',
+        'output_dir',
+        'model_name',
+    )
+
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Refuse to train into a directory whose record describes another run.
+
+        Model outputs are not a cache -- nothing here is ever loaded instead of
+        being trained -- so this is not a cache-or-build decision. It is a
+        collision check. `output_dir` is effectively one directory per
+        `experiment_id`, so a mismatch means one of two things, and both are
+        worth stopping:
+
+        - a preempted run is being resumed with a parameter changed, which
+          would make the resulting weights a chimera of two configurations;
+        - the same `experiment_id` is being re-run with different parameters,
+          so its registry entry would describe something other than what
+          ends up on disk.
+
+        Args:
+            config_path: Full path to the cached `training_config.yaml`.
+            error_on_mismatch: Raise on mismatch when True.
+
+        Returns:
+            True when the configs match or no record exists yet.
+
+        Raises:
+            ConfigMismatchError: If the records differ and `error_on_mismatch`.
+        """
+        if not os.path.exists(config_path):
+            return True
+        with open(config_path) as config_file:
+            cached = yaml.safe_load(config_file) or {}
+        current = self.to_dict()
+        for key in self._operational_fields:
+            cached.pop(key, None)
+            current.pop(key, None)
+
+        diffs = dict_diff(cached, current)
+        if not diffs:
+            return True
+
+        divider = '=' * 70
+        error_msg = (
+            f"\n{divider}\n"
+            f"CONFIG MISMATCH: {self.artifact_name}\n"
+            f"{divider}\n"
+            f"{config_path} records a run trained with different parameters:\n\n"
+            + "\n".join(f"  {diff}" for diff in diffs)
+            + f"\n\n"
+            f"Resuming here would blend two configurations into one set of\n"
+            f"weights; starting over would leave this experiment's recorded\n"
+            f"parameters describing something other than what is on disk.\n\n"
+            f"To proceed, either:\n\n"
+            f"  1. Retrain from scratch with fresh_model=true, which clears\n"
+            f"     the directory and this record with it\n"
+            f"  2. Give this run its own experiment_id\n"
+            f"  3. Change the config back to match the recorded run\n"
+            f"{divider}\n"
+        )
+        if error_on_mismatch:
+            raise ConfigMismatchError(error_msg)
+        print(error_msg, file=sys.stderr)
+        return False
 
     def effective_cache_dir(self, base_cache_dir: str) -> str:
         """
@@ -621,6 +614,34 @@ class TokenizedDatasetConfig(ArtifactConfig):
 
         return config
 
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Validate cached config, tolerating retired fields nested under 'tokenizer'.
+
+        A tokenized-dataset cache built before the seed-vocabulary retirement
+        (`f7d1942`) has those fields nested under its `tokenizer` key, since
+        `TokenizerConfig.to_dict()` used to include them. Strip them from the
+        cached side before diffing, the same way `TokenizerConfig.check_cached`
+        already does for a tokenizer cache directly -- without this, every
+        pre-retirement tokenized-dataset cache would mismatch on a field that
+        no longer exists anywhere in the current config.
+        """
+        if not os.path.exists(config_path):
+            return True
+        with open(config_path) as config_file:
+            cached = yaml.safe_load(config_file) or {}
+        tokenizer_block = cached.get('tokenizer')
+        if isinstance(tokenizer_block, dict):
+            for key in TokenizerConfig._embedding_only_fields + TokenizerConfig._retired_fields:
+                tokenizer_block.pop(key, None)
+        diffs = dict_diff(cached, self.to_dict())
+        if not diffs:
+            return True
+        error_msg = self._format_mismatch(config_path, diffs)
+        if error_on_mismatch:
+            raise ConfigMismatchError(error_msg)
+        print(error_msg, file=sys.stderr)
+        return False
+
 
 class ModelConfig(ArtifactConfig):
     """
@@ -649,22 +670,16 @@ class ModelConfig(ArtifactConfig):
         config = OmegaConf.to_container(args, resolve=True)
 
         # When a pre-built tokenizer is plugged in, FOCUS bypasses SentencePiece
-        # training entirely — vocab_size, character_coverage, and the various
-        # seed-vocab / inherit-additional-special-tokens knobs are never
-        # consulted. Null them out in the saved config so they don't appear to
-        # document how the plugged-in tokenizer was trained (they don't).
+        # training entirely — vocab_size, character_coverage, and
+        # inherit_additional_special_tokens are never consulted. Null them out
+        # in the saved config so they don't appear to document how the
+        # plugged-in tokenizer was trained (they don't).
         focus_cfg = config.get('focus') if isinstance(config, dict) else None
         if focus_cfg and focus_cfg.get('tokenizer_path'):
             unused_focus_keys = [
                 'vocab_size',
                 'character_coverage',
                 'inherit_additional_special_tokens',
-                'use_seed_vocabulary',
-                'seed_vocab_multiplier',
-                'seed_lambda',
-                'seed_min_frequency',
-                'seed_round_mode',
-                'seed_score_mode',
             ]
             for key in unused_focus_keys:
                 if key in focus_cfg:
@@ -675,3 +690,79 @@ class ModelConfig(ArtifactConfig):
     def to_dict(self) -> dict:
         """Return config dictionary for saving to YAML."""
         return dict(self._config)
+
+    # How a run was launched, rather than what it trains. Stripped before
+    # comparison but kept in the saved record: the archived config is
+    # provenance, and `tools/registry.py` reads its fields to describe runs.
+    # Without this the check would fire the moment `preempt_resume` flipped
+    # false -> true, which is exactly the workflow it exists to protect.
+    _operational_fields = (
+        'preempt_resume',
+        'resume_from_checkpoint',
+        'fresh_dataset',
+        'fresh_tokenizer',
+        'fresh_model',
+        'output_dir',
+        'model_name',
+    )
+
+    def check_cached(self, config_path: str, error_on_mismatch: bool = True) -> bool:
+        """Refuse to train into a directory whose record describes another run.
+
+        Model outputs are not a cache -- nothing here is ever loaded instead of
+        being trained -- so this is not a cache-or-build decision. It is a
+        collision check. `output_dir` is effectively one directory per
+        `experiment_id`, so a mismatch means one of two things, and both are
+        worth stopping:
+
+        - a preempted run is being resumed with a parameter changed, which
+          would make the resulting weights a chimera of two configurations;
+        - the same `experiment_id` is being re-run with different parameters,
+          so its registry entry would describe something other than what
+          ends up on disk.
+
+        Args:
+            config_path: Full path to the cached `training_config.yaml`.
+            error_on_mismatch: Raise on mismatch when True.
+
+        Returns:
+            True when the configs match or no record exists yet.
+
+        Raises:
+            ConfigMismatchError: If the records differ and `error_on_mismatch`.
+        """
+        if not os.path.exists(config_path):
+            return True
+        with open(config_path) as config_file:
+            cached = yaml.safe_load(config_file) or {}
+        current = self.to_dict()
+        for key in self._operational_fields:
+            cached.pop(key, None)
+            current.pop(key, None)
+
+        diffs = dict_diff(cached, current)
+        if not diffs:
+            return True
+
+        divider = '=' * 70
+        error_msg = (
+            f"\n{divider}\n"
+            f"CONFIG MISMATCH: {self.artifact_name}\n"
+            f"{divider}\n"
+            f"{config_path} records a run trained with different parameters:\n\n"
+            + "\n".join(f"  {diff}" for diff in diffs)
+            + f"\n\n"
+            f"Resuming here would blend two configurations into one set of\n"
+            f"weights; starting over would leave this experiment's recorded\n"
+            f"parameters describing something other than what is on disk.\n\n"
+            f"To proceed, either:\n\n"
+            f"  1. Retrain from scratch with fresh_model=true, which clears\n"
+            f"     the directory and this record with it\n"
+            f"  2. Give this run its own experiment_id\n"
+            f"  3. Change the config back to match the recorded run\n"
+            f"{divider}\n"
+        )
+        if error_on_mismatch:
+            raise ConfigMismatchError(error_msg)
+        print(error_msg, file=sys.stderr)
+        return False

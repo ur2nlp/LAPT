@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lapt-core"
+version = "0.1.5"
+description = "Content-tracked caching and dataset-mixing primitives for multi-stage training pipelines"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "C.M. Downey", email = "cmdowney.nlp@gmail.com" }]
+
+# Deliberately minimal. `lapt_core.artifacts` and `lapt_core.mixing` import the
+# standard library and PyYAML only, which is what makes them cheap to import
+# from a CLI helper (88 ms, nearly all of it PyYAML) and fast to unit-test.
+# Nothing here pins torch, transformers or omegaconf -- a consumer supplies its
+# own, and this package must never narrow that choice.
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# `lapt_core.dataset_artifacts` and `lapt_core.composites` are the modules whose
+# value is a `DatasetDict` on disk, so they -- and only they -- need `datasets`.
+# Kept an extra rather than a hard requirement so a consumer that wants the
+# caching layer alone does not pay a 2 s import for a dependency it never calls.
+datasets = [
+    "datasets>=3,<4",
+]
+
+# `lapt_core.spm` turns a trained SentencePiece model into a HuggingFace
+# tokenizer backend, so it needs all three of these and nothing else does.
+# The floor is `prepend_scheme` on the Metaspace pre-tokenizer and decoder,
+# which arrived in tokenizers 0.15 and became the only spelling in 0.19 when
+# `add_prefix_space` was dropped -- a release that also changed Metaspace
+# output, so straddling it would silently change tokenization. No separate
+# tokenizers bound is declared because transformers pins it far more tightly
+# than this package would (4.40 requires tokenizers>=0.19,<0.20).
+tokenizers = [
+    "tokenizers",
+    "transformers>=4.40,<5",
+    "sentencepiece",
+]
+
+# `lapt_core.plotting` is the only module that draws anything. plotnine pulls
+# pandas and matplotlib behind it, which is a large install for a consumer that
+# only wants the caching layer, so it stays optional. No version bounds: the
+# plotting API used here has been stable across plotnine 0.12-0.15, and the
+# numpy<2 cap plotnine once forced is gone (0.15.x declares numpy>=1.23.5 with
+# no ceiling).
+plotting = [
+    "pandas",
+    "plotnine",
+]
+
+[project.urls]
+Repository = "https://github.com/ur2nlp/LAPT"
+
+[tool.setuptools.packages.find]
+include = ["lapt_core*"]

@@ -7,7 +7,7 @@ import pytest
 import yaml
 from datasets import load_from_disk
 
-from lapt.sources.factory import build_source
+from lapt.sources.factory import make_source
 from lapt.sources.plaintext import PlaintextDataset
 from lapt.sources.substituted import SubstitutedDataset, parse_substitutions
 from lapt_core.artifacts import ConfigMismatchError
@@ -170,7 +170,7 @@ class TestFactoryIntegration:
             'substitutions': [{'pattern': 'alpha', 'replacement': 'ALPHA'}],
         }
 
-        source = build_source(str(tmp_path / "cache"), config)
+        source = make_source(str(tmp_path / "cache"), config)
 
         assert isinstance(source, SubstitutedDataset)
         assert source.resolve()['train']['text'] == ["ALPHA", "beta"]
@@ -179,7 +179,7 @@ class TestFactoryIntegration:
         corpus = tmp_path / "corpus.txt"
         corpus.write_text("alpha\n", encoding='utf-8')
 
-        source = build_source(str(tmp_path / "cache"), {'type': 'plaintext', 'path': str(corpus)})
+        source = make_source(str(tmp_path / "cache"), {'type': 'plaintext', 'path': str(corpus)})
 
         assert isinstance(source, PlaintextDataset)
 

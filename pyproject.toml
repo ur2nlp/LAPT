@@ -12,24 +12,44 @@ license = "MIT"
 authors = [{ name = "C.M. Downey", email = "cmdowney.nlp@gmail.com" }]
 
 # Mirrors environment.yml, which remains the canonical setup path for the
-# cluster (conda supplies the CUDA-linked torch build). This list exists so CI
-# and contributors can `pip install -e .` without conda. Pin minor versions only
-# where reproducibility depends on it.
+# cluster. This list exists so CI and contributors can `pip install -e .`
+# without conda. Pin minor versions only where reproducibility depends on it.
+#
+# Note that torch and accelerate come from pip in environment.yml too, not
+# conda -- see the comment there. Nothing in this project installs a
+# conda-supplied torch, so the CUDA build is always pip's to choose.
 dependencies = [
     "accelerate>=0.26",
     "datasets>=3,<4",
+    # Installed from an index; supplies the FOCUS embedding initialization.
+    "deepfocus",
     "hydra-core>=1,<2",
+    # Lives in this repository at packages/lapt-core, but is a separate
+    # distribution: consumers outside LAPT install it from a git tag without
+    # inheriting the torch/transformers pins below. Install the local copy
+    # first (`pip install -e packages/lapt-core`) so pip resolves it from the
+    # working tree rather than looking for it on an index.
+    "lapt-core[datasets]",
+    # Capped for the wider stack, not for plotnine -- see environment.yml for
+    # the full rationale and what remains untested under numpy 2.
     "numpy<2.0",
     "pandas",
     "plotnine",
     "protobuf",
     "pyyaml",
     "sacrebleu>=2,<3",
-    "sentencepiece>=0.1",
-    "tokenizers>=0.15",
+    "sentencepiece>=0.1,<1",
+    "tokenizers>=0.15,<1",
+    # Floor of 2.6 is required, not a convenience bump: transformers'
+    # `check_torch_load_is_safe` raises below it over CVE-2025-32434 in
+    # `torch.load` (`.bin` checkpoints; safetensors is exempt). No upper
+    # bound -- the CUDA build is the installing site's concern.
     "torch>=2.6",
     "tqdm",
-    "transformers>=4.57,<4.58",
+    # Capped below 5 because HuggingFace ships breaking changes in minor
+    # releases. The floor is the oldest known-working release, not a verified
+    # minimum. Project branches pin exactly via cluster-pins.txt.
+    "transformers>=4.40,<5",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +60,7 @@ dev = [
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.16",
+    "yapf",
 ]
 
 [project.urls]
@@ -47,6 +68,9 @@ Repository = "https://github.com/ur2nlp/LAPT"
 
 # Both `lapt` and `gothic` are real, installable packages. This table overrides
 # the framework default on `main`, which declares `lapt` alone.
+#
+# `lapt_core` is deliberately absent from both: it is its own distribution under
+# packages/, not a subpackage of this one.
 [tool.setuptools.packages.find]
 include = ["lapt*", "gothic*"]
 
@@ -55,7 +79,10 @@ testpaths = ["tests"]
 # `.` makes `lapt` and `tools` importable from a bare checkout, so the suite
 # runs without an editable install. This replaces a sys.path.insert in
 # tests/conftest.py, and applies before collection rather than during it.
-pythonpath = ["."]
+# `packages/lapt-core` does the same for `lapt_core` now that it is a separate
+# distribution -- without it the suite would require installing that package,
+# which is exactly the bare-checkout property this line exists to preserve.
+pythonpath = [".", "packages/lapt-core"]
 addopts = "--strict-markers"
 
 [tool.coverage.run]
@@ -118,6 +145,7 @@ ignore = [
 known-first-party = [
     "gothic",
     "lapt",
+    "lapt_core",
     "tools",
 ]
 known-third-party = ["tokenizers"]
@@ -136,7 +164,7 @@ known-third-party = ["tokenizers"]
 # Mutate the framework modules, but scope each run with `only_mutate` -- a whole
 # -tree run is far more mutants than a single sitting warrants.
 source_paths = ["lapt"]
-only_mutate = ["lapt/dataset_utils.py"]
+only_mutate = ["lapt/tokenized_data.py"]
 # Deliberately left off. It would skip mutants on lines no test executes, but it
 # buys that by running a whole extra in-process pytest pass to collect coverage
 # -- and a second pytest run in one process re-imports torch, which dies with

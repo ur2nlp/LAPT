@@ -21,13 +21,14 @@ from lapt.artifact_configs import (
     format_number,
     get_model_shortname,
 )
-from lapt.tokenizer_utils import (
+from lapt.focus import (
     LEGACY_INPUT_NAME,
     apply_focus_initialization,
     prepare_focus_training_data,
     resolve_cached_embedding_paths,
-    train_new_tokenizer,
 )
+from lapt.tokenizer import TokenizerArtifact
+from lapt_core.artifacts import CachedArtifact
 
 
 def is_local_model_path(hf_model: str) -> bool:
@@ -149,14 +150,14 @@ def _initialize_focus_model(args: DictConfig):
     # all. The JSONL is consumed by (a) tokenizer training (SentencePiece) and
     # (b) FOCUS's fastText fit on the target side; if both the tokenizer and
     # the per-mix embeddings are already cached, nothing reads it.
+    tokenizer_artifact = None
     if args.focus.tokenizer_path:
         embedding_cache_dir = args.focus.tokenizer_path
         tokenizer_cache_exists = True
     else:
-        embedding_cache_dir = tokenizer_config.cache_dir(args.dataset.language)
-        tokenizer_cache_exists = os.path.exists(
-            os.path.join(embedding_cache_dir, "tokenizer.json")
-        )
+        tokenizer_artifact = TokenizerArtifact(args.dataset.language, tokenizer_config)
+        embedding_cache_dir = tokenizer_artifact.path
+        tokenizer_cache_exists = tokenizer_artifact.exists()
 
     resolved_emb_paths = resolve_cached_embedding_paths(
         embedding_cache_dir, emb_hash, reuse_policy
@@ -215,32 +216,12 @@ def _initialize_focus_model(args: DictConfig):
         print(f"Loading tokenizer from {args.focus.tokenizer_path}", file=sys.stderr)
         tokenizer = AutoTokenizer.from_pretrained(args.focus.tokenizer_path)
     else:
-        tokenizer_output_dir = embedding_cache_dir
-        config_path = os.path.join(tokenizer_output_dir, "training_config.yaml")
-
-        # Verify config matches if cache exists
-        if tokenizer_cache_exists:
-            if os.path.exists(config_path):
-                tokenizer_config.check_cached(config_path)
-            else:
-                print(
-                    f"Note: Using cached tokenizer at {tokenizer_output_dir}"
-                    f" without config tracking\n"
-                    f"      (artifact was created before config tracking was implemented)",
-                    file=sys.stderr
-                )
-
-        # train_new_tokenizer is cache-aware: returns the existing tokenizer
-        # without re-training when the cache is populated. jsonl_path may be
-        # None in that case since it is not consulted.
-        tokenizer = train_new_tokenizer(
-            config=tokenizer_config,
-            jsonl_path=jsonl_path,
-            output_path=tokenizer_output_dir
-        )
-
-        if not tokenizer_cache_exists:
-            tokenizer_config.save(config_path)
+        # resolve() validates a cached config (tolerating embedding-only and
+        # retired seed-vocabulary fields) and either loads the cached
+        # tokenizer or trains and saves a new one. jsonl_path may be None
+        # here, since it is only consulted on a cold build.
+        tokenizer_artifact.jsonl_path = jsonl_path
+        tokenizer = tokenizer_artifact.resolve()
 
     # Load model and apply FOCUS
     print(f"Loading model: {args.hf_model}", file=sys.stderr)
@@ -375,3 +356,51 @@ def _initialize_standard_model(args: DictConfig):
     tokenized_path = get_tokenized_path(args)
 
     return model, tokenizer, tokenized_path
+
+
+class ModelOutput(CachedArtifact):
+    """The training output directory, as a graph node for invalidation only.
+
+    Deliberately not a real artifact. Nothing here is ever loaded instead of
+    being trained, so there is no cache-or-build decision to make, and
+    `resolve()`'s binary hit/miss has no room for training's third state --
+    resuming mid-run from a checkpoint. `build`, `read` and `write` therefore
+    refuse rather than pretend; the collision check that *does* guard this
+    directory is `ModelConfig.check_cached`, which is a different mechanism.
+
+    What this class is for is `ArtifactGraph`: invalidation needs only `name`,
+    `depends_on` and `clear()`, so registering the model lets the fresh_*
+    cascade derive "and everything downstream of it" instead of restating it
+    in every branch.
+    """
+
+    name = "model"
+    depends_on = ("tokenized",)
+
+    def __init__(self, output_dir: str):
+        """Initialize the node.
+
+        Args:
+            output_dir: The run's checkpoint directory, which `clear()` removes.
+        """
+        super().__init__(os.path.dirname(output_dir) or ".")
+        self._output_dir = output_dir
+
+    @property
+    def path(self) -> str:
+        return self._output_dir
+
+    def config(self) -> dict:
+        raise NotImplementedError(
+            "Model outputs are tracked by ModelConfig.check_cached, not by "
+            "CachedArtifact. This node exists only for graph invalidation."
+        )
+
+    def build(self, deps):
+        raise NotImplementedError("Training is driven by Trainer, not by resolve().")
+
+    def write(self, value, path: str) -> None:
+        raise NotImplementedError("Trainer writes its own checkpoints.")
+
+    def read(self, path: str):
+        raise NotImplementedError("A trained model is never loaded in place of training.")

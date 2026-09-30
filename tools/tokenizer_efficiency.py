@@ -3,7 +3,7 @@ Measure tokenization efficiency for different tokenizers.
 
 Computes compression metrics to compare how efficiently different tokenizers
 encode the same text. Useful for comparing tokenizers trained with different
-parameters (e.g., different lambda values in hybrid seed vocabulary).
+parameters (e.g., different vocab sizes or FOCUS settings).
 
 Metrics:
 - Characters per token (compression): Higher = more efficient
@@ -13,43 +13,38 @@ Metrics:
 Usage:
     # Single tokenizer, single file
     python tools/tokenizer_efficiency.py \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_seeded-5.0x-lambda0.5 \
+        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k \
         --text-file data/gothic_test.txt
 
     # Compare multiple tokenizers on same data
     python tools/tokenizer_efficiency.py \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_unseeded \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_seeded-5.0x-lambda0.3 \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_seeded-5.0x-lambda0.5 \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_seeded-5.0x-lambda0.7 \
+        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k \
+        --tokenizer tokenizers/got/xglm564m_focus-v32k-s200k \
         --text-file data/gothic_test.txt
 
     # Multiple text files
     python tools/tokenizer_efficiency.py \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_seeded-5.0x-lambda0.5 \
+        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k \
         --text-file data/gothic_test.txt \
         --text-file data/old_english_test.txt \
         --text-file data/old_norse_test.txt
 
     # Use JSONL format (reads "text" field from each line)
     python tools/tokenizer_efficiency.py \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_seeded-5.0x-lambda0.5 \
+        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k \
         --text-file training_subset.jsonl \
         --format jsonl
 
     # Sample large files for faster computation
     python tools/tokenizer_efficiency.py \
-        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k_seeded-5.0x-lambda0.5 \
+        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k \
         --text-file data/large_corpus.txt \
         --max-samples 10000
 
     # CSV output for plotting with base overlap computation
     python tools/tokenizer_efficiency.py \
-        --tokenizer tokenizers/got/lambda0.0 \
-        --tokenizer tokenizers/got/lambda0.3 \
-        --tokenizer tokenizers/got/lambda0.5 \
-        --tokenizer tokenizers/got/lambda0.7 \
-        --tokenizer tokenizers/got/lambda1.0 \
+        --tokenizer tokenizers/got/xglm564m_focus-v16k-s200k \
+        --tokenizer tokenizers/got/xglm564m_focus-v32k-s200k \
         --text-file data/test.txt \
         --base-tokenizer facebook/xglm-564M \
         --output results.csv

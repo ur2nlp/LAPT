@@ -15,7 +15,7 @@ so concrete subclasses live with the project that defines their sources.
 
 Note that this module imports `datasets`, which is roughly twenty times more
 expensive to import than `lapt_core.artifacts` itself. That is why
-`lapt/core/__init__.py` re-exports nothing: importing this module must not be a
+`lapt_core/__init__.py` re-exports nothing: importing this module must not be a
 side effect of reaching for the caching primitives. Import what you need
 directly.
 

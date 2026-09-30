@@ -11,14 +11,17 @@ import tempfile
 import pytest
 from omegaconf import OmegaConf
 
+from lapt.__main__ import _build_pipeline_graph, _require_composite_dataset
 from lapt.artifact_configs import (
     DatasetConfig,
+    ModelConfig,
     TokenizedDatasetConfig,
     TokenizerConfig,
     dict_diff,
     focus_embedding_hash,
     multinomial_mix_slug,
 )
+from lapt_core.artifacts import ConfigMismatchError
 
 
 class TestDictDiff:
@@ -302,7 +305,6 @@ class TestTokenizerConfigFocusSuffix:
                 'vocab_size': 50000,
                 'num_samples': 100000,
                 'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': False
             },
             'seed': 42
         })
@@ -319,72 +321,11 @@ class TestTokenizerConfigFocusSuffix:
                 'vocab_size': 32768,
                 'num_samples': 1000000,
                 'inherit_additional_special_tokens': False,
-                'use_seed_vocabulary': False
             },
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
         assert tok_config.tokenizer_id() == "xglm564m_focus-v32k-s1m_no-additional"
-
-    def test_suffix_with_seed_vocabulary_default_params(self):
-        """Test suffix with seed vocabulary using default parameters."""
-        args = OmegaConf.create({
-            'hf_model': 'facebook/xglm-564M',
-            'dataset': {'cache_dir': 'data/test'},
-            'focus': {
-                'enabled': True,
-                'vocab_size': 16384,
-                'num_samples': 50000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 1,
-                'seed_lambda': 0.5,
-                'seed_vocab_multiplier': 5.0
-            },
-            'seed': 42
-        })
-        tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.tokenizer_id() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5"
-
-    def test_suffix_with_seed_vocabulary_custom_min_frequency(self):
-        """Test suffix with non-default seed min frequency."""
-        args = OmegaConf.create({
-            'hf_model': 'facebook/xglm-564M',
-            'dataset': {'cache_dir': 'data/test'},
-            'focus': {
-                'enabled': True,
-                'vocab_size': 16384,
-                'num_samples': 50000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 5,
-                'seed_lambda': 0.5,
-                'seed_vocab_multiplier': 5.0
-            },
-            'seed': 42
-        })
-        tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.tokenizer_id() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.5-min5"
-
-    def test_suffix_with_seed_lambda(self):
-        """Test suffix with non-default seed lambda."""
-        args = OmegaConf.create({
-            'hf_model': 'facebook/xglm-564M',
-            'dataset': {'cache_dir': 'data/test'},
-            'focus': {
-                'enabled': True,
-                'vocab_size': 16384,
-                'num_samples': 50000,
-                'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 1,
-                'seed_lambda': 0.7,
-                'seed_vocab_multiplier': 5.0
-            },
-            'seed': 42
-        })
-        tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.tokenizer_id() == "xglm564m_focus-v16k-s50k_seeded-5.0x-lambda0.7"
 
     def test_suffix_with_all_flags(self):
         """Test suffix with all optional flags enabled."""
@@ -396,15 +337,11 @@ class TestTokenizerConfigFocusSuffix:
                 'vocab_size': 32768,
                 'num_samples': 1000000,
                 'inherit_additional_special_tokens': False,
-                'use_seed_vocabulary': True,
-                'seed_min_frequency': 10,
-                'seed_lambda': 0.7,
-                'seed_vocab_multiplier': 5.0
             },
             'seed': 42
         })
         tok_config = TokenizerConfig.from_args(args)
-        assert tok_config.tokenizer_id() == "xglm564m_focus-v32k-s1m_no-additional_seeded-5.0x-lambda0.7-min10"
+        assert tok_config.tokenizer_id() == "xglm564m_focus-v32k-s1m_no-additional"
 
     def test_suffix_respects_number_formatting(self):
         """Test that vocab and sample sizes use format_number() correctly."""
@@ -416,7 +353,6 @@ class TestTokenizerConfigFocusSuffix:
                 'vocab_size': 128000,
                 'num_samples': 5000000,
                 'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': False
             },
             'seed': 42
         })
@@ -433,7 +369,6 @@ class TestTokenizerConfigFocusSuffix:
                 'vocab_size': 50000,
                 'num_samples': 100000,
                 'inherit_additional_special_tokens': True,
-                'use_seed_vocabulary': False
             },
             'seed': 42
         })
@@ -452,9 +387,6 @@ class TestTokenizerConfigInitModelId:
                 'enabled': True,
                 'vocab_size': 32768,
                 'num_samples': 5000000,
-                'use_seed_vocabulary': True,
-                'seed_vocab_multiplier': 2.0,
-                'seed_lambda': 0.5,
             },
             'seed': 42,
         }
@@ -473,13 +405,6 @@ class TestTokenizerConfigInitModelId:
         assert tok_config.tokenizer_id().startswith("xglm1b_")
         assert "xglm17b" not in tok_config.tokenizer_id()
 
-    def test_seed_tokenizer_suffix_with_init_model_id(self):
-        """seed_tokenizer_suffix should also use init_model_id."""
-        tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="xglm1b"))
-        suffix = tok_config.seed_tokenizer_suffix()
-        assert suffix.startswith("xglm1b_")
-        assert "xglm17b" not in suffix
-
     def test_cache_dir_with_init_model_id(self):
         """cache_dir should use init_model_id in the directory name."""
         tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="xglm1b"))
@@ -488,89 +413,10 @@ class TestTokenizerConfigInitModelId:
         assert "xglm17b" not in path
 
     def test_all_suffixes_consistent(self):
-        """tokenizer_id, seed_tokenizer_suffix, and cache_dir should all use the same model id."""
+        """tokenizer_id and cache_dir should both use the same model id."""
         tok_config = TokenizerConfig.from_args(self._make_args(init_model_id="v81"))
         assert tok_config.tokenizer_id().startswith("v81_")
-        assert tok_config.seed_tokenizer_suffix().startswith("v81_")
         assert "/v81_" in tok_config.cache_dir("got")
-
-
-class TestTokenizerConfigSeedScoreMode:
-    """Test that seed_score_mode is reflected in tokenizer_id."""
-
-    def _make_args(self, score_mode="count"):
-        return OmegaConf.create({
-            'hf_model': 'facebook/xglm-564M',
-            'dataset': {'cache_dir': 'data/test'},
-            'focus': {
-                'enabled': True,
-                'vocab_size': 16384,
-                'num_samples': 50000,
-                'use_seed_vocabulary': True,
-                'seed_vocab_multiplier': 5.0,
-                'seed_lambda': 0.5,
-                'seed_score_mode': score_mode,
-            },
-            'seed': 42,
-        })
-
-    def test_default_count_mode_not_in_suffix(self):
-        """Default 'count' mode should not appear in the suffix."""
-        tok_config = TokenizerConfig.from_args(self._make_args("count"))
-        assert "count" not in tok_config.tokenizer_id()
-        assert "charlength" not in tok_config.tokenizer_id()
-
-    def test_charlength_mode_in_suffix(self):
-        """Non-default 'charlength' mode should appear in the suffix."""
-        tok_config = TokenizerConfig.from_args(self._make_args("charlength"))
-        assert tok_config.tokenizer_id().endswith("-charlength")
-
-    def test_score_mode_not_in_seed_tokenizer_suffix(self):
-        """Seed tokenizer suffix should NOT include score_mode (shared across modes)."""
-        tok_config = TokenizerConfig.from_args(self._make_args("charlength"))
-        assert "charlength" not in tok_config.seed_tokenizer_suffix()
-
-
-class TestSeedTokenizerSuffix:
-    """Test seed_tokenizer_suffix method directly."""
-
-    def test_basic_suffix(self):
-        """Test basic seed tokenizer suffix format."""
-        tok_config = TokenizerConfig(
-            hf_model='facebook/xglm-564M',
-            vocab_size=16384,
-            num_samples=200000,
-            character_coverage=1.0,
-            inherit_additional_special_tokens=True,
-            use_seed_vocabulary=True,
-            seed_vocab_multiplier=5.0,
-            seed_lambda=0.5,
-            seed_min_frequency=1,
-            seed_round_mode='round',
-            seed_score_mode='count',
-            fasttext_model_min_count=4,
-            seed=42,
-        )
-        assert tok_config.seed_tokenizer_suffix() == "xglm564m_focus-v16k-s200k_seed-5.0x"
-
-    def test_suffix_with_different_multiplier(self):
-        """Test that multiplier is reflected in seed tokenizer suffix."""
-        tok_config = TokenizerConfig(
-            hf_model='facebook/xglm-564M',
-            vocab_size=32768,
-            num_samples=5000000,
-            character_coverage=1.0,
-            inherit_additional_special_tokens=True,
-            use_seed_vocabulary=True,
-            seed_vocab_multiplier=2.0,
-            seed_lambda=0.5,
-            seed_min_frequency=1,
-            seed_round_mode='round',
-            seed_score_mode='count',
-            fasttext_model_min_count=4,
-            seed=42,
-        )
-        assert tok_config.seed_tokenizer_suffix() == "xglm564m_focus-v32k-s5m_seed-2.0x"
 
 
 class TestTokenizedDatasetConfig:
@@ -675,7 +521,6 @@ class TestTokenizedDatasetConfig:
                 'enabled': True,
                 'vocab_size': 16384,
                 'num_samples': 100000,
-                'use_seed_vocabulary': False
             },
             'seed': 42
         })
@@ -975,3 +820,108 @@ class TestMixSlugSeedKeying:
         """Only the digest moves, so a mix stays recognizable in a listing."""
         with_seed = multinomial_mix_slug({**self.BASE, 'seed': 7})
         assert with_seed.startswith("mix_a0.5_s5m_")
+
+
+class TestModelConfigCollisionCheck:
+    """Model outputs are not a cache; this is a collision check.
+
+    `output_dir` is effectively one directory per `experiment_id`, so a record
+    describing different parameters means either a preempted run is being
+    resumed with something changed, or an experiment label is being reused.
+    """
+
+    def _args(self, **overrides):
+        base = {
+            'hf_model': 'facebook/xglm-564M',
+            'output_dir': 'models',
+            'model_name': None,
+            'experiment_id': 'v01',
+            'seed': 1,
+            'preempt_resume': False,
+            'resume_from_checkpoint': None,
+            'dataset': {'type': 'oscar', 'language': 'hy', 'cache_dir': 'data/hy', 'dev_size': 0.1},
+            'training': {'name': 'basic', 'max_length': 512, 'learning_rate': 4e-5},
+            'focus': {'enabled': False},
+        }
+        base.update(overrides)
+        return OmegaConf.create(base)
+
+    def _record(self, tmp_path, args):
+        path = str(tmp_path / 'training_config.yaml')
+        ModelConfig.from_args(args).save(path)
+        return path
+
+    def test_identical_config_is_accepted(self, tmp_path):
+        args = self._args()
+        assert ModelConfig.from_args(args).check_cached(self._record(tmp_path, args))
+
+    def test_changed_hyperparameter_is_refused(self, tmp_path):
+        path = self._record(tmp_path, self._args())
+        changed = self._args(training={'name': 'basic', 'max_length': 512, 'learning_rate': 1e-4})
+
+        with pytest.raises(ConfigMismatchError, match="different parameters"):
+            ModelConfig.from_args(changed).check_cached(path)
+
+    def test_flipping_preempt_resume_is_not_a_mismatch(self, tmp_path):
+        """The workflow the check exists to protect must not trip it.
+
+        The record is the whole resolved config, so a naive comparison would
+        fire exactly when a preempted run is re-launched to resume.
+        """
+        path = self._record(tmp_path, self._args())
+        resuming = self._args(preempt_resume=True, resume_from_checkpoint='ckpt-500')
+
+        assert ModelConfig.from_args(resuming).check_cached(path)
+
+    def test_no_record_yet_is_accepted(self, tmp_path):
+        args = self._args()
+        assert ModelConfig.from_args(args).check_cached(str(tmp_path / 'absent.yaml'))
+
+
+class TestCacheCleanupCascade:
+    """The fresh_* flags derive their downstream sets from the graph."""
+
+    def _args(self, dataset_type='multinomial', **overrides):
+        sources = [{'id': 'got', 'type': 'plaintext', 'path': 'a'},
+                   {'id': 'eng', 'type': 'plaintext', 'path': 'b'}]
+        dataset = {'type': dataset_type, 'cache_dir': 'data/mix', 'language': 'got',
+                   'dev_size': 0.01}
+        if dataset_type == 'multinomial':
+            dataset.update({'alpha': 0.5, 'total_samples': 100, 'sources': sources})
+        elif dataset_type == 'concat':
+            dataset['sources'] = sources
+        else:
+            dataset['path'] = 'corpus.txt'
+        args = {'hf_model': 'facebook/xglm-564M', 'init_model_id': 'v74L', 'seed': 1,
+                'output_dir': 'models', 'model_name': None, 'experiment_id': 'v01',
+                'dataset': dataset, 'training': {'name': 'basic', 'max_length': 512},
+                'focus': {'enabled': False, 'tokenizer_path': None}}
+        args.update(overrides)
+        return OmegaConf.create(args)
+
+    def test_invalidating_the_corpus_reaches_the_model(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        graph = _build_pipeline_graph(self._args())
+
+        cascade = ['untokenized'] + graph.dependents('untokenized')
+        assert cascade == ['untokenized', 'tokenized', 'model']
+
+    def test_invalidating_the_model_reaches_nothing_else(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        graph = _build_pipeline_graph(self._args())
+
+        assert graph.dependents('model') == []
+
+    def test_fresh_mix_is_refused_on_a_leaf_dataset(self, tmp_path, monkeypatch):
+        """The top node of a leaf IS the acquisition, so invalidating it would
+        delete exactly the corpus the flag promises to keep."""
+        monkeypatch.chdir(tmp_path)
+        args = self._args(dataset_type='plaintext')
+
+        with pytest.raises(ValueError, match="fresh_mix DOES NOT APPLY"):
+            _require_composite_dataset(args)
+
+    def test_fresh_mix_is_allowed_on_composites(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        for dataset_type in ('multinomial', 'concat'):
+            assert _require_composite_dataset(self._args(dataset_type=dataset_type)) is None
