@@ -45,7 +45,6 @@ Usage:
 
 from lapt_core.registry import RegistrySchema, main
 
-
 LAPT_SCHEMA = RegistrySchema(
     env_prefix="LAPT",
     # sections of the config to flatten into params, with optional prefix stripping

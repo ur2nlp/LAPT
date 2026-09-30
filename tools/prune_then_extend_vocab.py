@@ -71,14 +71,13 @@ from transformers import AutoTokenizer, PreTrainedTokenizerFast
 # editable install, for running this script straight from a checkout.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from lapt_core.spm import create_unigram_backend
-
 from lapt.tokenizer import (
     _detect_tokenizer_algorithm,
     _extract_special_tokens,
     _train_sentencepiece_model,
     _validate_tokenizer,
 )
+from lapt_core.spm import create_unigram_backend
 
 
 def extract_base_vocab_with_scores(

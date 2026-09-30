@@ -9,7 +9,6 @@ from lapt_core.spm import (
     create_unigram_backend,
 )
 
-
 pytest.importorskip("tokenizers", reason="lapt_core.spm needs the tokenizers extra")
 
 
