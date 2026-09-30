@@ -49,20 +49,71 @@ class TestConditionalSeed:
         reused = HuggingFaceDataset(cache, "fake/ds", text_column='content', seed=99)
         assert reused.validate() is True
 
-    def test_seed_change_does_invalidate_a_subsampled_cache(self, tmp_path, fake_download):
+    def test_seed_change_builds_a_sibling_of_a_subsampled_cache(self, tmp_path, fake_download):
+        """A new seed is a new sample beside the old one, not a conflict with it."""
         # split_into_lines=False to skip the estimation phase, which divides
         # max_samples by 10 and so cannot be exercised at test scale
+        cache = str(tmp_path / "c")
+        first = HuggingFaceDataset(
+            cache, "fake/ds", text_column='content',
+            max_samples=2, split_into_lines=False, seed=1,
+        )
+        first.resolve()
+        second = HuggingFaceDataset(
+            cache, "fake/ds", text_column='content',
+            max_samples=2, split_into_lines=False, seed=99,
+        )
+        second.resolve()
+
+        assert second.path == str(tmp_path / "c" / "untokenized_seed99")
+        assert first.validate() is True
+        assert second.validate() is True
+
+
+class TestSeedKeyedPath:
+    def test_default_seed_keeps_the_bare_name(self, tmp_path):
+        """Every cache built before seed-keying was built at the default."""
+        source = HuggingFaceDataset(str(tmp_path / "c"), "fake/ds", max_samples=2, seed=1)
+        assert source.path == str(tmp_path / "c" / "untokenized")
+
+    def test_uncapped_source_ignores_the_seed(self, tmp_path):
+        source = HuggingFaceDataset(str(tmp_path / "c"), "fake/ds", seed=2)
+        assert source.path == str(tmp_path / "c" / "untokenized")
+
+    def test_a_mismatched_record_at_the_bare_name_still_raises(self, tmp_path, fake_download):
+        """A legacy cache drawn at a non-default seed is not silently reused."""
         cache = str(tmp_path / "c")
         HuggingFaceDataset(
             cache, "fake/ds", text_column='content',
             max_samples=2, split_into_lines=False, seed=1,
         ).resolve()
+        record = tmp_path / "c" / "untokenized" / "config.yaml"
+        tracked = yaml.safe_load(record.read_text())
+        tracked['seed'] = 3
+        record.write_text(yaml.safe_dump(tracked))
 
         with pytest.raises(ConfigMismatchError):
             HuggingFaceDataset(
                 cache, "fake/ds", text_column='content',
-                max_samples=2, split_into_lines=False, seed=99,
+                max_samples=2, split_into_lines=False, seed=1,
             ).resolve()
+
+
+class TestSampleSeedFromConfig:
+    def test_global_seed_does_not_reach_the_sample(self, tmp_path):
+        """A seed replicate reuses the default-seed sample unless asked not to."""
+        source = HuggingFaceDataset.from_config(
+            str(tmp_path / "c"), {'name': "fake/ds", 'max_samples': 2}, seed=2
+        )
+        assert source.seed == 1
+        assert source.path == str(tmp_path / "c" / "untokenized")
+
+    def test_sample_seed_is_honored(self, tmp_path):
+        source = HuggingFaceDataset.from_config(
+            str(tmp_path / "c"), {'name': "fake/ds", 'max_samples': 2, 'sample_seed': 2}, seed=1
+        )
+        assert source.config()['seed'] == 2
+        assert source.path == str(tmp_path / "c" / "untokenized_seed2")
 
 
 class TestBuild:

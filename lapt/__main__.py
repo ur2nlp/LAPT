@@ -39,6 +39,7 @@ from lapt.model import (
     is_local_model_path,
     set_random_seeds,
 )
+from lapt.sources.factory import resample_sources
 from lapt.tokenized_data import (
     TokenizedDatasetArtifact,
     TokenizedMultinomialMix,
@@ -393,6 +394,14 @@ def lapt(args: DictConfig):
 
     # Validate init_model_id is provided when hf_model is a local path
     _validate_init_model_id(args)
+
+    # Before anything reads the dataset spec: subsampling sources otherwise
+    # keep the default-seed sample whatever the global seed is
+    if getattr(args, 'resample_sources', False):
+        reseeded = resample_sources(args.dataset, args.seed)
+        if reseeded:
+            print(f"resample_sources=true: drawing {', '.join(reseeded)} at seed {args.seed}",
+                  file=sys.stderr)
 
     # Handle cache cleanup if requested
     _handle_cache_cleanup(args)

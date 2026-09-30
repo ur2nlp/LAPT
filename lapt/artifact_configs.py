@@ -391,6 +391,7 @@ class DatasetConfig(ArtifactConfig):
         'fresh_dataset',
         'fresh_tokenizer',
         'fresh_model',
+        'resample_sources',
         'output_dir',
         'model_name',
     )
@@ -702,6 +703,7 @@ class ModelConfig(ArtifactConfig):
         'fresh_dataset',
         'fresh_tokenizer',
         'fresh_model',
+        'resample_sources',
         'output_dir',
         'model_name',
     )

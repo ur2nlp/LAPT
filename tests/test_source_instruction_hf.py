@@ -87,12 +87,27 @@ class TestConditionalSeed:
 
         assert InstructionHFDataset(cache, "fake/chat", seed=99).validate() is True
 
-    def test_seed_change_does_invalidate_a_capped_cache(self, tmp_path, fake_download):
+    def test_seed_change_builds_a_sibling_of_a_capped_cache(self, tmp_path, fake_download):
         cache = str(tmp_path / "c")
-        InstructionHFDataset(cache, "fake/chat", max_samples=1, seed=1).resolve()
+        first = InstructionHFDataset(cache, "fake/chat", max_samples=1, seed=1)
+        first.resolve()
+        second = InstructionHFDataset(cache, "fake/chat", max_samples=1, seed=99)
+        second.resolve()
 
-        with pytest.raises(ConfigMismatchError):
-            InstructionHFDataset(cache, "fake/chat", max_samples=1, seed=99).resolve()
+        assert second.path == str(tmp_path / "c" / "untokenized_seed99")
+        assert first.validate() is True
+
+    def test_global_seed_does_not_reach_the_sample(self, tmp_path):
+        source = InstructionHFDataset.from_config(
+            str(tmp_path / "c"), {'name': "fake/chat", 'max_samples': 1}, seed=2
+        )
+        assert source.seed == 1
+
+    def test_sample_seed_is_honored(self, tmp_path):
+        source = InstructionHFDataset.from_config(
+            str(tmp_path / "c"), {'name': "fake/chat", 'max_samples': 1, 'sample_seed': 2}
+        )
+        assert source.path == str(tmp_path / "c" / "untokenized_seed2")
 
 
 class TestCaching:

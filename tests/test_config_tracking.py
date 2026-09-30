@@ -822,6 +822,32 @@ class TestMixSlugSeedKeying:
         assert with_seed.startswith("mix_a0.5_s5m_")
 
 
+class TestMixSlugSampleSeedKeying:
+    """A source's `sample_seed` moves the mix directory only when it is set.
+
+    Two samples of one corpus make two different mixes, which must coexist
+    rather than collide on the mix's config record. Absent, the key leaves the
+    slug unchanged, so every mix built before it existed stays addressed.
+    """
+
+    BASE = TestMixSlugSeedKeying.BASE
+
+    def with_sample_seed(self, value) -> dict:
+        return {**self.BASE, 'sources': [{'id': 'a', 'sample_seed': value}, {'id': 'b'}]}
+
+    def test_absent_sample_seed_leaves_the_slug_unchanged(self):
+        sources = [{'id': 'a', 'sample_seed': None}, {'id': 'b'}]
+        unset = multinomial_mix_slug({**self.BASE, 'sources': sources})
+        assert unset == multinomial_mix_slug(self.BASE)
+
+    def test_sample_seed_gets_its_own_slug(self):
+        assert multinomial_mix_slug(self.with_sample_seed(2)) != multinomial_mix_slug(self.BASE)
+
+    def test_distinct_sample_seeds_stay_distinct(self):
+        first = multinomial_mix_slug(self.with_sample_seed(2))
+        assert first != multinomial_mix_slug(self.with_sample_seed(3))
+
+
 class TestModelConfigCollisionCheck:
     """Model outputs are not a cache; this is a collision check.
 

@@ -6,7 +6,7 @@ import sys
 from datasets import Dataset, DatasetDict, load_dataset
 
 from lapt.sources.base import SOURCE_TYPES
-from lapt.sources.factory import field
+from lapt.sources.factory import field, sample_seed, seed_keyed_path
 from lapt_core.dataset_artifacts import DatasetArtifact
 
 
@@ -84,6 +84,15 @@ class InstructionHFDataset(DatasetArtifact):
         if self.max_samples is not None:
             tracked['seed'] = self.seed
         return tracked
+
+    @property
+    def path(self) -> str:
+        """Cache directory, a seed-keyed sibling for a non-default sample seed.
+
+        See `seed_keyed_path`. The seed is recorded in `config()` as well, so
+        the path and the record beside it cannot describe different samples.
+        """
+        return seed_keyed_path(self, self.max_samples, self.seed)
 
     def _is_single_turn_pair(self, example: dict) -> bool:
         """Whether an example is exactly one user turn and one assistant turn."""
@@ -183,7 +192,8 @@ class InstructionHFDataset(DatasetArtifact):
         Args:
             cache_dir: Directory the `untokenized` subdirectory goes in.
             source_config: Entry carrying at least `name`.
-            seed: Global random seed, recorded when `max_samples` is set.
+            seed: Unused. The subsample is drawn with the entry's own
+                `sample_seed`, not the global seed; see `sample_seed`.
             dev_size: Unused; only a mix holds out a dev split.
 
         Returns:
@@ -198,7 +208,7 @@ class InstructionHFDataset(DatasetArtifact):
             prompt_template=field(source_config, 'prompt_template', '{user} Response:'),
             response_template=field(source_config, 'response_template', ' {assistant}'),
             max_samples=field(source_config, 'max_samples'),
-            seed=seed,
+            seed=sample_seed(source_config),
         )
 
 SOURCE_TYPES.register(InstructionHFDataset)

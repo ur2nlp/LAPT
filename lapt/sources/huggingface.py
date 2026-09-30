@@ -6,7 +6,7 @@ import sys
 from datasets import Dataset, DatasetDict, load_dataset
 
 from lapt.sources.base import SOURCE_TYPES
-from lapt.sources.factory import field
+from lapt.sources.factory import field, sample_seed, seed_keyed_path
 from lapt.sources.text_processing import collect_from_stream, docs_to_filtered_lines
 from lapt_core.dataset_artifacts import DatasetArtifact
 
@@ -89,6 +89,15 @@ class HuggingFaceDataset(DatasetArtifact):
         if self.max_samples is not None:
             tracked['seed'] = self.seed
         return tracked
+
+    @property
+    def path(self) -> str:
+        """Cache directory, a seed-keyed sibling for a non-default sample seed.
+
+        See `seed_keyed_path`. The seed is recorded in `config()` as well, so
+        the path and the record beside it cannot describe different samples.
+        """
+        return seed_keyed_path(self, self.max_samples, self.seed)
 
     @property
     def _example_unit(self) -> str:
@@ -285,7 +294,8 @@ class HuggingFaceDataset(DatasetArtifact):
         Args:
             cache_dir: Directory the `untokenized` subdirectory goes in.
             source_config: Entry carrying at least `name`.
-            seed: Global random seed, recorded when `max_samples` is set.
+            seed: Unused. The subsample is drawn with the entry's own
+                `sample_seed`, not the global seed; see `sample_seed`.
             dev_size: Unused; only a mix holds out a dev split.
 
         Returns:
@@ -301,7 +311,7 @@ class HuggingFaceDataset(DatasetArtifact):
             min_words_per_line=field(source_config, 'min_words_per_line'),
             oversampling_factor=field(source_config, 'oversampling_factor', 3),
             split_into_lines=field(source_config, 'split_into_lines', True),
-            seed=seed,
+            seed=sample_seed(source_config),
         )
 
 SOURCE_TYPES.register(HuggingFaceDataset)
