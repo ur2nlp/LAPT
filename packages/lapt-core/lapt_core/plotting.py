@@ -26,6 +26,8 @@ from plotnine import (
     geom_ribbon,
     ggplot,
     labs,
+    scale_color_hue,
+    scale_fill_hue,
     theme,
     theme_bw,
     theme_minimal,
@@ -288,21 +290,52 @@ def _clip_band(frame, lower_column, upper_column, lower, upper, rows=None):
     return frame
 
 
-def _ribbon_layer(band_data, lower_column, upper_column, multiple_runs, geom_color):
-    """Shade each group's spread in the color of its mean line."""
+def _ribbon_layers(
+    band_data,
+    lower_column,
+    upper_column,
+    run_levels,
+    multiple_runs,
+    geom_color,
+    dark,
+):
+    """Shade each group's spread in the color of its mean line.
+
+    A translucent fill blends toward the background, so the same alpha that
+    gives a clear pastel on white gives a dim, muddy tint on a dark background;
+    dark mode gets a more opaque fill to compensate.
+
+    Only grouped runs have a band, so left to itself the fill scale would build
+    its palette from fewer levels than the color scale and hand a group a
+    different hue from its line. Both scales are therefore pinned to the same
+    levels.
+
+    Args:
+        run_levels: Every run label in the plot, which fixes both palettes.
+
+    Returns:
+        A list of plotnine components to add to the plot.
+    """
+    alpha = 0.4 if dark else 0.2
     if multiple_runs:
-        return geom_ribbon(
-            aes(ymin=lower_column, ymax=upper_column, fill='run'),
+        return [
+            geom_ribbon(
+                aes(ymin=lower_column, ymax=upper_column, fill='run'),
+                data=band_data,
+                alpha=alpha,
+                show_legend=False,
+            ),
+            scale_color_hue(limits=run_levels),
+            scale_fill_hue(limits=run_levels),
+        ]
+    return [
+        geom_ribbon(
+            aes(ymin=lower_column, ymax=upper_column),
             data=band_data,
-            alpha=0.2,
-            show_legend=False,
-        )
-    return geom_ribbon(
-        aes(ymin=lower_column, ymax=upper_column),
-        data=band_data,
-        fill=geom_color or 'black',
-        alpha=0.2,
-    )
+            fill=geom_color or 'black',
+            alpha=alpha,
+        ),
+    ]
 
 
 def load_config(config_path, parser):
@@ -429,8 +462,14 @@ def plot_metric(data, metric, x_axis='step', output=None, title=None, y_limits=N
 
     plot = ggplot(metric_data, aes(x=x_axis, y=metric))
     if len(band_data):
-        plot = plot + _ribbon_layer(
-            band_data, lower_column, upper_column, multiple_runs, geom_color
+        plot = plot + _ribbon_layers(
+            band_data,
+            lower_column,
+            upper_column,
+            sorted(metric_data['run'].unique()),
+            multiple_runs,
+            geom_color,
+            dark,
         )
 
     plot = (
@@ -684,8 +723,14 @@ def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=No
 
     plot = ggplot(plot_data, aes(x=x_axis, y='metric_value'))
     if len(band_data):
-        plot = plot + _ribbon_layer(
-            band_data, 'band_lower', 'band_upper', multiple_runs, geom_color
+        plot = plot + _ribbon_layers(
+            band_data,
+            'band_lower',
+            'band_upper',
+            sorted(plot_data['run'].unique()),
+            multiple_runs,
+            geom_color,
+            dark,
         )
 
     plot = (

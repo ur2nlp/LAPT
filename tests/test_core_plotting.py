@@ -1,4 +1,4 @@
-"""Tests for lapt_core.plotting — run grouping and YAML config handling."""
+"""Tests for lapt_core.plotting — run grouping, band rendering, and YAML config."""
 
 import argparse
 
@@ -13,6 +13,8 @@ from lapt_core.plotting import (  # noqa: E402
     normalize_groups,
     parse_group_specs,
     per_metric_limits_from_mapping,
+    plot_metric,
+    plot_multiple_metrics,
 )
 
 
@@ -80,6 +82,51 @@ class TestAggregateGroups:
     def test_rejects_unknown_band(self):
         with pytest.raises(ValueError):
             aggregate_groups(_runs(a=[(1, 1.0)]), ["loss"], {"a": ["a"]}, band="iqr")
+
+
+class TestBandColor:
+    """A group's band must share its mean line's color.
+
+    Only grouped runs have a band, so an unpinned fill scale builds a shorter
+    palette than the color scale. With ungrouped runs sorting ahead of the
+    group, the band then takes another run's hue -- still one of the line
+    colors, which is why the check compares against the group's own line.
+    """
+
+    @staticmethod
+    def _grouped_data():
+        data = _runs(
+            g_s1=[(1, 1.0), (2, 2.0)],
+            g_s2=[(1, 2.0), (2, 3.0)],
+            a=[(1, 5.0), (2, 5.0)],
+            b=[(1, 6.0), (2, 6.0)],
+            c=[(1, 7.0), (2, 7.0)],
+        )
+        return aggregate_groups(data, ["loss"], {"z_group": ["^g_"]}, band="minmax")
+
+    @staticmethod
+    def _band_and_line_colors(plot, group_mean_values):
+        plot.draw()
+        ribbon_layer, line_layer = plot.layers[0], plot.layers[1]
+        band_fills = set(ribbon_layer.data["fill"])
+        is_group_line = line_layer.data["y"].isin(group_mean_values)
+        group_line_colors = set(line_layer.data.loc[is_group_line, "color"])
+        return band_fills, group_line_colors
+
+    @pytest.mark.parametrize("dark", [False, True])
+    def test_single_metric(self, tmp_path, dark):
+        plot = plot_metric(
+            self._grouped_data(), "loss", output=tmp_path / "plot.png", dark=dark
+        )
+        band_fills, line_colors = self._band_and_line_colors(plot, [1.5, 2.5])
+        assert band_fills == line_colors
+
+    def test_faceted(self, tmp_path):
+        data = self._grouped_data()
+        data["other"] = data["loss"]
+        plot = plot_multiple_metrics(data, ["loss", "other"], output=tmp_path / "plot.png")
+        band_fills, line_colors = self._band_and_line_colors(plot, [1.5, 2.5])
+        assert band_fills == line_colors
 
 
 class TestGroupSpecs:
