@@ -297,8 +297,13 @@ def _ribbon_layers(
     run_levels,
     multiple_runs,
     geom_color,
+    dark,
 ):
     """Shade each group's spread in the color of its mean line.
+
+    A translucent fill blends toward the background, so the same alpha that
+    gives a clear pastel on white gives a dim, muddy tint on a dark background;
+    dark mode gets a more opaque fill to compensate.
 
     Only grouped runs have a band, so left to itself the fill scale would build
     its palette from fewer levels than the color scale and hand a group a
@@ -311,12 +316,13 @@ def _ribbon_layers(
     Returns:
         A list of plotnine components to add to the plot.
     """
+    alpha = 0.4 if dark else 0.2
     if multiple_runs:
         return [
             geom_ribbon(
                 aes(ymin=lower_column, ymax=upper_column, fill='run'),
                 data=band_data,
-                alpha=0.2,
+                alpha=alpha,
                 show_legend=False,
             ),
             scale_color_hue(limits=run_levels),
@@ -327,7 +333,7 @@ def _ribbon_layers(
             aes(ymin=lower_column, ymax=upper_column),
             data=band_data,
             fill=geom_color or 'black',
-            alpha=0.2,
+            alpha=alpha,
         ),
     ]
 
@@ -463,6 +469,7 @@ def plot_metric(data, metric, x_axis='step', output=None, title=None, y_limits=N
             sorted(metric_data['run'].unique()),
             multiple_runs,
             geom_color,
+            dark,
         )
 
     plot = (
@@ -723,6 +730,7 @@ def plot_multiple_metrics(data, metrics, x_axis='step', output=None, y_limits=No
             sorted(plot_data['run'].unique()),
             multiple_runs,
             geom_color,
+            dark,
         )
 
     plot = (
