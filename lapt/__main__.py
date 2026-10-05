@@ -23,13 +23,13 @@ from lapt.artifact_configs import (
 )
 from lapt.custom_trainer import FlooredPerExampleLossTrainer
 from lapt.evaluation import (
+    DEFAULT_CALIBRATION_TEMPERATURES,
     BPCCallback,
     DataCollatorForInstructionTuning,
+    EvalMetrics,
     GenerationChrfCallback,
     compute_chars_per_token,
-    compute_ttr_metrics,
     prepare_eval_datasets,
-    preprocess_logits_for_metrics,
 )
 from lapt.model import (
     ModelOutput,
@@ -537,11 +537,26 @@ def lapt(args: DictConfig):
         'eval_dataset': eval_dataset,
     }
 
-    # Conditionally enable TTR metric computation
+    # Opt-in eval diagnostics: TTR prediction diversity, and temperature-calibrated
+    # loss (logged as eval_<name>_calibrated_bpc / _calibrated_temperature). The
+    # calibration keys are deliberately absent from configs/training/: a key added
+    # there makes every in-flight run fail ModelConfig's resume check. Enable with
+    # +training.calibrated_bpc=true (optionally +training.calibration_temperatures=[...]).
     compute_ttr = args.training.get('compute_ttr', False)
-    if compute_ttr:
-        trainer_kwargs['compute_metrics'] = compute_ttr_metrics
-        trainer_kwargs['preprocess_logits_for_metrics'] = preprocess_logits_for_metrics
+    calibration_temperatures = None
+    if args.training.get('calibrated_bpc', False):
+        configured_temperatures = args.training.get('calibration_temperatures', None)
+        if configured_temperatures is None:
+            calibration_temperatures = list(DEFAULT_CALIBRATION_TEMPERATURES)
+        else:
+            calibration_temperatures = [float(value) for value in configured_temperatures]
+    if compute_ttr or calibration_temperatures:
+        eval_metrics = EvalMetrics(
+            compute_ttr=compute_ttr,
+            calibration_temperatures=calibration_temperatures,
+        )
+        trainer_kwargs['compute_metrics'] = eval_metrics.compute_metrics
+        trainer_kwargs['preprocess_logits_for_metrics'] = eval_metrics.preprocess_logits
 
     loss_type = args.training.get('loss_type', 'token_mean')
     if loss_type == 'token_mean':

@@ -115,6 +115,147 @@ def compute_ttr_metrics(eval_pred) -> dict[str, float]:
     }
 
 
+DEFAULT_CALIBRATION_TEMPERATURES = [round(0.8 + 0.1 * index, 1) for index in range(23)]
+
+
+def batch_nll_by_temperature(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    temperatures: list[float],
+    chunk_size: int = 4096,
+) -> torch.Tensor:
+    """Mean next-token NLL over a batch's loss tokens, at each temperature.
+
+    Logits are divided by each temperature before the softmax. At ``T = 1`` this
+    is the batch's token-mean causal-LM loss, the same quantity the model's own
+    loss computes. Loss positions are processed in chunks so that the extra
+    memory stays at about ``chunk_size * vocab_size`` floats rather than a copy
+    of the full logits.
+
+    Args:
+        logits: (batch_size, seq_len, vocab_size) pre-shift model logits.
+        labels: (batch_size, seq_len) labels with -100 marking ignored positions.
+        temperatures: Temperatures to score at.
+        chunk_size: Number of loss positions to process at once.
+
+    Returns:
+        (num_temperatures,) mean NLL in nats; NaN if the batch has no loss tokens.
+    """
+    vocab_size = logits.shape[-1]
+
+    # align labels with the logits that predict them instead of slicing the
+    # logits, so the flattened view below needs no copy
+    # (batch_size, seq_len)
+    next_token_labels = torch.full_like(labels, -100)
+    next_token_labels[:, :-1] = labels[:, 1:]
+
+    # (batch_size * seq_len, vocab_size)
+    flat_logits = logits.reshape(-1, vocab_size)
+    # (batch_size * seq_len,)
+    flat_labels = next_token_labels.reshape(-1)
+
+    # (num_temperatures,)
+    nll_sums = torch.zeros(len(temperatures), dtype=torch.float32, device=logits.device)
+    num_tokens = 0
+    for start in range(0, flat_labels.shape[0], chunk_size):
+        chunk_labels = flat_labels[start:start + chunk_size]
+        valid_mask = chunk_labels != -100
+        if not valid_mask.any():
+            continue
+        # (num_valid, vocab_size)
+        chunk_logits = flat_logits[start:start + chunk_size][valid_mask].float()
+        # (num_valid, 1)
+        targets = chunk_labels[valid_mask].unsqueeze(1)
+        for index, temperature in enumerate(temperatures):
+            log_probs = torch.log_softmax(chunk_logits / temperature, dim=-1)
+            nll_sums[index] -= log_probs.gather(1, targets).sum()
+        num_tokens += int(targets.shape[0])
+
+    if num_tokens == 0:
+        return torch.full_like(nll_sums, float('nan'))
+    return nll_sums / num_tokens
+
+
+class EvalMetrics:
+    """Builds the Trainer's ``preprocess_logits_for_metrics`` / ``compute_metrics``
+    pair for whichever opt-in eval diagnostics are enabled.
+
+    * **TTR** (``compute_ttr``): prediction diversity; see ``compute_ttr_metrics``.
+    * **Calibration** (``calibration_temperatures``): rescores eval loss with the
+      logits divided by each temperature and reports the best one as
+      ``calibrated_temperature`` and its loss as ``calibrated_loss``, which
+      ``BPCCallback`` converts to ``calibrated_bpc``. Raw bpc rising while
+      calibrated bpc does not means the model is getting overconfident rather
+      than worse at ranking next tokens. The temperature is fit on the same set it
+      scores, which with one parameter is a negligible optimism.
+
+    The calibration losses are reduced per batch inside the preprocess hook, so
+    the Trainer only accumulates a few floats per example. Each batch's mean is
+    repeated once per example, so averaging over examples weights batches by
+    size exactly as the Trainer's ``eval_loss`` does, and the ``T = 1`` loss
+    reproduces ``eval_loss``.
+
+    Args:
+        compute_ttr: Whether to compute the TTR diversity metric.
+        calibration_temperatures: Temperature grid for calibrated loss, or None
+            to skip calibration.
+    """
+
+    def __init__(
+        self,
+        compute_ttr: bool,
+        calibration_temperatures: list[float] | None,
+    ):
+        if not compute_ttr and not calibration_temperatures:
+            raise ValueError("EvalMetrics needs at least one diagnostic enabled.")
+        self.compute_ttr = compute_ttr
+        self.calibration_temperatures = calibration_temperatures
+
+    def preprocess_logits(self, logits, labels):
+        """Reduce a batch's logits to what compute_metrics needs.
+
+        Returns:
+            A tensor, or a tuple of tensors in the order (TTR argmax ids,
+            calibration losses), containing only the enabled ones. The argmax ids
+            are (batch_size, seq_len); the calibration losses are
+            (batch_size, num_temperatures), every row equal to the batch mean.
+        """
+        if isinstance(logits, tuple):
+            logits = logits[0]
+        outputs = []
+        if self.compute_ttr:
+            outputs.append(preprocess_logits_for_metrics(logits, labels))
+        if self.calibration_temperatures:
+            batch_losses = batch_nll_by_temperature(
+                logits, labels, self.calibration_temperatures,
+            )
+            outputs.append(batch_losses.unsqueeze(0).expand(logits.shape[0], -1))
+        if len(outputs) == 1:
+            return outputs[0]
+        return tuple(outputs)
+
+    def compute_metrics(self, eval_pred) -> dict[str, float]:
+        """Turn the accumulated preprocess outputs into metrics."""
+        predictions, labels = eval_pred
+        if not isinstance(predictions, tuple):
+            predictions = (predictions,)
+
+        metrics = {}
+        output_index = 0
+        if self.compute_ttr:
+            metrics.update(compute_ttr_metrics((predictions[output_index], labels)))
+            output_index += 1
+        if self.calibration_temperatures:
+            # (num_examples, num_temperatures)
+            example_losses = np.asarray(predictions[output_index], dtype=np.float64)
+            # (num_temperatures,)
+            losses = np.nanmean(example_losses, axis=0)
+            best_index = int(np.nanargmin(losses))
+            metrics['calibrated_loss'] = float(losses[best_index])
+            metrics['calibrated_temperature'] = self.calibration_temperatures[best_index]
+        return metrics
+
+
 def compute_chars_per_token(
     eval_dataset,
     tokenizer,
@@ -205,12 +346,15 @@ class BPCCallback(TrainerCallback):
 
         bpc_values = {}
         for prefix, chars_per_token in self.chars_per_token_ratios.items():
-            loss_key = f"{prefix}_loss"
-            bpc_key = f"{prefix}_bpc"
-            if loss_key in metrics and chars_per_token > 0:
-                bpc = metrics[loss_key] / (chars_per_token * math.log(2))
-                metrics[bpc_key] = bpc
-                bpc_values[bpc_key] = bpc
+            # convert the raw loss and, when EvalMetrics calibration is on, the
+            # temperature-calibrated loss with the same chars-per-token ratio
+            for loss_name in ('', 'calibrated_'):
+                loss_key = f"{prefix}_{loss_name}loss"
+                bpc_key = f"{prefix}_{loss_name}bpc"
+                if loss_key in metrics and chars_per_token > 0:
+                    bpc = metrics[loss_key] / (chars_per_token * math.log(2))
+                    metrics[bpc_key] = bpc
+                    bpc_values[bpc_key] = bpc
 
         # Trainer logs metrics before on_evaluate fires, so patch the most
         # recent log_history entry so BPC appears in saved trainer state
