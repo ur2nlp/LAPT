@@ -118,9 +118,24 @@ def initialize_model_and_tokenizer(args: DictConfig):
         Tuple of (model, tokenizer, tokenized_path)
     """
     if args.focus.enabled:
-        return _initialize_focus_model(args)
+        model, tokenizer, tokenized_path = _initialize_focus_model(args)
     else:
-        return _initialize_standard_model(args)
+        model, tokenizer, tokenized_path = _initialize_standard_model(args)
+
+    # Train and score with right padding regardless of what the loaded tokenizer
+    # defaults to. Models whose position ids ignore the attention mask (e.g. XGLM)
+    # would shift every shorter example's positions under left padding, and some
+    # checkpoints were saved with a leaked left-padding default from batched
+    # generation. Batched generation sets left padding itself where it needs it.
+    if tokenizer.padding_side != 'right':
+        print(
+            f"WARNING: tokenizer loaded with padding_side='{tokenizer.padding_side}'; "
+            f"forcing 'right' for training",
+            file=sys.stderr,
+        )
+        tokenizer.padding_side = 'right'
+
+    return model, tokenizer, tokenized_path
 
 
 def _initialize_focus_model(args: DictConfig):
