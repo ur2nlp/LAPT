@@ -14,7 +14,9 @@ from datasets import Dataset
 
 from lapt.evaluation import (
     BPCCallback,
+    EvalMetrics,
     GenerationChrfCallback,
+    batch_nll_by_temperature,
     compute_chars_per_token,
     compute_ttr_metrics,
     count_new_tokens,
@@ -1052,3 +1054,169 @@ class TestGenerateGreedyBatched:
 
         truncated_call = self._run(base_tokenizer, prompts[1:], max_prompt_length=3)
         assert truncated_call['input_ids'][0].tolist() == encoded[1][:3]
+
+
+class TestBatchNllByTemperature:
+    """Tests for the per-batch temperature-scaled NLL used by calibrated bpc."""
+
+    def test_unit_temperature_matches_causal_lm_loss(self):
+        """At T = 1 the result is the shifted, masked token-mean cross-entropy."""
+        torch.manual_seed(1)
+        # (batch_size, seq_len, vocab_size)
+        logits = torch.randn(3, 7, 11)
+        labels = torch.randint(0, 11, (3, 7))
+        labels[0, :3] = -100
+        labels[2, 5:] = -100
+
+        expected = torch.nn.functional.cross_entropy(
+            logits[:, :-1, :].reshape(-1, 11),
+            labels[:, 1:].reshape(-1),
+            ignore_index=-100,
+        )
+        # a small chunk size exercises chunk boundaries
+        result = batch_nll_by_temperature(logits, labels, [1.0, 2.0], chunk_size=4)
+
+        assert result[0].item() == pytest.approx(expected.item(), rel=1e-5)
+        assert result[1].item() != pytest.approx(expected.item(), rel=1e-3)
+
+    def test_temperature_divides_logits(self):
+        """Scoring logits at T equals scoring logits / T at T = 1."""
+        torch.manual_seed(1)
+        logits = torch.randn(2, 5, 9)
+        labels = torch.randint(0, 9, (2, 5))
+
+        scaled = batch_nll_by_temperature(logits, labels, [2.5])
+        reference = batch_nll_by_temperature(logits / 2.5, labels, [1.0])
+
+        assert scaled[0].item() == pytest.approx(reference[0].item(), rel=1e-5)
+
+    def test_no_loss_tokens_gives_nan(self):
+        logits = torch.randn(1, 4, 5)
+        labels = torch.full((1, 4), -100)
+
+        result = batch_nll_by_temperature(logits, labels, [1.0, 2.0])
+
+        assert torch.isnan(result).all()
+
+
+class TestEvalMetrics:
+    """Tests for the combined TTR / calibration Trainer metric hooks."""
+
+    def test_recovers_overconfidence_temperature(self):
+        """Logits sharpened by 4x around the true distribution are best at T = 4."""
+        torch.manual_seed(1)
+        # (batch_size, seq_len, vocab_size)
+        true_logits = torch.randn(16, 128, 20)
+        # sample each next token from the true distribution, then sharpen the logits
+        sampled = torch.distributions.Categorical(logits=true_logits).sample()
+        labels = torch.full((16, 128), -100)
+        labels[:, 1:] = sampled[:, :-1]
+
+        eval_metrics = EvalMetrics(
+            compute_ttr=False,
+            calibration_temperatures=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        )
+        predictions = eval_metrics.preprocess_logits(4.0 * true_logits, labels)
+        metrics = eval_metrics.compute_metrics((predictions.numpy(), labels.numpy()))
+
+        assert metrics['calibrated_temperature'] == 4.0
+        unit_loss = batch_nll_by_temperature(4.0 * true_logits, labels, [1.0])[0].item()
+        assert metrics['calibrated_loss'] < unit_loss
+
+    def test_ttr_and_calibration_together(self):
+        """With both enabled, preprocess returns a tuple and both metrics appear."""
+        torch.manual_seed(1)
+        logits = torch.randn(2, 6, 8)
+        labels = torch.randint(0, 8, (2, 6))
+
+        eval_metrics = EvalMetrics(compute_ttr=True, calibration_temperatures=[1.0, 2.0])
+        argmax_ids, losses = eval_metrics.preprocess_logits(logits, labels)
+        assert argmax_ids.shape == (2, 6)
+        assert losses.shape == (2, 2)
+
+        metrics = eval_metrics.compute_metrics(
+            ((argmax_ids.numpy(), losses.numpy()), labels.numpy())
+        )
+        assert 'ttr-seq' in metrics
+        assert metrics['calibrated_temperature'] in (1.0, 2.0)
+
+    def test_requires_a_diagnostic(self):
+        with pytest.raises(ValueError):
+            EvalMetrics(compute_ttr=False, calibration_temperatures=None)
+
+    def test_unit_temperature_reproduces_trainer_eval_loss(self, tmp_path):
+        """
+        Through a real Trainer, calibrated loss on a T = 1 grid equals eval_loss.
+
+        Uses uneven example lengths and a partial final batch, so this checks
+        both that the hook sees correctly aligned labels and that the per-example
+        expansion reproduces the Trainer's batch-size weighting.
+        """
+        from transformers import Trainer, TrainingArguments, XGLMConfig, XGLMForCausalLM
+
+        from lapt.evaluation import DataCollatorForInstructionTuning
+
+        torch.manual_seed(1)
+        config = XGLMConfig(
+            vocab_size=32, d_model=16, num_layers=1, attention_heads=2, ffn_dim=32,
+            max_position_embeddings=64, pad_token_id=1,
+        )
+        model = XGLMForCausalLM(config)
+
+        examples = []
+        for length in [5, 9, 7, 12, 4]:
+            input_ids = torch.randint(2, 32, (length,)).tolist()
+            examples.append({
+                'input_ids': input_ids,
+                'attention_mask': [1] * length,
+                'labels': [-100, -100] + input_ids[2:],
+            })
+        dataset = Dataset.from_list(examples)
+
+        tokenizer = MagicMock()
+        tokenizer.pad_token_id = 1
+        tokenizer.padding_side = 'right'
+
+        def pad(features, padding, max_length, return_tensors):
+            width = max(len(feature['input_ids']) for feature in features)
+            return {
+                'input_ids': torch.tensor([
+                    feature['input_ids'] + [1] * (width - len(feature['input_ids']))
+                    for feature in features
+                ]),
+                'attention_mask': torch.tensor([
+                    feature['attention_mask'] + [0] * (width - len(feature['input_ids']))
+                    for feature in features
+                ]),
+            }
+
+        tokenizer.pad = pad
+        eval_metrics = EvalMetrics(compute_ttr=False, calibration_temperatures=[1.0])
+        trainer = Trainer(
+            model=model,
+            args=TrainingArguments(
+                output_dir=str(tmp_path), per_device_eval_batch_size=2,
+                report_to=[], use_cpu=True,
+            ),
+            data_collator=DataCollatorForInstructionTuning(tokenizer),
+            compute_metrics=eval_metrics.compute_metrics,
+            preprocess_logits_for_metrics=eval_metrics.preprocess_logits,
+        )
+        metrics = trainer.evaluate(eval_dataset=dataset)
+
+        assert metrics['eval_calibrated_loss'] == pytest.approx(metrics['eval_loss'], rel=1e-5)
+        assert metrics['eval_calibrated_temperature'] == 1.0
+
+
+class TestBPCCallbackCalibrated:
+    def test_converts_calibrated_loss(self):
+        """Calibrated loss is converted with the same chars-per-token ratio."""
+        callback = BPCCallback({"eval_got": 4.0})
+        metrics = {"eval_got_loss": 2.0, "eval_got_calibrated_loss": 1.5}
+        state = _make_mock_state(dict(metrics))
+
+        callback.on_evaluate(args=None, state=state, control=None, metrics=metrics)
+
+        expected = 1.5 / (4.0 * math.log(2))
+        assert metrics["eval_got_calibrated_bpc"] == pytest.approx(expected)
+        assert state.log_history[-1]["eval_got_calibrated_bpc"] == pytest.approx(expected)
