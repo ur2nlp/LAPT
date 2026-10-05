@@ -313,6 +313,10 @@ def main():
 
     print(f"Loading model from {args.model} on {device}...", file=sys.stderr)
     tokenizer = AutoTokenizer.from_pretrained(args.model)
+    # match training-time eval: a checkpoint saved after left-padded generation can
+    # reload with padding_side='left', and XGLM's position ids ignore the attention
+    # mask, so left padding would shift every shorter example's positions
+    tokenizer.padding_side = 'right'
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.float32)
     model.to(device)
     model.eval()
