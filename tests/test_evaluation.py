@@ -4,6 +4,7 @@ Tests for evaluation utilities: TTR metrics, BPC computation, and logit preproce
 
 import math
 from collections import namedtuple
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -17,6 +18,7 @@ from lapt.evaluation import (
     compute_chars_per_token,
     compute_ttr_metrics,
     count_new_tokens,
+    generate_greedy_batched,
     load_external_eval_set,
     load_instruction_prompts,
     preprocess_logits_for_metrics,
@@ -982,3 +984,71 @@ class TestDataCollatorForInstructionTuning:
         assert isinstance(batch['input_ids'], torch.Tensor)
         assert isinstance(batch['attention_mask'], torch.Tensor)
         assert isinstance(batch['labels'], torch.Tensor)
+
+
+class _RecordingGenerationModel:
+    """Stand-in causal LM whose generate() records its inputs and appends two EOS
+    tokens, so generate_greedy_batched can run without real weights."""
+
+    def __init__(self, eos_token_id: int):
+        self.eos_token_id = eos_token_id
+        self.config = SimpleNamespace(use_cache=False)
+        self.generate_calls = []
+
+    def parameters(self):
+        yield torch.zeros(1)
+
+    def generate(self, input_ids, attention_mask, **kwargs):
+        self.generate_calls.append({'input_ids': input_ids, 'attention_mask': attention_mask})
+        # (batch_size, 2)
+        new_tokens = torch.full((input_ids.shape[0], 2), self.eos_token_id)
+        return torch.cat([input_ids, new_tokens], dim=1)
+
+
+class TestGenerateGreedyBatched:
+    """Tests for in-training batched generation's handling of the tokenizer."""
+
+    def _run(self, base_tokenizer, prompts, max_prompt_length=64):
+        model = _RecordingGenerationModel(base_tokenizer.eos_token_id)
+        generate_greedy_batched(
+            model=model,
+            tokenizer=base_tokenizer,
+            prompts=prompts,
+            max_new_tokens=2,
+            max_prompt_length=max_prompt_length,
+            batch_size=len(prompts),
+            stop_strings=[],
+        )
+        return model.generate_calls[0]
+
+    def test_leaves_tokenizer_state_untouched(self, base_tokenizer):
+        """
+        Generation must not change the tokenizer's padding or truncation.
+
+        This is the training tokenizer, which the Trainer saves into every
+        checkpoint. A padding setting left on the fast tokenizer's backend was
+        written into tokenizer.json and reloaded as padding_side='left'.
+        """
+        original_padding_side = base_tokenizer.padding_side
+        self._run(base_tokenizer, ["a short prompt", "a much longer prompt than the first"])
+
+        assert base_tokenizer.padding_side == original_padding_side
+        assert base_tokenizer.backend_tokenizer.padding is None
+        assert base_tokenizer.backend_tokenizer.truncation is None
+
+    def test_left_pads_and_truncates_prompts(self, base_tokenizer):
+        """Prompts are left-padded to the batch width and truncated to the cap."""
+        prompts = ["a short prompt", "a much longer prompt than the first"]
+        encoded = [base_tokenizer(prompt)['input_ids'] for prompt in prompts]
+        call = self._run(base_tokenizer, prompts)
+
+        width = max(len(ids) for ids in encoded)
+        assert call['input_ids'].shape == (2, width)
+        short_ids = encoded[0]
+        assert call['input_ids'][0, width - len(short_ids):].tolist() == short_ids
+        assert call['attention_mask'][0].tolist() == (
+            [0] * (width - len(short_ids)) + [1] * len(short_ids)
+        )
+
+        truncated_call = self._run(base_tokenizer, prompts[1:], max_prompt_length=3)
+        assert truncated_call['input_ids'][0].tolist() == encoded[1][:3]

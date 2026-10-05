@@ -337,10 +337,6 @@ def generate_greedy_batched(
     """
     device = next(model.parameters()).device
 
-    # Decoder-only batched generation requires left padding so that generation
-    # continues from the true end of each (right-aligned) prompt.
-    original_padding_side = tokenizer.padding_side
-    tokenizer.padding_side = 'left'
     pad_token_id = tokenizer.pad_token_id
     if pad_token_id is None:
         pad_token_id = tokenizer.eos_token_id
@@ -356,17 +352,31 @@ def generate_greedy_batched(
     try:
         for start in range(0, len(prompts), batch_size):
             batch = prompts[start:start + batch_size]
-            encoded = tokenizer(
-                batch,
-                return_tensors='pt',
-                padding=True,
-                truncation=True,
-                max_length=max_prompt_length,
-            ).to(device)
 
-            # Some tokenizers emit token_type_ids, which decoder-only models like
-            # XGLM do not accept; generate() rejects unused model kwargs, so drop it.
-            encoded.pop('token_type_ids', None)
+            # Encode without padding or truncation and do both by hand. Asking a
+            # fast tokenizer to pad or truncate stores that setting on its Rust
+            # backend, where it outlives the call; this is the training tokenizer,
+            # so the setting would be saved into every checkpoint's tokenizer.json
+            # and reload as padding_side='left'.
+            prompt_ids = [
+                ids[:max_prompt_length]
+                for ids in tokenizer(batch)['input_ids']
+            ]
+
+            # Decoder-only batched generation requires left padding so that
+            # generation continues from the true end of each prompt.
+            prompt_length = max(len(ids) for ids in prompt_ids)
+            # (batch_size, prompt_length)
+            input_ids = torch.full((len(prompt_ids), prompt_length), pad_token_id)
+            # (batch_size, prompt_length)
+            attention_mask = torch.zeros((len(prompt_ids), prompt_length), dtype=torch.long)
+            for row_index, ids in enumerate(prompt_ids):
+                input_ids[row_index, prompt_length - len(ids):] = torch.tensor(ids)
+                attention_mask[row_index, prompt_length - len(ids):] = 1
+            encoded = {
+                'input_ids': input_ids.to(device),
+                'attention_mask': attention_mask.to(device),
+            }
 
             with torch.no_grad():
                 # Pass EOS/PAD explicitly from the tokenizer so a stale
@@ -384,7 +394,6 @@ def generate_greedy_batched(
                     generate_kwargs['no_repeat_ngram_size'] = no_repeat_ngram_size
                 generated = model.generate(**encoded, **generate_kwargs)
 
-            prompt_length = encoded['input_ids'].shape[1]
             new_tokens = generated[:, prompt_length:]
             decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
             for row_index, text in enumerate(decoded):
@@ -395,7 +404,6 @@ def generate_greedy_batched(
                 hit_cap_flags.append(hit_cap)
                 responses.append(truncate_at_stop(text.strip(), stop_strings))
     finally:
-        tokenizer.padding_side = original_padding_side
         if original_use_cache is not None:
             model.config.use_cache = original_use_cache
 
