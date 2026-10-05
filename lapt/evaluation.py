@@ -805,13 +805,18 @@ class DataCollatorForInstructionTuning:
             return_tensors='pt'
         )
 
-        # Pad labels with -100 (ignored by loss function)
-        max_label_length = max(len(l) for l in labels)
+        # Pad labels with -100 (ignored by loss function) to the padded input width,
+        # on the same side the tokenizer padded input_ids. A tokenizer saved after
+        # left-padded batch generation can reload with padding_side='left'; padding
+        # labels on a fixed side would then shift them against their tokens.
+        padded_length = batch['input_ids'].shape[1]
         padded_labels = []
         for label in labels:
-            padding_length = max_label_length - len(label)
-            # Pad on the right with -100
-            padded_label = label + [-100] * padding_length
+            padding = [-100] * (padded_length - len(label))
+            if self.tokenizer.padding_side == 'left':
+                padded_label = padding + label
+            else:
+                padded_label = label + padding
             padded_labels.append(padded_label)
 
         batch['labels'] = torch.tensor(padded_labels, dtype=torch.long)

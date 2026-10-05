@@ -848,6 +848,43 @@ class TestDataCollatorForInstructionTuning:
         assert batch['labels'][1, 3].item() == -100
         assert batch['labels'][1, 4].item() == -100
 
+    def test_left_padding_keeps_labels_aligned(self, base_tokenizer):
+        """
+        Test that labels are padded on the tokenizer's padding side.
+
+        A tokenizer saved after left-padded batch generation reloads with
+        padding_side='left'. If labels were still right-padded, every shorter
+        example's labels would be shifted relative to its input_ids.
+        """
+        from lapt.evaluation import DataCollatorForInstructionTuning
+
+        original_padding_side = base_tokenizer.padding_side
+        base_tokenizer.padding_side = 'left'
+        try:
+            collator = DataCollatorForInstructionTuning(base_tokenizer)
+            features = [
+                {
+                    'input_ids': [1, 2, 3, 4, 5],
+                    'attention_mask': [1, 1, 1, 1, 1],
+                    'labels': [-100, -100, 3, 4, 5]
+                },
+                {
+                    'input_ids': [1, 2, 3],
+                    'attention_mask': [1, 1, 1],
+                    'labels': [-100, 2, 3]
+                }
+            ]
+            batch = collator(features)
+        finally:
+            base_tokenizer.padding_side = original_padding_side
+
+        # every unmasked label must sit under its own token
+        for row_input_ids, row_labels in zip(batch['input_ids'], batch['labels']):
+            for token_id, label in zip(row_input_ids.tolist(), row_labels.tolist()):
+                if label != -100:
+                    assert label == token_id
+        assert batch['labels'][1].tolist() == [-100, -100, -100, 2, 3]
+
     def test_single_example_batch(self, base_tokenizer):
         """
         Test batch with single example (no padding needed).
