@@ -3,6 +3,7 @@ import shutil
 import sys
 
 import hydra
+import torch
 from omegaconf import DictConfig, OmegaConf
 from transformers import (
     DataCollatorForLanguageModeling,
@@ -163,6 +164,66 @@ class DelayedEarlyStoppingCallback(EarlyStoppingCallback):
 
         # Delay has passed, use normal early stopping logic
         return super().on_evaluate(args, state, control, **kwargs)
+
+
+class SnapshotCallback(TrainerCallback):
+    """
+    Save model-only snapshots at chosen global steps, outside checkpoint rotation.
+
+    HF checkpoints carry optimizer and scheduler state and are rotated by
+    `save_total_limit`, so a run keeps only its last and best few. A snapshot is
+    just the weights (cast to `dtype`), the tokenizer, and the run config, enough
+    to score or generate from a mid-training model (e.g. with
+    `tools/calibrated_bpc.py`) but not to resume from. Snapshots are never deleted.
+
+    A snapshot at step N holds the weights after N optimizer updates, the same
+    weights the evaluation at step N sees. If a preempted run resumes from a
+    checkpoint before N and reaches N again, the snapshot is overwritten.
+
+    Args:
+        snapshot_steps: Global steps at which to save a snapshot.
+        output_dir: Run directory; snapshots go to `<output_dir>/snapshots/step-<N>`.
+        tokenizer: Tokenizer to save with each snapshot.
+        run_config: Full run config, saved as `training_config.yaml` in each
+            snapshot, as in `best-checkpoint`.
+        dtype: Dtype for the saved weights. bf16 halves the size; evaluation under
+            bf16 autocast already runs its matmuls on bf16-cast weights.
+    """
+    def __init__(
+        self,
+        snapshot_steps: list[int],
+        output_dir: str,
+        tokenizer,
+        run_config: DictConfig,
+        dtype: torch.dtype = torch.bfloat16,
+    ):
+        self.snapshot_steps = set(snapshot_steps)
+        self.output_dir = output_dir
+        self.tokenizer = tokenizer
+        self.run_config = run_config
+        self.dtype = dtype
+
+    def on_step_end(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs
+    ):
+        if state.global_step not in self.snapshot_steps or not state.is_world_process_zero:
+            return
+
+        # unwrap torch.compile so parameter names match a plain from_pretrained load
+        model = kwargs['model']
+        model = getattr(model, '_orig_mod', model)
+
+        snapshot_path = os.path.join(self.output_dir, 'snapshots', f'step-{state.global_step}')
+        # cast on the CPU so the copy doesn't need extra GPU memory mid-training
+        state_dict = {
+            name: tensor.detach().to(device='cpu', dtype=self.dtype)
+            for name, tensor in model.state_dict().items()
+        }
+        model.save_pretrained(snapshot_path, state_dict=state_dict)
+        self.tokenizer.save_pretrained(snapshot_path)
+        with open(os.path.join(snapshot_path, 'training_config.yaml'), 'w') as config_file:
+            OmegaConf.save(self.run_config, config_file)
+        print(f"Saved snapshot: {snapshot_path}", file=sys.stderr)
 
 
 def _get_tokenizer_path(args: DictConfig) -> str:
@@ -598,6 +659,22 @@ def lapt(args: DictConfig):
             max_prompt_length=args.training.max_length,
         )
         trainer.add_callback(chrf_callback)
+
+    # Model-only snapshots at chosen steps, kept outside checkpoint rotation so a
+    # trajectory can be scored afterwards. Opt-in like calibrated_bpc, and for the
+    # same reason absent from configs/training/: +training.snapshot_steps=[...]
+    # (optionally +training.snapshot_dtype=fp32; default bf16).
+    snapshot_steps = args.training.get('snapshot_steps', None)
+    if snapshot_steps:
+        snapshot_dtypes = {'bf16': torch.bfloat16, 'fp32': torch.float32}
+        snapshot_callback = SnapshotCallback(
+            snapshot_steps=[int(step) for step in snapshot_steps],
+            output_dir=output_dir,
+            tokenizer=tokenizer,
+            run_config=args,
+            dtype=snapshot_dtypes[args.training.get('snapshot_dtype', 'bf16')],
+        )
+        trainer.add_callback(snapshot_callback)
 
     if args.training.get('early_stopping_patience', None):
         delay_ratio = args.training.get('early_stopping_delay_ratio', 0.0)

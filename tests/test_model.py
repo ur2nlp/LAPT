@@ -401,3 +401,82 @@ class TestInitializeModelAndTokenizerPadding:
 
         assert tokenizer.padding_side == 'right'
         assert capsys.readouterr().err == ''
+
+
+class TestSnapshotCallback:
+    """Verify SnapshotCallback writes loadable model-only snapshots at chosen steps."""
+
+    def test_saves_snapshots_at_chosen_steps(self, tmp_path, base_tokenizer):
+        from datasets import Dataset
+        from safetensors import safe_open
+        from transformers import (
+            AutoModelForCausalLM,
+            Trainer,
+            TrainingArguments,
+            XGLMConfig,
+            XGLMForCausalLM,
+        )
+
+        from lapt.__main__ import SnapshotCallback
+        from lapt.evaluation import DataCollatorForInstructionTuning
+
+        torch.manual_seed(1)
+        model = XGLMForCausalLM(XGLMConfig(
+            vocab_size=32, d_model=16, num_layers=1, attention_heads=2, ffn_dim=32,
+            max_position_embeddings=64, pad_token_id=1,
+        ))
+        examples = []
+        for length in [5, 9, 7, 12]:
+            input_ids = torch.randint(2, 32, (length,)).tolist()
+            examples.append({
+                'input_ids': input_ids,
+                'attention_mask': [1] * length,
+                'labels': list(input_ids),
+            })
+
+        run_config = OmegaConf.create({'experiment_id': 'snapshot-test'})
+        trainer = Trainer(
+            model=model,
+            args=TrainingArguments(
+                output_dir=str(tmp_path / 'checkpoints'), max_steps=4,
+                per_device_train_batch_size=2, learning_rate=1e-2,
+                save_strategy='no', report_to=[], use_cpu=True,
+            ),
+            train_dataset=Dataset.from_list(examples),
+            data_collator=DataCollatorForInstructionTuning(base_tokenizer),
+        )
+        trainer.add_callback(SnapshotCallback(
+            snapshot_steps=[2, 4],
+            output_dir=str(tmp_path),
+            tokenizer=base_tokenizer,
+            run_config=run_config,
+        ))
+        trainer.train()
+
+        snapshot_root = tmp_path / 'snapshots'
+        assert sorted(path.name for path in snapshot_root.iterdir()) == ['step-2', 'step-4']
+
+        final_snapshot = snapshot_root / 'step-4'
+        assert (final_snapshot / 'tokenizer.json').exists()
+        assert OmegaConf.load(final_snapshot / 'training_config.yaml') == run_config
+
+        # weights are stored in bf16 on disk
+        with safe_open(str(final_snapshot / 'model.safetensors'), framework='pt') as handle:
+            stored_dtypes = {handle.get_tensor(name).dtype for name in handle.keys()}
+        assert stored_dtypes == {torch.bfloat16}
+
+        # the last snapshot is the final model, up to the bf16 cast
+        loaded = AutoModelForCausalLM.from_pretrained(str(final_snapshot), dtype=torch.float32)
+        loaded_state = loaded.state_dict()
+        for name, tensor in model.state_dict().items():
+            expected = tensor.detach().to(torch.bfloat16).to(torch.float32)
+            assert torch.equal(loaded_state[name], expected), name
+
+        # training moved the weights between the two snapshots
+        earlier = AutoModelForCausalLM.from_pretrained(
+            str(snapshot_root / 'step-2'), dtype=torch.float32,
+        )
+        assert not torch.equal(
+            earlier.state_dict()['model.layers.0.fc1.weight'],
+            loaded_state['model.layers.0.fc1.weight'],
+        )
