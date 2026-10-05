@@ -368,3 +368,36 @@ class TestInitializeFocusModelJsonlGating:
             f"embeddings are missing; got {len(jsonl_calls)} call(s)."
         )
         assert focus_calls[0]['training_data_path'] == '/tmp/fake.jsonl'
+
+
+class TestInitializeModelAndTokenizerPadding:
+    """Verify initialize_model_and_tokenizer always hands training a right-padding
+    tokenizer, warning when the loaded tokenizer defaulted to something else."""
+
+    def _patch_standard_init(self, monkeypatch, padding_side):
+        tokenizer = SimpleNamespace(padding_side=padding_side)
+        monkeypatch.setattr(
+            model_mod,
+            '_initialize_standard_model',
+            lambda args: (None, tokenizer, None),
+        )
+        return tokenizer
+
+    def test_forces_right_padding_and_warns(self, monkeypatch, capsys):
+        tokenizer = self._patch_standard_init(monkeypatch, 'left')
+        args = OmegaConf.create({'focus': {'enabled': False}})
+
+        _, returned_tokenizer, _ = model_mod.initialize_model_and_tokenizer(args)
+
+        assert returned_tokenizer is tokenizer
+        assert tokenizer.padding_side == 'right'
+        assert "padding_side='left'" in capsys.readouterr().err
+
+    def test_right_padding_is_silent(self, monkeypatch, capsys):
+        tokenizer = self._patch_standard_init(monkeypatch, 'right')
+        args = OmegaConf.create({'focus': {'enabled': False}})
+
+        model_mod.initialize_model_and_tokenizer(args)
+
+        assert tokenizer.padding_side == 'right'
+        assert capsys.readouterr().err == ''
