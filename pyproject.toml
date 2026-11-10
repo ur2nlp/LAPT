@@ -30,9 +30,9 @@ dependencies = [
     # first (`pip install -e packages/lapt-core`) so pip resolves it from the
     # working tree rather than looking for it on an index.
     "lapt-core[datasets]",
-    # Capped for the wider stack, not for plotnine -- see environment.yml for
-    # the full rationale and what remains untested under numpy 2.
-    "numpy<2.0",
+    # Deliberately uncapped; see environment.yml for why the numpy<2 cap was
+    # dropped and how keeping it broke pip installs once pyarrow 26 shipped.
+    "numpy",
     "pandas",
     "plotnine",
     "protobuf",
